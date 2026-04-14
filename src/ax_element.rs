@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     AXValueGetValue, AXValueRef, kAXButtonRole, kAXCheckBoxRole, kAXHiddenAttribute,
@@ -12,8 +14,6 @@ use core_foundation::{
 };
 use objc2_core_foundation::{CGPoint, CGSize};
 
-use crate::HintBox;
-
 #[derive(Debug, PartialEq)]
 pub enum RoleOfInterest {
     Button,
@@ -22,10 +22,28 @@ pub enum RoleOfInterest {
     TextArea,
     MenuItem,
 }
+
 pub struct ElementOfInterest {
     pub element: AXUIElement,
     pub context: Option<String>,
     pub role: RoleOfInterest,
+    pub center: (f64, f64),
+}
+
+impl ElementOfInterest {
+    pub fn new(
+        element: AXUIElement,
+        context: Option<String>,
+        role: RoleOfInterest,
+        center: (f64, f64),
+    ) -> Self {
+        Self {
+            element,
+            context,
+            role,
+            center,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -61,50 +79,100 @@ impl Frame {
     }
 }
 
-impl ElementOfInterest {
-    pub fn new(element: AXUIElement, context: Option<String>, role: RoleOfInterest) -> Self {
-        Self {
-            element,
-            context,
-            role,
-        }
+#[derive(Debug, Clone, PartialEq)]
+pub struct HintBox {
+    pub label: String,
+    pub x: f64,
+    pub y: f64,
+    pub idx: usize,
+}
+
+impl HintBox {
+    pub fn new(label: String, x: f64, y: f64, idx: usize) -> Self {
+        Self { label, x, y, idx }
     }
 }
 
 #[derive(Default)]
 pub struct ElementCache {
     pub cache: Vec<ElementOfInterest>,
+    pub seen_center: HashSet<(u64, u64)>,
 }
 
 impl ElementCache {
     pub fn new() -> Self {
-        ElementCache { cache: vec![] }
-    }
-
-    pub fn add(&mut self, pair: ElementOfInterest) {
-        if pair.role == RoleOfInterest::Button
-            || pair
-                .context
-                .as_ref()
-                // naive filtering
-                .is_none_or(|ctx| !ctx.is_empty() && !ctx.chars().all(|c| c.is_ascii_punctuation()))
-        {
-            self.cache.push(pair);
+        ElementCache {
+            cache: vec![],
+            seen_center: HashSet::new(),
         }
     }
 
+    pub fn clear(&mut self) {
+        self.cache.clear();
+        self.seen_center.clear();
+    }
+
+    pub fn add(&mut self, element: AXUIElement, context: Option<String>, role: RoleOfInterest) {
+        if let Some(center) = element.center()
+            // NOTE: de-duplication for DOM elements
+            && !self
+                .seen_center
+                .contains(&(center.0.to_bits(), center.1.to_bits()))
+            && (role == RoleOfInterest::Button
+                || context
+                    .as_ref()
+                    // naive filtering
+                    .is_none_or(|ctx| {
+                        !ctx.is_empty() && !ctx.chars().all(|c| c.is_ascii_punctuation())
+                    }))
+        {
+            self.seen_center
+                .insert((center.0.to_bits(), center.1.to_bits()));
+            self.cache
+                .push(ElementOfInterest::new(element, context, role, center));
+        }
+    }
+
+    fn int_to_string(i: usize, digits: u32) -> String {
+        let mut n = i;
+        if n == 0 {
+            return "A".to_string();
+        }
+
+        let mut result = Vec::new();
+
+        while n > 0 {
+            let remainder = (n % 26) as u8;
+            let char = (b'A' + remainder) as char;
+            result.push(char);
+            n /= 26;
+        }
+
+        // pad to fixed length
+        while result.len() < digits as usize {
+            result.push('A');
+        }
+        result.into_iter().rev().collect()
+    }
+
     pub fn hint_boxes(&self, screen_height: f64) -> Vec<HintBox> {
+        if self.cache.is_empty() {
+            return vec![];
+        }
+
+        let digits = self.cache.len().ilog(26) + 1;
+
         self.cache
             .iter()
-            .filter_map(|it| {
-                let ElementOfInterest {
-                    element,
-                    context: ctx,
-                    ..
-                } = it;
-                element.center().map(|(x, y)| {
-                    HintBox::new(ctx.clone().unwrap_or("A".into()), x, screen_height - y)
-                })
+            .enumerate()
+            .map(|(idx, it)| {
+                let ElementOfInterest { center, .. } = it;
+                HintBox::new(
+                    Self::int_to_string(idx, digits),
+                    center.0,
+                    screen_height - center.1,
+                    idx,
+                )
             })
             .collect()
     }
@@ -195,15 +263,15 @@ fn get_ax_struct<T: Default>(cf_type: &CFType, value_type: u32) -> Option<T> {
 }
 
 pub fn traverse_elements(element: &AXUIElement, parent_frame: &Frame, cache: &mut ElementCache) {
-    if let Ok(role) = element.role() {
-        // if invisible, return early
-        let Some(new_frame) = element.visible_frame(parent_frame) else {
-            return;
-        };
+    // if invisible, return early
+    let Some(new_frame) = element.visible_frame(parent_frame) else {
+        return;
+    };
 
+    if let Ok(role) = element.role() {
         #[allow(non_upper_case_globals)]
         match role.to_string().as_str() {
-            kAXButtonRole => {
+            "AXRadioButton" | kAXButtonRole => {
                 let ctx = element
                     .label_value()
                     .ok()
@@ -213,18 +281,10 @@ pub fn traverse_elements(element: &AXUIElement, parent_frame: &Frame, cache: &mu
                             .and_then(|val| val.downcast::<CFString>())
                     })
                     .map(|cf| cf.to_string());
-                cache.add(ElementOfInterest::new(
-                    element.clone(),
-                    ctx,
-                    RoleOfInterest::Button,
-                ));
+                cache.add(element.clone(), ctx, RoleOfInterest::Button);
             }
             kAXCheckBoxRole => {
-                cache.add(ElementOfInterest::new(
-                    element.clone(),
-                    None,
-                    RoleOfInterest::Button,
-                ));
+                cache.add(element.clone(), None, RoleOfInterest::Button);
             }
             kAXTextFieldRole => {
                 // element.inspect();
@@ -232,11 +292,7 @@ pub fn traverse_elements(element: &AXUIElement, parent_frame: &Frame, cache: &mu
             kAXStaticTextRole => {
                 if let Some(value) = element.get_attribute_string(kAXValueAttribute) {
                     // println!("{role} - {:?}", value);
-                    cache.add(ElementOfInterest::new(
-                        element.clone(),
-                        Some(value),
-                        RoleOfInterest::StaticText,
-                    ));
+                    cache.add(element.clone(), Some(value), RoleOfInterest::StaticText);
                     // element.inspect();
                 }
             }
@@ -246,11 +302,7 @@ pub fn traverse_elements(element: &AXUIElement, parent_frame: &Frame, cache: &mu
             kAXMenuItemRole => {
                 if let Some(title) = element.get_attribute_string(kAXTitleAttribute) {
                     // println!("{role} - {:?}", title);
-                    cache.add(ElementOfInterest::new(
-                        element.clone(),
-                        Some(title),
-                        RoleOfInterest::MenuItem,
-                    ));
+                    cache.add(element.clone(), Some(title), RoleOfInterest::MenuItem);
                 }
             }
             _ => {

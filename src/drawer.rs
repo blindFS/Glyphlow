@@ -5,17 +5,7 @@ use objc2_core_graphics::CGMutablePath;
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer};
 
-pub struct HintBox {
-    pub label: String,
-    pub x: f64,
-    pub y: f64,
-}
-
-impl HintBox {
-    pub fn new(label: String, x: f64, y: f64) -> Self {
-        Self { label, x, y }
-    }
-}
+use crate::HintBox;
 
 pub fn get_main_screen_size(mtm: MainThreadMarker) -> CGSize {
     let screens = NSScreen::screens(mtm);
@@ -50,7 +40,7 @@ pub fn create_overlay_window(mtm: MainThreadMarker) -> Retained<NSWindow> {
     }
 }
 
-pub fn draw_hints(window: &NSWindow, hints: Vec<HintBox>) {
+pub fn draw_hints(window: &NSWindow, hints: &Vec<HintBox>) {
     unsafe {
         let content_view = window.contentView().expect("Content view missing");
         content_view.setWantsLayer(true);
@@ -68,7 +58,7 @@ pub fn draw_hints(window: &NSWindow, hints: Vec<HintBox>) {
         let corner_radius = 5.0;
 
         let bg_color = NSColor::yellowColor()
-            .colorWithAlphaComponent(0.7)
+            .colorWithAlphaComponent(0.3)
             .CGColor();
 
         for hint in hints {
