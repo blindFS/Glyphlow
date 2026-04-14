@@ -135,10 +135,6 @@ impl ElementCache {
 
     fn int_to_string(i: usize, digits: u32) -> String {
         let mut n = i;
-        if n == 0 {
-            return "A".to_string();
-        }
-
         let mut result = Vec::new();
 
         while n > 0 {
