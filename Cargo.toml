@@ -1,0 +1,16 @@
+[package]
+name = "glyphlow"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rdev = "0.5.3"
+accessibility = "0.2.0"
+accessibility-sys = "0.2.0"
+core-foundation = "0.10.1"
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", features = ["NSWindow", "NSView", "NSColor", "NSGraphics", "NSResponder"] }
+objc2-foundation = { version = "0.3.2", features = ["NSGeometry", "NSString", "NSObject", "NSThread"] }
+objc2-quartz-core = { version = "0.3.2", features = ["CALayer", "CATextLayer"] }
+objc2-core-graphics = "0.3.2"
+objc2-core-foundation = "0.3.2"
