@@ -1,10 +1,9 @@
-use std::collections::HashMap;
-
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
-    AXValueGetValue, AXValueRef, kAXButtonRole, kAXHiddenAttribute, kAXMenuItemRole, kAXMenuRole,
-    kAXPositionAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole, kAXTextFieldRole,
-    kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCGPoint, kAXValueTypeCGSize,
+    AXValueGetValue, AXValueRef, kAXButtonRole, kAXCheckBoxRole, kAXHiddenAttribute,
+    kAXMenuItemRole, kAXMenuRole, kAXPositionAttribute, kAXSizeAttribute, kAXStaticTextRole,
+    kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCGPoint,
+    kAXValueTypeCGSize,
 };
 use core_foundation::{
     base::{CFType, TCFType},
@@ -13,15 +12,111 @@ use core_foundation::{
 };
 use objc2_core_foundation::{CGPoint, CGSize};
 
-pub type StringishElement = (AXUIElement, Option<String>);
-pub type ElementCache = HashMap<String, StringishElement>;
+use crate::HintBox;
+
+#[derive(Debug, PartialEq)]
+pub enum RoleOfInterest {
+    Button,
+    TextField,
+    StaticText,
+    TextArea,
+    MenuItem,
+}
+pub struct ElementOfInterest {
+    pub element: AXUIElement,
+    pub context: Option<String>,
+    pub role: RoleOfInterest,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Frame {
+    top_left: CGPoint,
+    bottom_right: CGPoint,
+}
+
+impl Frame {
+    fn new(x1: f64, y1: f64, x2: f64, y2: f64) -> Self {
+        Frame {
+            top_left: CGPoint { x: x1, y: y1 },
+            bottom_right: CGPoint { x: x2, y: y2 },
+        }
+    }
+
+    pub fn from_origion(size: CGSize) -> Self {
+        Self::new(0.0, 0.0, size.width, size.height)
+    }
+
+    /// Calculate the boundaries of the potential intersection
+    fn intersect(&self, other: &Frame) -> Option<Self> {
+        let inter_x1 = self.top_left.x.max(other.top_left.x);
+        let inter_y1 = self.top_left.y.max(other.top_left.y);
+        let inter_x2 = self.bottom_right.x.min(other.bottom_right.x);
+        let inter_y2 = self.bottom_right.y.min(other.bottom_right.y);
+
+        if inter_x1 < inter_x2 && inter_y1 < inter_y2 {
+            Some(Frame::new(inter_x1, inter_y1, inter_x2, inter_y2))
+        } else {
+            None
+        }
+    }
+}
+
+impl ElementOfInterest {
+    pub fn new(element: AXUIElement, context: Option<String>, role: RoleOfInterest) -> Self {
+        Self {
+            element,
+            context,
+            role,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct ElementCache {
+    pub cache: Vec<ElementOfInterest>,
+}
+
+impl ElementCache {
+    pub fn new() -> Self {
+        ElementCache { cache: vec![] }
+    }
+
+    pub fn add(&mut self, pair: ElementOfInterest) {
+        if pair.role == RoleOfInterest::Button
+            || pair
+                .context
+                .as_ref()
+                // naive filtering
+                .is_none_or(|ctx| !ctx.is_empty() && !ctx.chars().all(|c| c.is_ascii_punctuation()))
+        {
+            self.cache.push(pair);
+        }
+    }
+
+    pub fn hint_boxes(&self, screen_height: f64) -> Vec<HintBox> {
+        self.cache
+            .iter()
+            .filter_map(|it| {
+                let ElementOfInterest {
+                    element,
+                    context: ctx,
+                    ..
+                } = it;
+                element.center().map(|(x, y)| {
+                    HintBox::new(ctx.clone().unwrap_or("A".into()), x, screen_height - y)
+                })
+            })
+            .collect()
+    }
+}
 
 pub trait GetAttribute {
     fn get_attribute(&self, attribute_name: &str) -> Option<CFType>;
     fn get_attribute_string(&self, attribute_name: &str) -> Option<String>;
     fn center(&self) -> Option<(f64, f64)>;
+    fn get_frame(&self) -> Option<Frame>;
     fn inspect(&self);
-    fn is_visible(&self, screen_size: CGSize) -> bool;
+    fn visible_frame(&self, parent_frame: &Frame) -> Option<Frame>;
 }
 
 impl GetAttribute for AXUIElement {
@@ -31,19 +126,33 @@ impl GetAttribute for AXUIElement {
     }
 
     fn center(&self) -> Option<(f64, f64)> {
-        let pos_cf = self.get_attribute(kAXPositionAttribute)?;
-        let size_cf = self.get_attribute(kAXSizeAttribute)?;
-
-        let point = get_ax_struct::<CGPoint>(&pos_cf, kAXValueTypeCGPoint)?;
-        let size = get_ax_struct::<CGSize>(&size_cf, kAXValueTypeCGSize)?;
-
-        Some((point.x + size.width / 2.0, point.y + size.height / 2.0))
+        self.get_frame().map(|f| {
+            (
+                (f.top_left.x + f.bottom_right.x) / 2.0,
+                (f.top_left.y + f.bottom_right.y) / 2.0,
+            )
+        })
     }
 
     fn get_attribute_string(&self, attribute_name: &str) -> Option<String> {
         self.get_attribute(attribute_name)
             .and_then(|val| val.downcast::<CFString>())
             .map(|cf| cf.to_string())
+    }
+
+    fn get_frame(&self) -> Option<Frame> {
+        let pos_cf = self.get_attribute(kAXPositionAttribute)?;
+        let pos = get_ax_struct::<CGPoint>(&pos_cf, kAXValueTypeCGPoint)?;
+
+        let size_cf = self.get_attribute(kAXSizeAttribute)?;
+        let size = get_ax_struct::<CGSize>(&size_cf, kAXValueTypeCGSize)?;
+
+        Some(Frame::new(
+            pos.x,
+            pos.y,
+            pos.x + size.width,
+            pos.y + size.height,
+        ))
     }
 
     fn inspect(&self) {
@@ -56,21 +165,22 @@ impl GetAttribute for AXUIElement {
         }
     }
 
-    fn is_visible(&self, screen_size: CGSize) -> bool {
+    fn visible_frame(&self, parent_frame: &Frame) -> Option<Frame> {
         let is_hidden = self
             .get_attribute(kAXHiddenAttribute)
             .and_then(|val| val.downcast::<CFBoolean>())
             .map(bool::from)
             .unwrap_or(false);
-        let pos_cf = self.get_attribute(kAXPositionAttribute);
-        let pos = pos_cf.and_then(|val| get_ax_struct::<CGPoint>(&val, kAXValueTypeCGPoint));
-        pos.is_none_or(|pos| {
-            pos.x >= 0.0
-                && pos.x <= screen_size.width
-                && pos.y >= 0.0
-                && pos.y <= screen_size.height
-                && !is_hidden
-        })
+
+        if is_hidden {
+            return None;
+        }
+
+        if let Some(this_frame) = self.get_frame() {
+            this_frame.intersect(parent_frame)
+        } else {
+            Some(parent_frame.clone())
+        }
     }
 }
 
@@ -84,53 +194,75 @@ fn get_ax_struct<T: Default>(cf_type: &CFType, value_type: u32) -> Option<T> {
     }
 }
 
-pub fn traverse_elements(
-    element: &AXUIElement,
-    screen_size: CGSize,
-    cache: &mut Vec<StringishElement>,
-) {
+pub fn traverse_elements(element: &AXUIElement, parent_frame: &Frame, cache: &mut ElementCache) {
     if let Ok(role) = element.role() {
+        // if invisible, return early
+        let Some(new_frame) = element.visible_frame(parent_frame) else {
+            return;
+        };
+
         #[allow(non_upper_case_globals)]
         match role.to_string().as_str() {
             kAXButtonRole => {
-                if let Some(title) = element.get_attribute_string(kAXTitleAttribute)
-                    && !title.is_empty()
-                {
-                    // println!("{role} - {:?}", title);
-                    cache.push((element.clone(), Some(title)));
-                }
+                let ctx = element
+                    .label_value()
+                    .ok()
+                    .or_else(|| {
+                        element
+                            .get_attribute(kAXTitleAttribute)
+                            .and_then(|val| val.downcast::<CFString>())
+                    })
+                    .map(|cf| cf.to_string());
+                cache.add(ElementOfInterest::new(
+                    element.clone(),
+                    ctx,
+                    RoleOfInterest::Button,
+                ));
+            }
+            kAXCheckBoxRole => {
+                cache.add(ElementOfInterest::new(
+                    element.clone(),
+                    None,
+                    RoleOfInterest::Button,
+                ));
             }
             kAXTextFieldRole => {
-                // inspect_element(element);
+                // element.inspect();
             }
             kAXStaticTextRole => {
-                if let Some(value) = element.get_attribute_string(kAXValueAttribute)
-                    && !value.is_empty()
-                {
+                if let Some(value) = element.get_attribute_string(kAXValueAttribute) {
                     // println!("{role} - {:?}", value);
-                    cache.push((element.clone(), Some(value)));
+                    cache.add(ElementOfInterest::new(
+                        element.clone(),
+                        Some(value),
+                        RoleOfInterest::StaticText,
+                    ));
+                    // element.inspect();
                 }
             }
             kAXTextAreaRole => {
-                // inspect_element(element);
+                // element.inspect();
             }
             kAXMenuItemRole => {
                 if let Some(title) = element.get_attribute_string(kAXTitleAttribute) {
-                    println!("{role} - {:?}", title);
-                    // cache.push((element.clone(), Some(title)));
+                    // println!("{role} - {:?}", title);
+                    cache.add(ElementOfInterest::new(
+                        element.clone(),
+                        Some(title),
+                        RoleOfInterest::MenuItem,
+                    ));
                 }
             }
             _ => {
-                println!("-------------------- {role} -----------------");
+                // println!("-------------------- {role} -----------------");
             }
         }
 
         if role != CFString::new(kAXMenuRole)
-            && element.is_visible(screen_size)
-            && let Ok(children) = element.children()
+            && let Ok(children) = element.visible_children().or_else(|_| element.children())
         {
             for child in &children {
-                traverse_elements(&child, screen_size, cache);
+                traverse_elements(&child, &new_frame, cache);
             }
         }
     }

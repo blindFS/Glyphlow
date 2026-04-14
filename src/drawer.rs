@@ -17,7 +17,7 @@ impl HintBox {
     }
 }
 
-pub fn get_main_screen_height(mtm: MainThreadMarker) -> CGSize {
+pub fn get_main_screen_size(mtm: MainThreadMarker) -> CGSize {
     let screens = NSScreen::screens(mtm);
     // The first screen in the array is always the "primary" screen
     // with the menu bar, which defines the coordinate system origin.
@@ -67,6 +67,10 @@ pub fn draw_hints(window: &NSWindow, hints: Vec<HintBox>) {
         let font_size = 14.0;
         let corner_radius = 5.0;
 
+        let bg_color = NSColor::yellowColor()
+            .colorWithAlphaComponent(0.7)
+            .CGColor();
+
         for hint in hints {
             // 1. Calculate Positions based on your requirement:
             // The input (hint.x, hint.y) is the top point of the triangle.
@@ -86,7 +90,7 @@ pub fn draw_hints(window: &NSWindow, hints: Vec<HintBox>) {
                 NSPoint::new(box_shifted_x, box_shifted_y),
                 NSSize::new(box_width, box_height),
             ));
-            box_layer.setBackgroundColor(Some(&NSColor::yellowColor().CGColor()));
+            box_layer.setBackgroundColor(Some(&bg_color));
             box_layer.setCornerRadius(corner_radius);
 
             // 3. Create the triangle using CAShapeLayer
@@ -105,7 +109,7 @@ pub fn draw_hints(window: &NSWindow, hints: Vec<HintBox>) {
             CGMutablePath::close_subpath(Some(&path));
 
             tri_layer.setPath(Some(&path));
-            tri_layer.setFillColor(Some(&NSColor::yellowColor().CGColor())); // Match box color
+            tri_layer.setFillColor(Some(&bg_color)); // Match box color
 
             // Position the triangle on top of the main box
             tri_layer.setFrame(NSRect::new(
