@@ -50,6 +50,7 @@ impl AlphabeticKey for Key {
             Key::KeyX => 'X',
             Key::KeyY => 'Y',
             Key::KeyZ => 'Z',
+            Key::Backspace | Key::Delete => '-',
             _ => ' ',
         }
     }

@@ -3,9 +3,9 @@ use std::collections::HashSet;
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     AXValueGetValue, AXValueRef, kAXButtonRole, kAXCheckBoxRole, kAXHiddenAttribute,
-    kAXMenuItemRole, kAXMenuRole, kAXPositionAttribute, kAXSizeAttribute, kAXStaticTextRole,
-    kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCGPoint,
-    kAXValueTypeCGSize,
+    kAXMenuItemRole, kAXMenuRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXSizeAttribute,
+    kAXStaticTextRole, kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute,
+    kAXValueTypeCGPoint, kAXValueTypeCGSize,
 };
 use core_foundation::{
     base::{CFType, TCFType},
@@ -180,7 +180,7 @@ pub trait GetAttribute {
     fn center(&self) -> Option<(f64, f64)>;
     fn get_frame(&self) -> Option<Frame>;
     fn inspect(&self);
-    fn visible_frame(&self, parent_frame: &Frame) -> Option<Frame>;
+    fn visible_frame(&self, parent_frame: &Frame, role: &CFString) -> Option<Frame>;
 }
 
 impl GetAttribute for AXUIElement {
@@ -229,7 +229,7 @@ impl GetAttribute for AXUIElement {
         }
     }
 
-    fn visible_frame(&self, parent_frame: &Frame) -> Option<Frame> {
+    fn visible_frame(&self, parent_frame: &Frame, _role: &CFString) -> Option<Frame> {
         let is_hidden = self
             .get_attribute(kAXHiddenAttribute)
             .and_then(|val| val.downcast::<CFBoolean>())
@@ -240,6 +240,7 @@ impl GetAttribute for AXUIElement {
             return None;
         }
 
+        // TODO: Edge case based on role
         if let Some(this_frame) = self.get_frame() {
             this_frame.intersect(parent_frame)
         } else {
@@ -259,15 +260,15 @@ fn get_ax_struct<T: Default>(cf_type: &CFType, value_type: u32) -> Option<T> {
 }
 
 pub fn traverse_elements(element: &AXUIElement, parent_frame: &Frame, cache: &mut ElementCache) {
-    // if invisible, return early
-    let Some(new_frame) = element.visible_frame(parent_frame) else {
-        return;
-    };
-
     if let Ok(role) = element.role() {
+        // if invisible, return early
+        let Some(new_frame) = element.visible_frame(parent_frame, &role) else {
+            return;
+        };
+
         #[allow(non_upper_case_globals)]
         match role.to_string().as_str() {
-            "AXRadioButton" | kAXButtonRole => {
+            kAXPopUpButtonRole | kAXButtonRole | "AXRadioButton" => {
                 let ctx = element
                     .label_value()
                     .ok()
@@ -306,9 +307,7 @@ pub fn traverse_elements(element: &AXUIElement, parent_frame: &Frame, cache: &mu
             }
         }
 
-        if role != CFString::new(kAXMenuRole)
-            && let Ok(children) = element.visible_children().or_else(|_| element.children())
-        {
+        if let Ok(children) = element.visible_children().or_else(|_| element.children()) {
             for child in &children {
                 traverse_elements(&child, &new_frame, cache);
             }
