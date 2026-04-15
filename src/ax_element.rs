@@ -27,6 +27,7 @@ pub enum RoleOfInterest {
 pub struct ElementOfInterest {
     pub element: AXUIElement,
     pub context: Option<String>,
+    // TODO: role based drawing
     pub role: RoleOfInterest,
     pub center: (f64, f64),
 }
@@ -184,7 +185,12 @@ pub trait GetAttribute {
     fn center(&self) -> Option<(f64, f64)>;
     fn get_frame(&self) -> Option<Frame>;
     fn inspect(&self);
-    fn visible_frame(&self, parent_frame: &Frame, role: &CFString) -> Option<Frame>;
+    fn visible_frame(
+        &self,
+        parent_frame: &Frame,
+        init_frame: &Frame,
+        role: &CFString,
+    ) -> Option<Frame>;
     fn is_clickable(&self) -> bool;
 }
 
@@ -235,7 +241,12 @@ impl GetAttribute for AXUIElement {
         }
     }
 
-    fn visible_frame(&self, parent_frame: &Frame, _role: &CFString) -> Option<Frame> {
+    fn visible_frame(
+        &self,
+        parent_frame: &Frame,
+        init_frame: &Frame,
+        _role: &CFString,
+    ) -> Option<Frame> {
         let is_hidden = self
             .get_attribute(kAXHiddenAttribute)
             .and_then(|val| val.downcast::<CFBoolean>())
@@ -249,7 +260,13 @@ impl GetAttribute for AXUIElement {
         // TODO: handle edge cases according to role
         // e.g. popup menu
         if let Some(this_frame) = self.get_frame() {
-            this_frame.intersect(parent_frame)
+            this_frame.intersect(parent_frame)?;
+            // HACK: For some fully visible structure of A -> B -> C,
+            // somehow the intersection of either A and B or B and C is not empty,
+            // but the intersection of all those 3 is empty.
+            // We have to introduce the `init_frame` here, typically full screen,
+            // to make sure that C is at least within visible area.
+            this_frame.intersect(init_frame)
         } else {
             Some(parent_frame.clone())
         }
@@ -287,12 +304,13 @@ pub enum Target {
 pub fn traverse_elements(
     element: &AXUIElement,
     parent_frame: &Frame,
+    init_frame: &Frame,
     cache: &mut ElementCache,
     target: &Target,
 ) {
     if let Ok(role) = element.role() {
         // if invisible, return early
-        let Some(new_frame) = element.visible_frame(parent_frame, &role) else {
+        let Some(new_frame) = element.visible_frame(parent_frame, init_frame, &role) else {
             return;
         };
 
@@ -331,13 +349,17 @@ pub fn traverse_elements(
             kAXTextFieldRole => {
                 // element.inspect();
             }
-            kAXStaticTextRole => {
-                if *target == Target::Text
-                    && let Some(value) = element.get_attribute_string(kAXValueAttribute)
-                {
-                    cache.add(element.clone(), Some(value), RoleOfInterest::StaticText);
+            kAXStaticTextRole => match target {
+                Target::Clickable if element.is_clickable() => {
+                    cache.add(element.clone(), None, RoleOfInterest::Button);
                 }
-            }
+                Target::Text => {
+                    if let Some(value) = element.get_attribute_string(kAXValueAttribute) {
+                        cache.add(element.clone(), Some(value), RoleOfInterest::StaticText);
+                    }
+                }
+                _ => (),
+            },
             kAXTextAreaRole => {
                 // element.inspect();
             }
@@ -355,7 +377,7 @@ pub fn traverse_elements(
 
         if let Ok(children) = element.visible_children().or_else(|_| element.children()) {
             for child in &children {
-                traverse_elements(&child, &new_frame, cache, target);
+                traverse_elements(&child, &new_frame, init_frame, cache, target);
             }
         }
     }

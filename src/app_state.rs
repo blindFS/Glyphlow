@@ -99,6 +99,7 @@ impl AppState {
             traverse_elements(
                 &focused_window,
                 &window_frame,
+                &window_frame,
                 &mut self.element_cache,
                 target,
             );
@@ -141,6 +142,7 @@ impl AppState {
             {
                 if self.target == Target::Clickable {
                     let _ = element.press();
+                    // let _ = element.show_menu();
                 } else if let Some(text) = context {
                     copy_to_clipboard(text);
                 }
