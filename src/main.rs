@@ -57,11 +57,7 @@ fn main() {
                     should_swallow = true;
                 }
             }
-            _ => {
-                if cst.is_active {
-                    should_swallow = true;
-                }
-            }
+            _ => (),
         }
 
         // Return None to swallow the event, Some(event) to pass it to the system
