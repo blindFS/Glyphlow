@@ -1,9 +1,12 @@
-use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
-use objc2_app_kit::{NSBackingStoreType, NSColor, NSScreen, NSWindow, NSWindowStyleMask};
+use objc2::{AnyThread, MainThreadMarker, MainThreadOnly, rc::Retained};
+use objc2_app_kit::{
+    NSBackingStoreType, NSColor, NSForegroundColorAttributeName, NSScreen, NSWindow,
+    NSWindowStyleMask,
+};
 use objc2_core_foundation::{CFString, CGSize};
 use objc2_core_graphics::{CGColor, CGMutablePath};
 use objc2_core_text::CTFont;
-use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer};
 
 use crate::{HintBox, config::GlyphlowTheme};
@@ -41,25 +44,42 @@ pub fn create_overlay_window(mtm: MainThreadMarker, screen_size: CGSize) -> Reta
     }
 }
 
-pub fn draw_hints(window: &NSWindow, hints: &Vec<HintBox>, theme: &GlyphlowTheme, max_width: u32) {
+pub fn clear_window(window: &NSWindow) -> Option<Retained<CALayer>> {
+    let content_view = window.contentView()?;
+    content_view.setWantsLayer(true);
+    let root_layer = content_view.layer()?;
+    // Clear existing sublayers
     unsafe {
-        let content_view = window.contentView().expect("Content view missing");
-        content_view.setWantsLayer(true);
-        let root_layer = content_view.layer().expect("Layer missing");
-
-        // Clear existing sublayers
         root_layer.setSublayers(None);
+    }
+    Some(root_layer)
+}
 
-        // Core dimensions
-        let box_width = theme.font_size as f64 * max_width as f64 / 1.5 + 6.0;
-        let box_height = theme.font_size as f64 + 6.0;
-        let tri_height = theme.font_size as f64 / 2.0;
-        let tri_width = theme.font_size as f64 / 2.0;
-        let font_size = theme.font_size as f64;
-        let corner_radius = theme.hint_radius as f64;
+pub fn draw_hints(
+    window: &NSWindow,
+    hints: &Vec<HintBox>,
+    theme: &GlyphlowTheme,
+    max_width: u32,
+    key_prefix_len: usize,
+) {
+    let root_layer = clear_window(window).expect("Failed to get root layer of the window.");
 
-        let bg_color = cgcolor_from_hex(&theme.hint_bg_color);
+    // Geometry determined by font size
+    let font_size = theme.font_size as f64;
+    let box_width = font_size * max_width as f64 / 1.5 + 6.0;
+    let box_height = font_size + 6.0;
+    let tri_height = font_size / 2.0;
+    let tri_width = font_size / 2.0;
+    let corner_radius = theme.hint_radius as f64;
 
+    // Colors parsed from hex strings
+    let bg_color = cgcolor_from_hex(&theme.hint_bg_color);
+    let hl_color =
+        cgcolor_from_hex(&theme.hint_hl_color).unwrap_or(NSColor::whiteColor().CGColor());
+    let fg_color =
+        cgcolor_from_hex(&theme.hint_fg_color).unwrap_or(NSColor::blackColor().CGColor());
+
+    unsafe {
         for hint in hints {
             // 1. Calculate Positions based on your requirement:
             // The input (hint.x, hint.y) is the top point of the triangle.
@@ -106,9 +126,7 @@ pub fn draw_hints(window: &NSWindow, hints: &Vec<HintBox>, theme: &GlyphlowTheme
             let text_layer = CATextLayer::new();
             text_layer.setAlignmentMode(&NSString::from_str("center"));
 
-            // Calculate vertical center offset
             let y_offset = (font_size - box_height) / 2.0 + 1.0;
-
             text_layer.setFrame(NSRect::new(
                 NSPoint::new(0.0, y_offset),
                 NSSize::new(box_width, box_height),
@@ -120,8 +138,24 @@ pub fn draw_hints(window: &NSWindow, hints: &Vec<HintBox>, theme: &GlyphlowTheme
                 font_size,
                 std::ptr::null(),
             )));
-            text_layer.setString(Some(&NSString::from_str(&hint.label)));
-            text_layer.setForegroundColor(cgcolor_from_hex(&theme.hint_fg_color).as_deref());
+
+            // Highlight prefixed keys
+            let label_string = NSString::from_str(&hint.label);
+            let attr_string = NSMutableAttributedString::initWithString(
+                NSMutableAttributedString::alloc(),
+                &label_string,
+            );
+            attr_string.addAttribute_value_range(
+                NSForegroundColorAttributeName,
+                hl_color.as_ref(),
+                NSRange::new(0, key_prefix_len),
+            );
+            attr_string.addAttribute_value_range(
+                NSForegroundColorAttributeName,
+                fg_color.as_ref(),
+                NSRange::new(key_prefix_len, hint.label.len() - key_prefix_len),
+            );
+            text_layer.setString(Some(&attr_string));
             text_layer.setContentsScale(2.0); // Retina crispness
 
             box_layer.addSublayer(&text_layer);

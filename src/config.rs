@@ -7,6 +7,7 @@ pub struct GlyphlowTheme {
     pub hint_radius: u8,
     pub hint_bg_color: String,
     pub hint_fg_color: String,
+    pub hint_hl_color: String,
 }
 
 impl Default for GlyphlowTheme {
@@ -17,6 +18,7 @@ impl Default for GlyphlowTheme {
             hint_radius: 5,
             hint_bg_color: "#769ff0A0".to_string(),
             hint_fg_color: "#FFFFFFFF".to_string(),
+            hint_hl_color: "#FFFFFF20".to_string(),
         }
     }
 }
@@ -54,7 +56,12 @@ pub fn load_config() -> GlyphlowConfig {
 
     if let Ok(content) = fs::read_to_string(&path) {
         println!("------------- Loading config from {path:?} -------------");
-        toml::from_str::<GlyphlowConfig>(&content).unwrap_or_default()
+        if let Ok(existing_config) = toml::from_str::<GlyphlowConfig>(&content) {
+            existing_config
+        } else {
+            eprintln!("Failed to parse config file, using default config instead.");
+            GlyphlowConfig::default()
+        }
     } else {
         println!("------------- Saving config to {path:?} -------------");
         let default_config = GlyphlowConfig::default();

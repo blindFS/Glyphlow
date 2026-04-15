@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::{
-    ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, Target,
+    ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, Target, clear_window,
     config::{GlyphlowConfig, load_config},
     copy_to_clipboard, create_overlay_window, draw_hints, get_focused_pid, get_main_screen_size,
     traverse_elements,
@@ -72,11 +72,17 @@ impl AppState {
     }
 
     fn clear_drawing(&mut self) {
-        draw_hints(&self.window, &vec![], &self.config.theme, self.hint_width);
+        clear_window(&self.window);
     }
 
     fn draw(&self, boxes: &Vec<HintBox>) {
-        draw_hints(&self.window, boxes, &self.config.theme, self.hint_width);
+        draw_hints(
+            &self.window,
+            boxes,
+            &self.config.theme,
+            self.hint_width,
+            self.key_prefix.len(),
+        );
     }
 
     /// Activates the app and caches UI elements

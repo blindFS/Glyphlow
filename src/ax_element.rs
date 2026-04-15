@@ -185,6 +185,7 @@ pub trait GetAttribute {
     fn get_frame(&self) -> Option<Frame>;
     fn inspect(&self);
     fn visible_frame(&self, parent_frame: &Frame, role: &CFString) -> Option<Frame>;
+    fn is_clickable(&self) -> bool;
 }
 
 impl GetAttribute for AXUIElement {
@@ -252,6 +253,17 @@ impl GetAttribute for AXUIElement {
         } else {
             Some(parent_frame.clone())
         }
+    }
+
+    fn is_clickable(&self) -> bool {
+        if let Ok(actions) = self.action_names() {
+            for action in &actions {
+                if action.to_string().as_str() == "AXPress" {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 
@@ -335,15 +347,8 @@ pub fn traverse_elements(
                 }
             }
             _ => {
-                if *target == Target::Clickable
-                    && let Ok(actions) = element.action_names()
-                {
-                    for action in &actions {
-                        if action.to_string().as_str() == "AXPress" {
-                            cache.add(element.clone(), None, RoleOfInterest::Button);
-                            break;
-                        }
-                    }
+                if *target == Target::Clickable && element.is_clickable() {
+                    cache.add(element.clone(), None, RoleOfInterest::Button);
                 }
             }
         }
