@@ -14,9 +14,9 @@ pub fn get_main_screen_size(mtm: MainThreadMarker) -> CGSize {
     screens.objectAtIndex(0).frame().size
 }
 
-pub fn create_overlay_window(mtm: MainThreadMarker) -> Retained<NSWindow> {
+pub fn create_overlay_window(mtm: MainThreadMarker, screen_size: CGSize) -> Retained<NSWindow> {
     unsafe {
-        let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1920.0, 1080.0));
+        let frame = NSRect::new(NSPoint::new(0.0, 0.0), screen_size);
 
         // Use NSBackingStoreType::Buffered (the modern enum path)
         let window = NSWindow::initWithContentRect_styleMask_backing_defer(

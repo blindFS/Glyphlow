@@ -2,10 +2,10 @@ use std::collections::HashSet;
 
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
-    AXValueGetValue, AXValueRef, kAXButtonRole, kAXCheckBoxRole, kAXHiddenAttribute,
-    kAXMenuItemRole, kAXMenuRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXSizeAttribute,
-    kAXStaticTextRole, kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute,
-    kAXValueTypeCGPoint, kAXValueTypeCGSize,
+    AXValueGetValue, AXValueRef, kAXButtonRole, kAXHiddenAttribute, kAXMenuItemRole,
+    kAXPopUpButtonRole, kAXPositionAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
+    kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCGPoint,
+    kAXValueTypeCGSize,
 };
 use core_foundation::{
     base::{CFType, TCFType},
@@ -221,6 +221,7 @@ impl GetAttribute for AXUIElement {
 
     fn inspect(&self) {
         let role = self.role();
+        println!("{role:?} ==== {:?}", self.action_names());
         for attr in &self.attribute_names().unwrap() {
             println!(
                 "{role:?} - {attr:?} - {:?}",
@@ -240,7 +241,8 @@ impl GetAttribute for AXUIElement {
             return None;
         }
 
-        // TODO: Edge case based on role
+        // TODO: handle edge cases according to role
+        // e.g. popup menu
         if let Some(this_frame) = self.get_frame() {
             this_frame.intersect(parent_frame)
         } else {
@@ -259,7 +261,19 @@ fn get_ax_struct<T: Default>(cf_type: &CFType, value_type: u32) -> Option<T> {
     }
 }
 
-pub fn traverse_elements(element: &AXUIElement, parent_frame: &Frame, cache: &mut ElementCache) {
+#[derive(Default, PartialEq, Clone)]
+pub enum Target {
+    #[default]
+    Clickable,
+    Text,
+}
+
+pub fn traverse_elements(
+    element: &AXUIElement,
+    parent_frame: &Frame,
+    cache: &mut ElementCache,
+    target: &Target,
+) {
     if let Ok(role) = element.role() {
         // if invisible, return early
         let Some(new_frame) = element.visible_frame(parent_frame, &role) else {
@@ -269,7 +283,9 @@ pub fn traverse_elements(element: &AXUIElement, parent_frame: &Frame, cache: &mu
         #[allow(non_upper_case_globals)]
         match role.to_string().as_str() {
             kAXPopUpButtonRole | kAXButtonRole | "AXRadioButton" => {
-                let ctx = element
+                if *target == Target::Clickable {
+                    cache.add(element.clone(), None, RoleOfInterest::Button);
+                } else if let Some(ctx) = element
                     .label_value()
                     .ok()
                     .or_else(|| {
@@ -277,20 +293,19 @@ pub fn traverse_elements(element: &AXUIElement, parent_frame: &Frame, cache: &mu
                             .get_attribute(kAXTitleAttribute)
                             .and_then(|val| val.downcast::<CFString>())
                     })
-                    .map(|cf| cf.to_string());
-                cache.add(element.clone(), ctx, RoleOfInterest::Button);
-            }
-            kAXCheckBoxRole => {
-                cache.add(element.clone(), None, RoleOfInterest::Button);
+                    .map(|cf| cf.to_string())
+                {
+                    cache.add(element.clone(), Some(ctx), RoleOfInterest::Button);
+                }
             }
             kAXTextFieldRole => {
                 // element.inspect();
             }
             kAXStaticTextRole => {
-                if let Some(value) = element.get_attribute_string(kAXValueAttribute) {
-                    // println!("{role} - {:?}", value);
+                if *target == Target::Text
+                    && let Some(value) = element.get_attribute_string(kAXValueAttribute)
+                {
                     cache.add(element.clone(), Some(value), RoleOfInterest::StaticText);
-                    // element.inspect();
                 }
             }
             kAXTextAreaRole => {
@@ -298,18 +313,26 @@ pub fn traverse_elements(element: &AXUIElement, parent_frame: &Frame, cache: &mu
             }
             kAXMenuItemRole => {
                 if let Some(title) = element.get_attribute_string(kAXTitleAttribute) {
-                    // println!("{role} - {:?}", title);
                     cache.add(element.clone(), Some(title), RoleOfInterest::MenuItem);
                 }
             }
             _ => {
-                // println!("-------------------- {role} -----------------");
+                if *target == Target::Clickable
+                    && let Ok(actions) = element.action_names()
+                {
+                    for action in &actions {
+                        if action.to_string().as_str() == "AXPress" {
+                            cache.add(element.clone(), None, RoleOfInterest::Button);
+                            break;
+                        }
+                    }
+                }
             }
         }
 
         if let Ok(children) = element.visible_children().or_else(|_| element.children()) {
             for child in &children {
-                traverse_elements(&child, &new_frame, cache);
+                traverse_elements(&child, &new_frame, cache, target);
             }
         }
     }

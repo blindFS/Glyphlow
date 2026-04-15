@@ -1,6 +1,6 @@
 use std::{rc::Rc, sync::Mutex};
 
-use glyphlow::{AlphabeticKey, AppState, check_accessibility_permissions};
+use glyphlow::{AlphabeticKey, AppState, Target, check_accessibility_permissions};
 use rdev::{EventType, Key, grab};
 
 fn main() {
@@ -26,12 +26,19 @@ fn main() {
                 let key_char = key.to_char();
 
                 if !cst.is_active && cst.pressed_keys.contains(&Key::Alt)
-                // New procedure triggered by Alt + C
+                // New procedure for clickable elements triggered by Alt + C
                 && key == Key::KeyC
                 {
                     should_swallow = true;
                     // TODO: don't block system events, using Channels instead
-                    cst.activate();
+                    cst.activate(&Target::Clickable);
+                } else if !cst.is_active && cst.pressed_keys.contains(&Key::Alt)
+                // New procedure for text elements triggered by Alt + X
+                && key == Key::KeyX
+                {
+                    should_swallow = true;
+                    // TODO: don't block system events, using Channels instead
+                    cst.activate(&Target::Text);
                 } else if cst.is_active {
                     should_swallow = true;
 

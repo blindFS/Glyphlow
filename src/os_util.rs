@@ -1,4 +1,6 @@
-use objc2_app_kit::NSWorkspace;
+use objc2::runtime::ProtocolObject;
+use objc2_app_kit::{NSPasteboard, NSWorkspace};
+use objc2_foundation::{NSArray, NSString};
 use rdev::Key;
 
 pub fn get_focused_pid() -> Option<i32> {
@@ -16,6 +18,15 @@ pub fn check_accessibility_permissions() -> bool {
     }
 
     unsafe { AXIsProcessTrusted() }
+}
+
+pub fn copy_to_clipboard(text: &str) {
+    let pb = NSPasteboard::generalPasteboard();
+    pb.clearContents();
+    let ns_string = NSString::from_str(text);
+    let proto_string = ProtocolObject::from_retained(ns_string);
+    let objects = NSArray::from_retained_slice(&[proto_string]);
+    pb.writeObjects(&objects);
 }
 
 pub trait AlphabeticKey {

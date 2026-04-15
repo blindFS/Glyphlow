@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use crate::{
-    ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, create_overlay_window,
-    draw_hints, get_focused_pid, get_main_screen_size, traverse_elements,
+    ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, Target, copy_to_clipboard,
+    create_overlay_window, draw_hints, get_focused_pid, get_main_screen_size, traverse_elements,
 };
 use accessibility::{AXUIElement, AXUIElementActions};
 use objc2::{MainThreadMarker, rc::Retained};
@@ -22,6 +22,8 @@ pub struct AppState {
     key_prefix: String,
     screen_size: CGSize,
     window: Retained<NSWindow>,
+    /// Which elements of interest to look for
+    target: Target,
 }
 
 impl Default for AppState {
@@ -33,9 +35,9 @@ impl Default for AppState {
 impl AppState {
     pub fn new() -> Self {
         let mtm = MainThreadMarker::new().expect("Not on main thread");
-        let window = create_overlay_window(mtm);
-        window.makeKeyAndOrderFront(None);
         let screen_size = get_main_screen_size(mtm);
+        let window = create_overlay_window(mtm, screen_size);
+        window.makeKeyAndOrderFront(None);
 
         Self {
             pressed_keys: HashSet::new(),
@@ -45,6 +47,7 @@ impl AppState {
             key_prefix: String::new(),
             screen_size,
             window,
+            target: Target::default(),
         }
     }
 
@@ -65,7 +68,9 @@ impl AppState {
     }
 
     /// Activates the app and caches UI elements
-    pub fn activate(&mut self) {
+    pub fn activate(&mut self, target: &Target) {
+        self.target = target.clone();
+
         if let Some(pid) = get_focused_pid() {
             let focused_window = AXUIElement::application(pid);
             let window_frame = focused_window
@@ -73,7 +78,12 @@ impl AppState {
                 .unwrap_or_else(|| Frame::from_origion(self.screen_size));
 
             self.clear_cache();
-            traverse_elements(&focused_window, &window_frame, &mut self.element_cache);
+            traverse_elements(
+                &focused_window,
+                &window_frame,
+                &mut self.element_cache,
+                target,
+            );
 
             if !self.element_cache.cache.is_empty() {
                 self.is_active = true;
@@ -105,9 +115,15 @@ impl AppState {
         // Only 1 remaining, click and exit
         if filtered_boxes.len() == 1 {
             if let Some(HintBox { idx, .. }) = filtered_boxes.first()
-                && let Some(ElementOfInterest { element, .. }) = self.element_cache.cache.get(*idx)
+                && let Some(ElementOfInterest {
+                    element, context, ..
+                }) = self.element_cache.cache.get(*idx)
             {
-                let _ = element.press();
+                if self.target == Target::Clickable {
+                    let _ = element.press();
+                } else if let Some(text) = context {
+                    copy_to_clipboard(text);
+                }
             }
             self.deactivate();
         } else if filtered_boxes.is_empty() {
