@@ -2,9 +2,9 @@ use std::collections::HashSet;
 
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
-    AXValueGetValue, AXValueRef, kAXButtonRole, kAXHiddenAttribute, kAXMenuItemRole,
-    kAXPopUpButtonRole, kAXPositionAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
-    kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCGPoint,
+    AXValueGetValue, AXValueRef, kAXButtonRole, kAXHiddenAttribute, kAXMenuBarRole,
+    kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXSizeAttribute, kAXStaticTextRole,
+    kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCGPoint,
     kAXValueTypeCGSize,
 };
 use core_foundation::{
@@ -183,6 +183,8 @@ pub trait GetAttribute {
     fn get_attribute(&self, attribute_name: &str) -> Option<CFType>;
     fn get_attribute_string(&self, attribute_name: &str) -> Option<String>;
     fn center(&self) -> Option<(f64, f64)>;
+    fn get_pos(&self) -> Option<CGPoint>;
+    fn get_size(&self) -> Option<CGSize>;
     fn get_frame(&self) -> Option<Frame>;
     fn inspect(&self);
     fn visible_frame(
@@ -215,12 +217,19 @@ impl GetAttribute for AXUIElement {
             .map(|cf| cf.to_string())
     }
 
-    fn get_frame(&self) -> Option<Frame> {
+    fn get_pos(&self) -> Option<CGPoint> {
         let pos_cf = self.get_attribute(kAXPositionAttribute)?;
-        let pos = get_ax_struct::<CGPoint>(&pos_cf, kAXValueTypeCGPoint)?;
+        get_ax_struct::<CGPoint>(&pos_cf, kAXValueTypeCGPoint)
+    }
 
+    fn get_size(&self) -> Option<CGSize> {
         let size_cf = self.get_attribute(kAXSizeAttribute)?;
-        let size = get_ax_struct::<CGSize>(&size_cf, kAXValueTypeCGSize)?;
+        get_ax_struct::<CGSize>(&size_cf, kAXValueTypeCGSize)
+    }
+
+    fn get_frame(&self) -> Option<Frame> {
+        let pos = self.get_pos()?;
+        let size = self.get_size()?;
 
         Some(Frame::new(
             pos.x,
@@ -315,9 +324,8 @@ pub fn traverse_elements(
         };
 
         // TODO: Fine-grained control
-        // 1. Exclude system menu bar items
-        // 2. Image
-        // 3. TextInput/TextField/TextArea
+        // 1. Image
+        // 2. TextInput/TextField/TextArea
         #[allow(non_upper_case_globals)]
         match role.to_string().as_str() {
             kAXPopUpButtonRole | kAXButtonRole | "AXRadioButton" => {
@@ -362,6 +370,15 @@ pub fn traverse_elements(
             },
             kAXTextAreaRole => {
                 // element.inspect();
+            }
+            kAXMenuBarRole => {
+                // NOTE: Exclude system menu bar items
+                if let Some(CGPoint { x, y }) = element.get_pos()
+                    && x == 0.0
+                    && y == 0.0
+                {
+                    return;
+                }
             }
             kAXMenuItemRole => {
                 if let Some(title) = element.get_attribute_string(kAXTitleAttribute) {
