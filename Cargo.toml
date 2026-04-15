@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 rdev = {version = "0.5.3", features = ["unstable_grab"]}
+toml = "1.1.2"
+serde = { version = "1.0.228", features = ["derive"] }
 accessibility = "0.2.0"
 accessibility-sys = "0.2.0"
 core-foundation = "0.10.1"
@@ -14,3 +16,4 @@ objc2-foundation = { version = "0.3.2", features = ["NSGeometry", "NSString", "N
 objc2-quartz-core = { version = "0.3.2", features = ["CALayer", "CATextLayer"] }
 objc2-core-graphics = "0.3.2"
 objc2-core-foundation = "0.3.2"
+objc2-core-text = "0.3.2"

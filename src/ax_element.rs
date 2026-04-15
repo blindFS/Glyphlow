@@ -151,26 +151,29 @@ impl ElementCache {
         result.into_iter().rev().collect()
     }
 
-    pub fn hint_boxes(&self, screen_height: f64) -> Vec<HintBox> {
+    pub fn hint_boxes(&self, screen_height: f64) -> (u32, Vec<HintBox>) {
         if self.cache.is_empty() {
-            return vec![];
+            return (0, vec![]);
         }
 
         let digits = self.cache.len().ilog(26) + 1;
 
-        self.cache
-            .iter()
-            .enumerate()
-            .map(|(idx, it)| {
-                let ElementOfInterest { center, .. } = it;
-                HintBox::new(
-                    Self::int_to_string(idx, digits),
-                    center.0,
-                    screen_height - center.1,
-                    idx,
-                )
-            })
-            .collect()
+        (
+            digits,
+            self.cache
+                .iter()
+                .enumerate()
+                .map(|(idx, it)| {
+                    let ElementOfInterest { center, .. } = it;
+                    HintBox::new(
+                        Self::int_to_string(idx, digits),
+                        center.0,
+                        screen_height - center.1,
+                        idx,
+                    )
+                })
+                .collect(),
+        )
     }
 }
 
@@ -280,6 +283,10 @@ pub fn traverse_elements(
             return;
         };
 
+        // TODO: Fine-grained control
+        // 1. Exclude system menu bar items
+        // 2. Image
+        // 3. TextInput/TextField/TextArea
         #[allow(non_upper_case_globals)]
         match role.to_string().as_str() {
             kAXPopUpButtonRole | kAXButtonRole | "AXRadioButton" => {

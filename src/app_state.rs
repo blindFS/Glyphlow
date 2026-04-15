@@ -1,8 +1,10 @@
 use std::collections::HashSet;
 
 use crate::{
-    ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, Target, copy_to_clipboard,
-    create_overlay_window, draw_hints, get_focused_pid, get_main_screen_size, traverse_elements,
+    ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, Target,
+    config::{GlyphlowConfig, load_config},
+    copy_to_clipboard, create_overlay_window, draw_hints, get_focused_pid, get_main_screen_size,
+    traverse_elements,
 };
 use accessibility::{AXUIElement, AXUIElementActions};
 use objc2::{MainThreadMarker, rc::Retained};
@@ -24,6 +26,8 @@ pub struct AppState {
     window: Retained<NSWindow>,
     /// Which elements of interest to look for
     target: Target,
+    config: GlyphlowConfig,
+    hint_width: u32,
 }
 
 impl Default for AppState {
@@ -39,15 +43,19 @@ impl AppState {
         let window = create_overlay_window(mtm, screen_size);
         window.makeKeyAndOrderFront(None);
 
+        let config = load_config();
+
         Self {
             pressed_keys: HashSet::new(),
             is_active: false,
             hint_boxes: vec![],
             element_cache: ElementCache::new(),
             key_prefix: String::new(),
+            target: Target::default(),
+            hint_width: 0,
             screen_size,
             window,
-            target: Target::default(),
+            config,
         }
     }
 
@@ -64,7 +72,11 @@ impl AppState {
     }
 
     fn clear_drawing(&mut self) {
-        draw_hints(&self.window, &vec![]);
+        draw_hints(&self.window, &vec![], &self.config.theme, self.hint_width);
+    }
+
+    fn draw(&self, boxes: &Vec<HintBox>) {
+        draw_hints(&self.window, boxes, &self.config.theme, self.hint_width);
     }
 
     /// Activates the app and caches UI elements
@@ -88,9 +100,11 @@ impl AppState {
             if !self.element_cache.cache.is_empty() {
                 self.is_active = true;
 
-                let new_boxes = self.element_cache.hint_boxes(self.screen_size.height);
+                let (hint_width, new_boxes) =
+                    self.element_cache.hint_boxes(self.screen_size.height);
+                self.hint_width = hint_width;
                 self.hint_boxes.extend(new_boxes);
-                draw_hints(&self.window, &self.hint_boxes);
+                self.draw(&self.hint_boxes);
             } else {
                 self.clear_drawing();
             }
@@ -129,7 +143,7 @@ impl AppState {
         } else if filtered_boxes.is_empty() {
             self.deactivate();
         } else {
-            draw_hints(&self.window, &filtered_boxes);
+            self.draw(&filtered_boxes);
         }
     }
 }
