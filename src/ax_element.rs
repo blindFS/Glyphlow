@@ -8,6 +8,7 @@ use accessibility_sys::{
     kAXValueTypeCGSize,
 };
 use core_foundation::{
+    attributed_string::{CFAttributedStringGetString, CFAttributedStringRef},
     base::{CFType, TCFType},
     boolean::CFBoolean,
     string::CFString,
@@ -295,6 +296,16 @@ pub fn traverse_elements(
                 } else if let Some(ctx) = element
                     .label_value()
                     .ok()
+                    .or_else(|| {
+                        element
+                            .get_attribute("AXAttributedDescription")
+                            .map(|val| unsafe {
+                                let string_ref = CFAttributedStringGetString(
+                                    val.as_concrete_TypeRef() as CFAttributedStringRef,
+                                );
+                                CFString::wrap_under_get_rule(string_ref)
+                            })
+                    })
                     .or_else(|| {
                         element
                             .get_attribute(kAXTitleAttribute)
