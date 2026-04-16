@@ -7,7 +7,7 @@ use objc2_core_foundation::{CFString, CGSize};
 use objc2_core_graphics::{CGColor, CGMutablePath};
 use objc2_core_text::CTFont;
 use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
-use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer};
+use objc2_quartz_core::{CALayer, CAScrollLayer, CAShapeLayer, CATextLayer, kCAAlignmentCenter};
 
 use crate::{ax_element::HintBox, config::GlyphlowTheme};
 
@@ -124,9 +124,9 @@ pub fn draw_hints(
 
             // 4. Create the centered text layer
             let text_layer = CATextLayer::new();
-            text_layer.setAlignmentMode(&NSString::from_str("center"));
+            text_layer.setAlignmentMode(kCAAlignmentCenter);
 
-            let y_offset = (font_size - box_height) / 2.0 + 1.0;
+            let y_offset = (font_size * 1.2 - box_height) / 2.0;
             text_layer.setFrame(NSRect::new(
                 NSPoint::new(0.0, y_offset),
                 NSSize::new(box_width, box_height),
@@ -182,4 +182,39 @@ fn hex_to_rgba(hex: &str) -> Option<(f64, f64, f64, f64)> {
 fn cgcolor_from_hex(hex: &str) -> Option<Retained<CGColor>> {
     let (r, g, b, a) = hex_to_rgba(hex)?;
     Some(NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, a).CGColor())
+}
+
+pub fn setup_scrollable_text(window: &NSWindow, text: &str) {
+    let root_layer = clear_window(window).expect("Failed to get root layer of the window.");
+    // 1. Create the Main Box (Container)
+    let container = CALayer::new();
+    container.setFrame(NSRect::new(
+        NSPoint::new(0.0, 0.0),
+        NSSize::new(400.0, 1000.0),
+    ));
+    container.setBackgroundColor(Some(&NSColor::yellowColor().CGColor()));
+
+    // 2. Create the Scroll Layer
+    let scroll_layer = CAScrollLayer::new();
+    scroll_layer.setFrame(container.bounds());
+
+    // 3. Create the Text Layer
+    let text_layer = CATextLayer::new();
+    let string = NSString::from_str(text);
+
+    text_layer.setFrame(container.bounds());
+    text_layer.setWrapped(true); // Enables multiline
+    text_layer.setFontSize(14.0);
+    text_layer.setContentsScale(2.0); // Retina crispness
+    text_layer.setForegroundColor(Some(&NSColor::blackColor().CGColor()));
+
+    unsafe {
+        text_layer.setString(Some(&string));
+    }
+
+    // 4. Hierarchy
+    scroll_layer.addSublayer(&text_layer);
+    container.addSublayer(&scroll_layer);
+
+    root_layer.addSublayer(&container);
 }

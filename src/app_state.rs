@@ -2,12 +2,14 @@ use std::collections::HashSet;
 
 use crate::{
     ax_element::{
-        ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, SetAttribute, Target,
-        traverse_elements,
+        ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, Target, traverse_elements,
     },
     config::{GlyphlowConfig, load_config},
-    drawer::{clear_window, create_overlay_window, draw_hints, get_main_screen_size},
-    os_util::{copy_to_clipboard, get_focused_pid},
+    drawer::{
+        clear_window, create_overlay_window, draw_hints, get_main_screen_size,
+        setup_scrollable_text,
+    },
+    os_util::{copy_to_clipboard, dictionary_lookup, get_focused_pid},
 };
 use accessibility::{AXUIElement, AXUIElementActions};
 use objc2::{MainThreadMarker, rc::Retained};
@@ -145,13 +147,15 @@ impl AppState {
             {
                 if self.target == Target::Clickable {
                     let _ = element.press();
-                // let _ = element.show_menu();
+                    // let _ = element.show_menu();
+                    self.deactivate();
                 } else if let Some(text) = context {
-                    element.set_selected_range(0, 2);
+                    if let Some(def_str) = dictionary_lookup(text) {
+                        setup_scrollable_text(&self.window, &def_str);
+                    }
                     copy_to_clipboard(text);
                 }
             }
-            self.deactivate();
         } else if filtered_boxes.is_empty() {
             self.deactivate();
         } else {

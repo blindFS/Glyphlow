@@ -1,5 +1,10 @@
+use core_foundation::{
+    base::{CFRange, CFTypeRef, TCFType},
+    string::{CFString, CFStringRef},
+};
 use objc2::runtime::ProtocolObject;
 use objc2_app_kit::{NSPasteboard, NSWorkspace};
+use objc2_core_foundation::CGPoint;
 use objc2_foundation::{NSArray, NSString};
 use rdev::Key;
 
@@ -9,15 +14,48 @@ pub fn get_focused_pid() -> Option<i32> {
     Some(app.processIdentifier())
 }
 
+// Using a raw system check (AXIsProcessTrusted)
+// In a real app, you'd use `AXIsProcessTrustedWithOptions` to show the prompt
+unsafe extern "C" {
+    fn AXIsProcessTrusted() -> bool;
+}
+
 pub fn check_accessibility_permissions() -> bool {
-    // Using a raw system check (AXIsProcessTrusted)
-    // In a real app, you'd use `AXIsProcessTrustedWithOptions` to show the prompt
-    unsafe extern "C" {
-        fn AXIsProcessTrusted() -> bool;
-
-    }
-
     unsafe { AXIsProcessTrusted() }
+}
+
+unsafe extern "C" {
+    /// Show a pop-up dictionary window, same as how Ctrl+Cmd+D works.
+    /// Currently not working on macOS 26
+    #[allow(dead_code)]
+    fn HIDictionaryWindowShow(
+        dictionary_ref: CFTypeRef,
+        text: CFStringRef,
+        range: CFRange,
+        font_ref: CFTypeRef,
+        origin: CGPoint,
+        is_vertical: bool,
+        transform: CFTypeRef,
+    );
+
+    fn DCSCopyTextDefinition(
+        dictionary: CFTypeRef, // Can be NULL
+        text_string: CFStringRef,
+        range: CFRange,
+    ) -> CFStringRef;
+}
+
+pub fn dictionary_lookup(text: &str) -> Option<String> {
+    unsafe {
+        println!("Calling DCSCopyTextDefinition ...");
+        let raw_ptr = DCSCopyTextDefinition(
+            std::ptr::null(),
+            CFString::new(text).as_concrete_TypeRef(),
+            CFRange::init(0, text.chars().count() as isize),
+        );
+
+        (!raw_ptr.is_null()).then_some(CFString::wrap_under_create_rule(raw_ptr).to_string())
+    }
 }
 
 pub fn copy_to_clipboard(text: &str) {

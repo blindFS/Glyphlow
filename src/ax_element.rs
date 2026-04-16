@@ -402,7 +402,7 @@ pub fn traverse_elements(
             },
             // TODO: select only the visible part, `kAXVisibleCharacterRangeAttribute`
             kAXTextFieldRole | kAXTextAreaRole => {
-                element.inspect();
+                // element.inspect();
                 if *target == Target::Text
                     && let Some(value) = element.get_attribute_string(kAXValueAttribute)
                 {
