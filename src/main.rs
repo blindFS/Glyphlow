@@ -1,6 +1,10 @@
 use std::{rc::Rc, sync::Mutex};
 
-use glyphlow::{AlphabeticKey, AppState, Target, check_accessibility_permissions};
+use glyphlow::{
+    AppState,
+    ax_element::Target,
+    os_util::{AlphabeticKey, check_accessibility_permissions},
+};
 use rdev::{EventType, Key, grab};
 
 fn main() {

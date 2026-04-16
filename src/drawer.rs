@@ -9,7 +9,7 @@ use objc2_core_text::CTFont;
 use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer};
 
-use crate::{HintBox, config::GlyphlowTheme};
+use crate::{ax_element::HintBox, config::GlyphlowTheme};
 
 pub fn get_main_screen_size(mtm: MainThreadMarker) -> CGSize {
     let screens = NSScreen::screens(mtm);

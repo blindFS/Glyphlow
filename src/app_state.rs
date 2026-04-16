@@ -1,10 +1,13 @@
 use std::collections::HashSet;
 
 use crate::{
-    ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, Target, clear_window,
+    ax_element::{
+        ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, SetAttribute, Target,
+        traverse_elements,
+    },
     config::{GlyphlowConfig, load_config},
-    copy_to_clipboard, create_overlay_window, draw_hints, get_focused_pid, get_main_screen_size,
-    traverse_elements,
+    drawer::{clear_window, create_overlay_window, draw_hints, get_main_screen_size},
+    os_util::{copy_to_clipboard, get_focused_pid},
 };
 use accessibility::{AXUIElement, AXUIElementActions};
 use objc2::{MainThreadMarker, rc::Retained};
@@ -142,8 +145,9 @@ impl AppState {
             {
                 if self.target == Target::Clickable {
                     let _ = element.press();
-                    // let _ = element.show_menu();
+                // let _ = element.show_menu();
                 } else if let Some(text) = context {
+                    element.set_selected_range(0, 2);
                     copy_to_clipboard(text);
                 }
             }

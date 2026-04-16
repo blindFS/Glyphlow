@@ -2,14 +2,14 @@ use std::collections::HashSet;
 
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
-    AXValueGetValue, AXValueRef, kAXButtonRole, kAXHiddenAttribute, kAXMenuBarRole,
-    kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXSizeAttribute, kAXStaticTextRole,
-    kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCGPoint,
-    kAXValueTypeCGSize,
+    AXValueCreate, AXValueGetValue, AXValueRef, kAXButtonRole, kAXHiddenAttribute, kAXMenuBarRole,
+    kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXSelectedTextRangeAttribute,
+    kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute,
+    kAXValueAttribute, kAXValueTypeCFRange, kAXValueTypeCGPoint, kAXValueTypeCGSize,
 };
 use core_foundation::{
     attributed_string::{CFAttributedStringGetString, CFAttributedStringRef},
-    base::{CFType, TCFType},
+    base::{CFRange, CFType, FromVoid, TCFType, TCFTypeRef},
     boolean::CFBoolean,
     string::CFString,
 };
@@ -196,6 +196,7 @@ pub trait GetAttribute {
     fn is_clickable(&self) -> bool;
 }
 
+// TODO: logging
 impl GetAttribute for AXUIElement {
     fn get_attribute(&self, attribute_name: &str) -> Option<CFType> {
         self.attribute(&AXAttribute::new(&CFString::new(attribute_name)))
@@ -219,12 +220,12 @@ impl GetAttribute for AXUIElement {
 
     fn get_pos(&self) -> Option<CGPoint> {
         let pos_cf = self.get_attribute(kAXPositionAttribute)?;
-        get_ax_struct::<CGPoint>(&pos_cf, kAXValueTypeCGPoint)
+        cftype_to_rust_type::<CGPoint>(&pos_cf, kAXValueTypeCGPoint)
     }
 
     fn get_size(&self) -> Option<CGSize> {
         let size_cf = self.get_attribute(kAXSizeAttribute)?;
-        get_ax_struct::<CGSize>(&size_cf, kAXValueTypeCGSize)
+        cftype_to_rust_type::<CGSize>(&size_cf, kAXValueTypeCGSize)
     }
 
     fn get_frame(&self) -> Option<Frame> {
@@ -275,6 +276,7 @@ impl GetAttribute for AXUIElement {
             // but the intersection of all those 3 is empty.
             // We have to introduce the `init_frame` here, typically full screen,
             // to make sure that C is at least within visible area.
+            // TODO: trade-off among false-positive, false-negative and performance
             this_frame.intersect(init_frame)
         } else {
             Some(parent_frame.clone())
@@ -293,8 +295,28 @@ impl GetAttribute for AXUIElement {
     }
 }
 
+pub trait SetAttribute {
+    fn set_attribute_by_name(&self, attribute_name: &str, value: CFType);
+    fn set_selected_range(&self, location: isize, length: isize);
+}
+
+// TODO: logging
+impl SetAttribute for AXUIElement {
+    fn set_attribute_by_name(&self, attribute_name: &str, value: CFType) {
+        let attr = AXAttribute::new(&CFString::new(attribute_name));
+        let _ = self.set_attribute(&attr, value);
+    }
+
+    fn set_selected_range(&self, location: isize, length: isize) {
+        let range = CFRange::init(location, length);
+        if let Some(wrapped_range) = rust_type_to_cftype(range, kAXValueTypeCFRange) {
+            self.set_attribute_by_name(kAXSelectedTextRangeAttribute, wrapped_range);
+        }
+    }
+}
+
 /// A safe helper to extract C-structs from an AXValue stored inside a CFType.
-fn get_ax_struct<T: Default>(cf_type: &CFType, value_type: u32) -> Option<T> {
+fn cftype_to_rust_type<T: Default>(cf_type: &CFType, value_type: u32) -> Option<T> {
     unsafe {
         let value_ref = cf_type.as_CFTypeRef() as AXValueRef;
         let mut result = T::default();
@@ -303,6 +325,20 @@ fn get_ax_struct<T: Default>(cf_type: &CFType, value_type: u32) -> Option<T> {
     }
 }
 
+/// A helper for types have no impl Into<CFType>
+fn rust_type_to_cftype<T>(value: T, value_type: u32) -> Option<CFType> {
+    unsafe {
+        let raw_value = AXValueCreate(value_type, &value as *const _ as *const std::ffi::c_void);
+        if raw_value.is_null() {
+            eprintln!("Failed to create AXValue");
+            return None;
+        }
+
+        Some(CFType::from_void(raw_value.as_void_ptr()).as_CFType())
+    }
+}
+
+// TODO: image
 #[derive(Default, PartialEq, Clone)]
 pub enum Target {
     #[default]
@@ -325,7 +361,6 @@ pub fn traverse_elements(
 
         // TODO: Fine-grained control
         // 1. Image
-        // 2. TextInput/TextField/TextArea
         #[allow(non_upper_case_globals)]
         match role.to_string().as_str() {
             kAXPopUpButtonRole | kAXButtonRole | "AXRadioButton" => {
@@ -354,9 +389,6 @@ pub fn traverse_elements(
                     cache.add(element.clone(), Some(ctx), RoleOfInterest::Button);
                 }
             }
-            kAXTextFieldRole => {
-                // element.inspect();
-            }
             kAXStaticTextRole => match target {
                 Target::Clickable if element.is_clickable() => {
                     cache.add(element.clone(), None, RoleOfInterest::Button);
@@ -368,8 +400,14 @@ pub fn traverse_elements(
                 }
                 _ => (),
             },
-            kAXTextAreaRole => {
-                // element.inspect();
+            // TODO: select only the visible part, `kAXVisibleCharacterRangeAttribute`
+            kAXTextFieldRole | kAXTextAreaRole => {
+                element.inspect();
+                if *target == Target::Text
+                    && let Some(value) = element.get_attribute_string(kAXValueAttribute)
+                {
+                    cache.add(element.clone(), Some(value), RoleOfInterest::StaticText);
+                }
             }
             kAXMenuBarRole => {
                 // NOTE: Exclude system menu bar items
