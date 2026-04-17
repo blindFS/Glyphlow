@@ -7,7 +7,7 @@ use objc2_app_kit::{
     NSFontAttributeName, NSForegroundColorAttributeName, NSMutableParagraphStyle,
     NSParagraphStyleAttributeName, NSScreen, NSStringDrawingOptions, NSWindow, NSWindowStyleMask,
 };
-use objc2_core_foundation::CGSize;
+use objc2_core_foundation::{CFRetained, CGSize};
 use objc2_core_graphics::{CGColor, CGMutablePath};
 use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer, kCAAlignmentCenter};
@@ -74,11 +74,9 @@ pub fn draw_hints(
     let corner_radius = theme.hint_radius as f64;
 
     // Colors parsed from hex strings
-    let bg_color = cgcolor_from_hex(&theme.hint_bg_color);
-    let hl_color =
-        cgcolor_from_hex(&theme.hint_hl_color).unwrap_or(NSColor::whiteColor().CGColor());
-    let fg_color =
-        cgcolor_from_hex(&theme.hint_fg_color).unwrap_or(NSColor::blackColor().CGColor());
+    let bg_color = &theme.hint_bg_color;
+    let hl_color = &theme.hint_hl_color;
+    let fg_color = &theme.hint_fg_color;
     let font = NSFont::fontWithName_size(&NSString::from_str(&theme.font), font_size);
 
     unsafe {
@@ -112,7 +110,7 @@ pub fn draw_hints(
             let box_layer = text_box_with_attributed_string(
                 attr_string,
                 true,
-                bg_color.as_deref(),
+                bg_color,
                 margin_size,
                 (hint.x, hint.y - tri_height),
                 screen_size,
@@ -136,7 +134,7 @@ pub fn draw_hints(
             CGMutablePath::close_subpath(Some(&path));
 
             tri_layer.setPath(Some(&path));
-            tri_layer.setFillColor(bg_color.as_deref());
+            tri_layer.setFillColor(Some(bg_color));
             tri_layer.setFrame(NSRect::new(
                 NSPoint::new(tri_x_offset, tri_y_offset),
                 NSSize::new(tri_width, tri_height),
@@ -146,26 +144,6 @@ pub fn draw_hints(
             root_layer.addSublayer(&box_layer);
         }
     }
-}
-
-fn hex_to_rgba(hex: &str) -> Option<(f64, f64, f64, f64)> {
-    let hex = hex.trim_start_matches('#');
-    // TODO: error on invalid format
-    let to_float = |i: std::ops::Range<usize>| -> Option<f64> {
-        hex.get(i)
-            .and_then(|s| u8::from_str_radix(s, 16).ok())
-            .map(|iu8| iu8 as f64 / 255.0)
-    };
-    let r = to_float(0..2)?;
-    let g = to_float(2..4)?;
-    let b = to_float(4..6)?;
-    let a = if hex.len() == 8 { to_float(6..8)? } else { 1.0 };
-    Some((r, g, b, a))
-}
-
-fn cgcolor_from_hex(hex: &str) -> Option<Retained<CGColor>> {
-    let (r, g, b, a) = hex_to_rgba(hex)?;
-    Some(NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, a).CGColor())
 }
 
 pub fn draw_dictionary_popup(
@@ -181,8 +159,8 @@ pub fn draw_dictionary_popup(
         text,
         false,
         font,
-        NSColor::blackColor().CGColor(),
-        NSColor::whiteColor().CGColor(),
+        CGColor::new_generic_gray(1.0, 1.0),
+        CGColor::new_generic_gray(0.0, 1.0),
         10.0,
         (center.0, screen_size.height - center.1),
         screen_size,
@@ -195,8 +173,8 @@ fn draw_text_box(
     text: &str,
     center_text: bool,
     font: Option<Retained<NSFont>>,
-    fg_color: Retained<CGColor>,
-    bg_color: Retained<CGColor>,
+    fg_color: CFRetained<CGColor>,
+    bg_color: CFRetained<CGColor>,
     margin: f64,
     center: (f64, f64),
     screen_size: CGSize,
@@ -226,7 +204,7 @@ fn draw_text_box(
         text_box_with_attributed_string(
             attr_string,
             center_text,
-            Some(&bg_color),
+            &bg_color,
             margin,
             center,
             screen_size,
@@ -237,7 +215,7 @@ fn draw_text_box(
 fn text_box_with_attributed_string(
     attr_string: Retained<NSMutableAttributedString>,
     center_text: bool,
-    bg_color: Option<&CGColor>,
+    bg_color: &CFRetained<CGColor>,
     margin: f64,
     center: (f64, f64),
     screen_size: CGSize,
@@ -262,7 +240,7 @@ fn text_box_with_attributed_string(
 
         let container = CALayer::new();
         container.setFrame(NSRect::new(origin, NSSize::new(box_width, box_height)));
-        container.setBackgroundColor(bg_color);
+        container.setBackgroundColor(Some(bg_color));
 
         let text_layer = CATextLayer::new();
         text_layer.setFrame(NSRect::new(

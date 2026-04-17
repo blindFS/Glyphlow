@@ -6,7 +6,6 @@ use objc2::runtime::ProtocolObject;
 use objc2_app_kit::{NSPasteboard, NSWorkspace};
 use objc2_core_foundation::CGPoint;
 use objc2_foundation::{NSArray, NSString};
-use rdev::Key;
 
 pub fn get_focused_pid() -> Option<i32> {
     let workspace = NSWorkspace::sharedWorkspace();
@@ -100,100 +99,4 @@ pub fn copy_to_clipboard(text: &str) {
     let proto_string = ProtocolObject::from_retained(ns_string);
     let objects = NSArray::from_retained_slice(&[proto_string]);
     pb.writeObjects(&objects);
-}
-
-pub trait AlphabeticKey {
-    fn to_char(&self) -> char;
-    fn to_str(&self) -> String;
-    fn from_str(c: &str) -> Option<Key>;
-    fn right_alternative(&self) -> Option<Key>;
-}
-
-impl AlphabeticKey for Key {
-    fn to_char(&self) -> char {
-        match self {
-            Key::KeyA => 'A',
-            Key::KeyB => 'B',
-            Key::KeyC => 'C',
-            Key::KeyD => 'D',
-            Key::KeyE => 'E',
-            Key::KeyF => 'F',
-            Key::KeyG => 'G',
-            Key::KeyH => 'H',
-            Key::KeyI => 'I',
-            Key::KeyJ => 'J',
-            Key::KeyK => 'K',
-            Key::KeyL => 'L',
-            Key::KeyM => 'M',
-            Key::KeyN => 'N',
-            Key::KeyO => 'O',
-            Key::KeyP => 'P',
-            Key::KeyQ => 'Q',
-            Key::KeyR => 'R',
-            Key::KeyT => 'T',
-            Key::KeyU => 'U',
-            Key::KeyV => 'V',
-            Key::KeyW => 'W',
-            Key::KeyX => 'X',
-            Key::KeyY => 'Y',
-            Key::KeyZ => 'Z',
-            Key::Backspace | Key::Delete => '-',
-            _ => ' ',
-        }
-    }
-
-    fn to_str(&self) -> String {
-        match self {
-            Key::Alt | Key::AltGr => "ALT".to_string(),
-            Key::ControlLeft | Key::ControlRight => "CTRL".to_string(),
-            Key::MetaLeft | Key::MetaRight => "META".to_string(),
-            Key::ShiftLeft | Key::ShiftRight => "SHIFT".to_string(),
-            _ => self.to_char().to_string(),
-        }
-    }
-
-    fn from_str(c: &str) -> Option<Self> {
-        match c.to_uppercase().as_str() {
-            "A" => Some(Key::KeyA),
-            "B" => Some(Key::KeyB),
-            "C" => Some(Key::KeyC),
-            "D" => Some(Key::KeyD),
-            "E" => Some(Key::KeyE),
-            "F" => Some(Key::KeyF),
-            "G" => Some(Key::KeyG),
-            "H" => Some(Key::KeyH),
-            "I" => Some(Key::KeyI),
-            "J" => Some(Key::KeyJ),
-            "K" => Some(Key::KeyK),
-            "L" => Some(Key::KeyL),
-            "M" => Some(Key::KeyM),
-            "N" => Some(Key::KeyN),
-            "O" => Some(Key::KeyO),
-            "P" => Some(Key::KeyP),
-            "Q" => Some(Key::KeyQ),
-            "R" => Some(Key::KeyR),
-            "T" => Some(Key::KeyT),
-            "U" => Some(Key::KeyU),
-            "V" => Some(Key::KeyV),
-            "W" => Some(Key::KeyW),
-            "X" => Some(Key::KeyX),
-            "Y" => Some(Key::KeyY),
-            "Z" => Some(Key::KeyZ),
-            "ALT" => Some(Key::Alt),
-            "CTRL" => Some(Key::ControlLeft),
-            "SHIFT" => Some(Key::ShiftLeft),
-            "META" => Some(Key::MetaLeft),
-            _ => None,
-        }
-    }
-
-    fn right_alternative(&self) -> Option<Key> {
-        match self {
-            Key::Alt => Some(Key::AltGr),
-            Key::ControlLeft => Some(Key::ControlRight),
-            Key::ShiftLeft => Some(Key::ShiftRight),
-            Key::ShiftRight => Some(Key::MetaRight),
-            _ => None,
-        }
-    }
 }

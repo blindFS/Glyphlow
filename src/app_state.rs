@@ -4,12 +4,12 @@ use crate::{
     ax_element::{
         ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, Target, traverse_elements,
     },
-    config::GlyphlowConfig,
+    config::{AlphabeticKey, GlyphlowConfig},
     drawer::{
         clear_window, create_overlay_window, draw_dictionary_popup, draw_hints,
         get_main_screen_size,
     },
-    os_util::{AlphabeticKey, copy_to_clipboard, dictionary_lookup, get_focused_pid},
+    os_util::{copy_to_clipboard, dictionary_lookup, get_focused_pid},
 };
 use accessibility::{AXUIElement, AXUIElementActions};
 use objc2::{MainThreadMarker, rc::Retained};
