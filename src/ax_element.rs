@@ -3,9 +3,10 @@ use std::collections::HashSet;
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     AXValueCreate, AXValueGetValue, AXValueRef, kAXButtonRole, kAXHiddenAttribute, kAXMenuBarRole,
-    kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXSelectedTextRangeAttribute,
-    kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute,
-    kAXValueAttribute, kAXValueTypeCFRange, kAXValueTypeCGPoint, kAXValueTypeCGSize,
+    kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction,
+    kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
+    kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
+    kAXValueTypeCGPoint, kAXValueTypeCGSize,
 };
 use core_foundation::{
     attributed_string::{CFAttributedStringGetString, CFAttributedStringRef},
@@ -285,14 +286,11 @@ impl GetAttribute for AXUIElement {
     }
 
     fn is_clickable(&self) -> bool {
-        if let Ok(actions) = self.action_names() {
-            for action in &actions {
-                if action.to_string().as_str() == "AXPress" {
-                    return true;
-                }
-            }
-        }
-        false
+        self.action_names().is_ok_and(|actions| {
+            actions
+                .iter()
+                .any(|action| action.to_string() == kAXPressAction)
+        })
     }
 }
 
@@ -373,11 +371,14 @@ pub fn traverse_elements(
                     .or_else(|| {
                         element
                             .get_attribute("AXAttributedDescription")
-                            .map(|val| unsafe {
+                            .and_then(|val| unsafe {
                                 let string_ref = CFAttributedStringGetString(
                                     val.as_concrete_TypeRef() as CFAttributedStringRef,
                                 );
-                                CFString::wrap_under_get_rule(string_ref)
+                                if string_ref.is_null() {
+                                    return None;
+                                }
+                                Some(CFString::wrap_under_get_rule(string_ref))
                             })
                     })
                     .map(|cf| cf.to_string())
