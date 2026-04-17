@@ -1,16 +1,18 @@
-use objc2::{AnyThread, MainThreadMarker, MainThreadOnly, rc::Retained};
-use objc2_app_kit::{
-    NSBackingStoreType, NSColor, NSForegroundColorAttributeName, NSScreen, NSWindow,
-    NSWindowStyleMask,
+use objc2::{
+    AnyThread, MainThreadMarker, MainThreadOnly,
+    rc::{DefaultRetained, Retained},
 };
-use objc2_core_foundation::{CFString, CGPoint, CGSize};
+use objc2_app_kit::{
+    NSAttributedStringNSStringDrawingDeprecated, NSBackingStoreType, NSColor, NSFont,
+    NSFontAttributeName, NSForegroundColorAttributeName, NSMutableParagraphStyle,
+    NSParagraphStyleAttributeName, NSScreen, NSStringDrawingOptions, NSWindow, NSWindowStyleMask,
+};
+use objc2_core_foundation::CGSize;
 use objc2_core_graphics::{CGColor, CGMutablePath};
-use objc2_core_text::CTFont;
 use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer, kCAAlignmentCenter};
 
 use crate::{ax_element::HintBox, config::GlyphlowTheme};
-use unicode_width::UnicodeWidthStr;
 
 pub fn get_main_screen_size(mtm: MainThreadMarker) -> CGSize {
     let screens = NSScreen::screens(mtm);
@@ -59,15 +61,14 @@ pub fn draw_hints(
     window: &NSWindow,
     hints: &Vec<HintBox>,
     theme: &GlyphlowTheme,
-    max_width: u32,
     key_prefix_len: usize,
+    screen_size: CGSize,
 ) {
     let root_layer = clear_window(window).expect("Failed to get root layer of the window.");
 
     // Geometry determined by font size
     let font_size = theme.font_size as f64;
-    let box_width = font_size * max_width as f64 / 1.5 + 6.0;
-    let box_height = font_size + 6.0;
+    let margin_size = theme.margin_size as f64;
     let tri_height = font_size / 2.0;
     let tri_width = font_size / 2.0;
     let corner_radius = theme.hint_radius as f64;
@@ -78,30 +79,50 @@ pub fn draw_hints(
         cgcolor_from_hex(&theme.hint_hl_color).unwrap_or(NSColor::whiteColor().CGColor());
     let fg_color =
         cgcolor_from_hex(&theme.hint_fg_color).unwrap_or(NSColor::blackColor().CGColor());
+    let font = NSFont::fontWithName_size(&NSString::from_str(&theme.font), font_size);
 
     unsafe {
         for hint in hints {
-            // 1. Calculate Positions based on your requirement:
-            // The input (hint.x, hint.y) is the top point of the triangle.
-            // The triangle sits on top of the main box.
-            let tri_y_offset = box_height;
-            // Center the triangle horizontally on the box
-            let tri_x_offset = (box_width - tri_width) / 2.0;
+            // Create NSMutableAttributedString first to estimate the size
+            // Highlight prefixed keys
+            let label_string = NSString::from_str(&hint.label);
+            let attr_string = NSMutableAttributedString::initWithString(
+                NSMutableAttributedString::alloc(),
+                &label_string,
+            );
+            attr_string.addAttribute_value_range(
+                NSForegroundColorAttributeName,
+                hl_color.as_ref(),
+                NSRange::new(0, key_prefix_len),
+            );
+            attr_string.addAttribute_value_range(
+                NSForegroundColorAttributeName,
+                fg_color.as_ref(),
+                NSRange::new(key_prefix_len, hint.label.len() - key_prefix_len),
+            );
+            if let Some(font) = &font {
+                attr_string.addAttribute_value_range(
+                    NSFontAttributeName,
+                    font,
+                    NSRange::new(0, hint.label.len()),
+                );
+            }
 
-            // 2. Create the main box container
-            // Shift the main box so the triangle tip hits the exact (x, y)
-            let box_shifted_x = hint.x - (box_width / 2.0);
-            let box_shifted_y = hint.y - (box_height + tri_height);
-
-            let box_layer = CALayer::new();
-            box_layer.setFrame(NSRect::new(
-                NSPoint::new(box_shifted_x, box_shifted_y),
-                NSSize::new(box_width, box_height),
-            ));
-            box_layer.setBackgroundColor(bg_color.as_deref());
+            // Background Box
+            let box_layer = text_box_with_attributed_string(
+                attr_string,
+                true,
+                bg_color.as_deref(),
+                margin_size,
+                (hint.x, hint.y - tri_height),
+                screen_size,
+            );
             box_layer.setCornerRadius(corner_radius);
 
-            // 3. Create the triangle using CAShapeLayer
+            // Create the triangle pointing to the center
+            let box_size = box_layer.bounds().size;
+            let tri_y_offset = box_size.height;
+            let tri_x_offset = (box_size.width - tri_width) / 2.0;
             let tri_layer = CAShapeLayer::new();
             let path = CGMutablePath::new();
             CGMutablePath::move_to_point(Some(&path), std::ptr::null(), 0.0, 0.0); // A
@@ -120,45 +141,8 @@ pub fn draw_hints(
                 NSPoint::new(tri_x_offset, tri_y_offset),
                 NSSize::new(tri_width, tri_height),
             ));
+
             box_layer.addSublayer(&tri_layer);
-
-            // 4. Create the centered text layer
-            let text_layer = CATextLayer::new();
-            text_layer.setAlignmentMode(kCAAlignmentCenter);
-
-            let y_offset = (font_size * 1.25 - box_height) / 2.0;
-            text_layer.setFrame(NSRect::new(
-                NSPoint::new(0.0, y_offset),
-                NSSize::new(box_width, box_height),
-            ));
-
-            text_layer.setFontSize(font_size);
-            text_layer.setFont(Some(&CTFont::with_name(
-                &CFString::from_str(&theme.font),
-                font_size,
-                std::ptr::null(),
-            )));
-
-            // Highlight prefixed keys
-            let label_string = NSString::from_str(&hint.label);
-            let attr_string = NSMutableAttributedString::initWithString(
-                NSMutableAttributedString::alloc(),
-                &label_string,
-            );
-            attr_string.addAttribute_value_range(
-                NSForegroundColorAttributeName,
-                hl_color.as_ref(),
-                NSRange::new(0, key_prefix_len),
-            );
-            attr_string.addAttribute_value_range(
-                NSForegroundColorAttributeName,
-                fg_color.as_ref(),
-                NSRange::new(key_prefix_len, hint.label.len() - key_prefix_len),
-            );
-            text_layer.setString(Some(&attr_string));
-            text_layer.setContentsScale(2.0); // Retina crispness
-
-            box_layer.addSublayer(&text_layer);
             root_layer.addSublayer(&box_layer);
         }
     }
@@ -189,16 +173,18 @@ pub fn draw_dictionary_popup(
     text: &str,
     center: &(f64, f64),
     screen_size: CGSize,
+    theme: &GlyphlowTheme,
 ) {
     let root_layer = clear_window(window).expect("Failed to get root layer of the window.");
+    let font = NSFont::fontWithName_size(&NSString::from_str(&theme.font), theme.font_size as f64);
     let text_box = draw_text_box(
         text,
         false,
-        14.0,
+        font,
         NSColor::blackColor().CGColor(),
         NSColor::whiteColor().CGColor(),
         10.0,
-        CGPoint::new(center.0, screen_size.height - center.1),
+        (center.0, screen_size.height - center.1),
         screen_size,
     );
     root_layer.addSublayer(&text_box);
@@ -208,65 +194,88 @@ pub fn draw_dictionary_popup(
 fn draw_text_box(
     text: &str,
     center_text: bool,
-    font_size: f64,
+    font: Option<Retained<NSFont>>,
     fg_color: Retained<CGColor>,
     bg_color: Retained<CGColor>,
     margin: f64,
-    center: CGPoint,
+    center: (f64, f64),
     screen_size: CGSize,
 ) -> Retained<CALayer> {
-    // Estimate Text Area Size
-    let lines: Vec<&str> = text.split('\n').collect();
-    let line_count = lines.len() as f64;
-    let max_chars = lines
-        .iter()
-        .map(|l| UnicodeWidthStr::width(*l))
-        .max()
-        .unwrap_or(0) as f64;
-
-    let estimated_text_width = max_chars * (font_size * 0.6);
-    let estimated_text_height = line_count * (font_size * 1.4);
-
-    // 3. Calculate Box Size (Text + Margins)
-    let box_width = estimated_text_width + (margin * 2.0);
-    let box_height = estimated_text_height + (margin * 2.0);
-
-    let origin = NSPoint::new(
-        (center.x - (margin / 2.0))
-            .min(screen_size.width - box_width)
-            .max(0.0),
-        (center.y - box_height)
-            .max(0.0)
-            .min(screen_size.height - box_height),
-    );
-
-    let container = CALayer::new();
-    container.setFrame(NSRect::new(origin, NSSize::new(box_width, box_height)));
-    container.setBackgroundColor(Some(&bg_color));
-
-    let text_layer = CATextLayer::new();
-    text_layer.setFrame(NSRect::new(
-        NSPoint::new(margin, margin), // Positioned exactly at margin
-        NSSize::new(estimated_text_width, estimated_text_height),
-    ));
-
-    let ns_string = NSString::from_str(text);
     unsafe {
-        text_layer.setString(Some(&ns_string));
-        text_layer.setFont(Some(&CTFont::with_name(
-            &CFString::from_str("Andale Mono"),
-            font_size,
-            std::ptr::null(),
-        )));
-        if center_text {
-            text_layer.setAlignmentMode(kCAAlignmentCenter); // Horizontal center
-        }
-    }
-    text_layer.setFontSize(font_size);
-    text_layer.setForegroundColor(Some(&fg_color));
-    text_layer.setWrapped(false);
-    text_layer.setContentsScale(2.0); // Retina crispness
+        // Estimate text size with attributed string
+        let ns_string = NSString::from_str(text);
+        let attr_string = NSMutableAttributedString::initWithString(
+            NSMutableAttributedString::alloc(),
+            &ns_string,
+        );
+        let full_range = NSRange::new(0, text.chars().count());
 
-    container.addSublayer(&text_layer);
-    container
+        attr_string.addAttribute_value_range(
+            NSForegroundColorAttributeName,
+            fg_color.as_ref(),
+            full_range,
+        );
+        if let Some(font) = &font {
+            attr_string.addAttribute_value_range(NSFontAttributeName, font, full_range);
+            // HACK: Somehow it underestimates the height without line spacing, it's still not accurate
+            let style = NSMutableParagraphStyle::default_retained();
+            style.setLineSpacing(font.pointSize() / 3.0);
+            attr_string.addAttribute_value_range(NSParagraphStyleAttributeName, &style, full_range);
+        }
+
+        text_box_with_attributed_string(
+            attr_string,
+            center_text,
+            Some(&bg_color),
+            margin,
+            center,
+            screen_size,
+        )
+    }
+}
+
+fn text_box_with_attributed_string(
+    attr_string: Retained<NSMutableAttributedString>,
+    center_text: bool,
+    bg_color: Option<&CGColor>,
+    margin: f64,
+    center: (f64, f64),
+    screen_size: CGSize,
+) -> Retained<CALayer> {
+    unsafe {
+        let max_size = NSSize::new(10000.0, 10000.0);
+        let options = NSStringDrawingOptions::UsesLineFragmentOrigin
+            | NSStringDrawingOptions::UsesFontLeading;
+        let text_bounds = attr_string.boundingRectWithSize_options(max_size, options);
+
+        // Determined the box size and position
+        let box_width = text_bounds.size.width + (margin * 2.0);
+        let box_height = text_bounds.size.height + (margin * 2.0);
+        let origin = NSPoint::new(
+            (center.0 - (box_width / 2.0))
+                .min(screen_size.width - box_width)
+                .max(0.0),
+            (center.1 - box_height)
+                .max(0.0)
+                .min(screen_size.height - box_height),
+        );
+
+        let container = CALayer::new();
+        container.setFrame(NSRect::new(origin, NSSize::new(box_width, box_height)));
+        container.setBackgroundColor(bg_color);
+
+        let text_layer = CATextLayer::new();
+        text_layer.setFrame(NSRect::new(
+            NSPoint::new(margin, margin), // Positioned exactly at margin
+            text_bounds.size,
+        ));
+
+        text_layer.setString(Some(&attr_string));
+        text_layer.setContentsScale(2.0); // Retina crispness
+        if center_text {
+            text_layer.setAlignmentMode(kCAAlignmentCenter);
+        }
+        container.addSublayer(&text_layer);
+        container
+    }
 }

@@ -85,8 +85,8 @@ impl AppState {
             &self.window,
             boxes,
             &self.config.theme,
-            self.hint_width,
             self.key_prefix.len(),
+            self.screen_size,
         );
     }
 
@@ -155,7 +155,13 @@ impl AppState {
                 } else if let Some(text) = context {
                     copy_to_clipboard(text);
                     if let Some(def_str) = dictionary_lookup(text) {
-                        draw_dictionary_popup(&self.window, &def_str, center, self.screen_size);
+                        draw_dictionary_popup(
+                            &self.window,
+                            &def_str,
+                            center,
+                            self.screen_size,
+                            &self.config.theme,
+                        );
                     } else {
                         self.deactivate();
                     }

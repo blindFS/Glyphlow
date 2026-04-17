@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub struct GlyphlowTheme {
     pub font: String,
     pub font_size: u8,
+    pub margin_size: u8,
     pub hint_radius: u8,
     pub hint_bg_color: String,
     pub hint_fg_color: String,
@@ -15,6 +16,7 @@ impl Default for GlyphlowTheme {
         GlyphlowTheme {
             font: "Andale Mono".to_string(),
             font_size: 12,
+            margin_size: 3,
             hint_radius: 5,
             hint_bg_color: "#769ff0A0".to_string(),
             hint_fg_color: "#FFFFFFFF".to_string(),

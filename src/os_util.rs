@@ -83,13 +83,12 @@ pub fn dictionary_lookup(text: &str) -> Option<String> {
                 formated.push('\n');
             } else if char == '▸' {
                 formated.push_str("\n    ");
-            } else if ('①'..='㊿').contains(&char) {
+            } else if ('①'..='⑳').contains(&char) {
                 formated.push_str("\n  ");
             }
             formated.push(char);
         }
 
-        println!("{formated}");
         Some(formated)
     }
 }
