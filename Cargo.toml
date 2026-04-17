@@ -17,3 +17,4 @@ objc2-quartz-core = { version = "0.3.2", features = ["CALayer", "CATextLayer"] }
 objc2-core-graphics = "0.3.2"
 objc2-core-foundation = "0.3.2"
 objc2-core-text = "0.3.2"
+unicode-width = "0.2.2"

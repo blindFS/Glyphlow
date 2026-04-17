@@ -6,8 +6,8 @@ use crate::{
     },
     config::{GlyphlowConfig, load_config},
     drawer::{
-        clear_window, create_overlay_window, draw_hints, get_main_screen_size,
-        setup_scrollable_text,
+        clear_window, create_overlay_window, draw_dictionary_popup, draw_hints,
+        get_main_screen_size,
     },
     os_util::{copy_to_clipboard, dictionary_lookup, get_focused_pid},
 };
@@ -142,7 +142,10 @@ impl AppState {
         if filtered_boxes.len() == 1 {
             if let Some(HintBox { idx, .. }) = filtered_boxes.first()
                 && let Some(ElementOfInterest {
-                    element, context, ..
+                    element,
+                    context,
+                    center,
+                    ..
                 }) = self.element_cache.cache.get(*idx)
             {
                 if self.target == Target::Clickable {
@@ -150,10 +153,12 @@ impl AppState {
                     // let _ = element.show_menu();
                     self.deactivate();
                 } else if let Some(text) = context {
-                    if let Some(def_str) = dictionary_lookup(text) {
-                        setup_scrollable_text(&self.window, &def_str);
-                    }
                     copy_to_clipboard(text);
+                    if let Some(def_str) = dictionary_lookup(text) {
+                        draw_dictionary_popup(&self.window, &def_str, center, self.screen_size);
+                    } else {
+                        self.deactivate();
+                    }
                 }
             }
         } else if filtered_boxes.is_empty() {

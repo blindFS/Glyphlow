@@ -3,13 +3,14 @@ use objc2_app_kit::{
     NSBackingStoreType, NSColor, NSForegroundColorAttributeName, NSScreen, NSWindow,
     NSWindowStyleMask,
 };
-use objc2_core_foundation::{CFString, CGSize};
+use objc2_core_foundation::{CFString, CGPoint, CGSize};
 use objc2_core_graphics::{CGColor, CGMutablePath};
 use objc2_core_text::CTFont;
 use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
-use objc2_quartz_core::{CALayer, CAScrollLayer, CAShapeLayer, CATextLayer, kCAAlignmentCenter};
+use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer, kCAAlignmentCenter};
 
 use crate::{ax_element::HintBox, config::GlyphlowTheme};
+use unicode_width::UnicodeWidthStr;
 
 pub fn get_main_screen_size(mtm: MainThreadMarker) -> CGSize {
     let screens = NSScreen::screens(mtm);
@@ -36,9 +37,8 @@ pub fn create_overlay_window(mtm: MainThreadMarker, screen_size: CGSize) -> Reta
         window.setIgnoresMouseEvents(true);
         window.setHasShadow(false);
 
-        // Use a raw integer for the level to avoid the "non-constant" error.
-        // 2147483647 is the maximum level (Status/ScreenSaver level)
-        window.setLevel(2147483647);
+        // Front most
+        window.setLevel(i32::MAX as isize);
 
         window
     }
@@ -126,7 +126,7 @@ pub fn draw_hints(
             let text_layer = CATextLayer::new();
             text_layer.setAlignmentMode(kCAAlignmentCenter);
 
-            let y_offset = (font_size * 1.2 - box_height) / 2.0;
+            let y_offset = (font_size * 1.25 - box_height) / 2.0;
             text_layer.setFrame(NSRect::new(
                 NSPoint::new(0.0, y_offset),
                 NSSize::new(box_width, box_height),
@@ -184,37 +184,89 @@ fn cgcolor_from_hex(hex: &str) -> Option<Retained<CGColor>> {
     Some(NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, a).CGColor())
 }
 
-pub fn setup_scrollable_text(window: &NSWindow, text: &str) {
+pub fn draw_dictionary_popup(
+    window: &NSWindow,
+    text: &str,
+    center: &(f64, f64),
+    screen_size: CGSize,
+) {
     let root_layer = clear_window(window).expect("Failed to get root layer of the window.");
-    // 1. Create the Main Box (Container)
+    let text_box = draw_text_box(
+        text,
+        false,
+        14.0,
+        NSColor::blackColor().CGColor(),
+        NSColor::whiteColor().CGColor(),
+        10.0,
+        CGPoint::new(center.0, screen_size.height - center.1),
+        screen_size,
+    );
+    root_layer.addSublayer(&text_box);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_text_box(
+    text: &str,
+    center_text: bool,
+    font_size: f64,
+    fg_color: Retained<CGColor>,
+    bg_color: Retained<CGColor>,
+    margin: f64,
+    center: CGPoint,
+    screen_size: CGSize,
+) -> Retained<CALayer> {
+    // Estimate Text Area Size
+    let lines: Vec<&str> = text.split('\n').collect();
+    let line_count = lines.len() as f64;
+    let max_chars = lines
+        .iter()
+        .map(|l| UnicodeWidthStr::width(*l))
+        .max()
+        .unwrap_or(0) as f64;
+
+    let estimated_text_width = max_chars * (font_size * 0.6);
+    let estimated_text_height = line_count * (font_size * 1.4);
+
+    // 3. Calculate Box Size (Text + Margins)
+    let box_width = estimated_text_width + (margin * 2.0);
+    let box_height = estimated_text_height + (margin * 2.0);
+
+    let origin = NSPoint::new(
+        (center.x - (margin / 2.0))
+            .min(screen_size.width - box_width)
+            .max(0.0),
+        (center.y - box_height)
+            .max(0.0)
+            .min(screen_size.height - box_height),
+    );
+
     let container = CALayer::new();
-    container.setFrame(NSRect::new(
-        NSPoint::new(0.0, 0.0),
-        NSSize::new(400.0, 1000.0),
-    ));
-    container.setBackgroundColor(Some(&NSColor::yellowColor().CGColor()));
+    container.setFrame(NSRect::new(origin, NSSize::new(box_width, box_height)));
+    container.setBackgroundColor(Some(&bg_color));
 
-    // 2. Create the Scroll Layer
-    let scroll_layer = CAScrollLayer::new();
-    scroll_layer.setFrame(container.bounds());
-
-    // 3. Create the Text Layer
     let text_layer = CATextLayer::new();
-    let string = NSString::from_str(text);
+    text_layer.setFrame(NSRect::new(
+        NSPoint::new(margin, margin), // Positioned exactly at margin
+        NSSize::new(estimated_text_width, estimated_text_height),
+    ));
 
-    text_layer.setFrame(container.bounds());
-    text_layer.setWrapped(true); // Enables multiline
-    text_layer.setFontSize(14.0);
-    text_layer.setContentsScale(2.0); // Retina crispness
-    text_layer.setForegroundColor(Some(&NSColor::blackColor().CGColor()));
-
+    let ns_string = NSString::from_str(text);
     unsafe {
-        text_layer.setString(Some(&string));
+        text_layer.setString(Some(&ns_string));
+        text_layer.setFont(Some(&CTFont::with_name(
+            &CFString::from_str("Andale Mono"),
+            font_size,
+            std::ptr::null(),
+        )));
+        if center_text {
+            text_layer.setAlignmentMode(kCAAlignmentCenter); // Horizontal center
+        }
     }
+    text_layer.setFontSize(font_size);
+    text_layer.setForegroundColor(Some(&fg_color));
+    text_layer.setWrapped(false);
+    text_layer.setContentsScale(2.0); // Retina crispness
 
-    // 4. Hierarchy
-    scroll_layer.addSublayer(&text_layer);
-    container.addSublayer(&scroll_layer);
-
-    root_layer.addSublayer(&container);
+    container.addSublayer(&text_layer);
+    container
 }

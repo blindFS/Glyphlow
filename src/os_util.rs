@@ -45,16 +45,52 @@ unsafe extern "C" {
     ) -> CFStringRef;
 }
 
+// FIXME: make it work!
+pub fn dictionary_popup(text: &str, point: (f64, f64)) {
+    let point = CGPoint::new(point.0, point.1);
+    unsafe {
+        HIDictionaryWindowShow(
+            std::ptr::null(),
+            CFString::new(text).as_concrete_TypeRef(),
+            CFRange::init(0, text.chars().count() as isize),
+            std::ptr::null(),
+            point,
+            false,
+            std::ptr::null(),
+        )
+    }
+}
+
 pub fn dictionary_lookup(text: &str) -> Option<String> {
     unsafe {
-        println!("Calling DCSCopyTextDefinition ...");
+        println!("Calling DCSCopyTextDefinition with query: {text} ...");
         let raw_ptr = DCSCopyTextDefinition(
             std::ptr::null(),
             CFString::new(text).as_concrete_TypeRef(),
             CFRange::init(0, text.chars().count() as isize),
         );
+        if raw_ptr.is_null() {
+            return None;
+        }
 
-        (!raw_ptr.is_null()).then_some(CFString::wrap_under_create_rule(raw_ptr).to_string())
+        let raw_string = CFString::wrap_under_create_rule(raw_ptr).to_string();
+        let mut formated = String::new();
+        let mut char_iter = raw_string.chars().peekable();
+        while let Some(char) = char_iter.next() {
+            if let Some('.') = char_iter.peek()
+                && char.is_ascii_uppercase()
+            {
+                formated.push('\n');
+            } else if char == '▸' {
+                formated.push_str("\n    ");
+            } else if ('①'..='㊿').contains(&char) {
+                formated.push_str("\n  ");
+            }
+            formated.push(char);
+        }
+
+        println!("{formated}");
+        Some(formated)
     }
 }
 
