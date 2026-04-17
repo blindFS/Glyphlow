@@ -4,12 +4,12 @@ use crate::{
     ax_element::{
         ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, Target, traverse_elements,
     },
-    config::{GlyphlowConfig, load_config},
+    config::GlyphlowConfig,
     drawer::{
         clear_window, create_overlay_window, draw_dictionary_popup, draw_hints,
         get_main_screen_size,
     },
-    os_util::{copy_to_clipboard, dictionary_lookup, get_focused_pid},
+    os_util::{AlphabeticKey, copy_to_clipboard, dictionary_lookup, get_focused_pid},
 };
 use accessibility::{AXUIElement, AXUIElementActions};
 use objc2::{MainThreadMarker, rc::Retained};
@@ -17,12 +17,20 @@ use objc2_app_kit::NSWindow;
 use objc2_core_foundation::CGSize;
 use rdev::Key;
 
+#[derive(PartialEq)]
+enum Mode {
+    Idle,
+    DashBoard,
+    Filtering,
+    ActionMenu,
+}
+
 /// Global state for Glyphlow,
 /// mainly cached UI elements, and some related drawings
 pub struct AppState {
     /// Keyboard listener for mod keys
     pub pressed_keys: HashSet<Key>,
-    pub is_active: bool,
+    mode: Mode,
     /// Used for drawing hint boxes on screen
     hint_boxes: Vec<HintBox>,
     element_cache: ElementCache,
@@ -33,6 +41,7 @@ pub struct AppState {
     target: Target,
     config: GlyphlowConfig,
     hint_width: u32,
+    selected: Option<ElementOfInterest>,
 }
 
 impl Default for AppState {
@@ -48,11 +57,11 @@ impl AppState {
         let window = create_overlay_window(mtm, screen_size);
         window.makeKeyAndOrderFront(None);
 
-        let config = load_config();
+        let config = GlyphlowConfig::load_config();
 
         Self {
             pressed_keys: HashSet::new(),
-            is_active: false,
+            mode: Mode::Idle,
             hint_boxes: vec![],
             element_cache: ElementCache::new(),
             key_prefix: String::new(),
@@ -61,11 +70,12 @@ impl AppState {
             screen_size,
             window,
             config,
+            selected: None,
         }
     }
 
     pub fn deactivate(&mut self) {
-        self.is_active = false;
+        self.mode = Mode::Idle;
         self.clear_cache();
         self.clear_drawing();
     }
@@ -74,6 +84,7 @@ impl AppState {
         self.hint_boxes.clear();
         self.element_cache.clear();
         self.key_prefix.clear();
+        self.selected = None;
     }
 
     fn clear_drawing(&mut self) {
@@ -110,7 +121,7 @@ impl AppState {
             );
 
             if !self.element_cache.cache.is_empty() {
-                self.is_active = true;
+                self.mode = Mode::Filtering;
 
                 let (hint_width, new_boxes) =
                     self.element_cache.hint_boxes(self.screen_size.height);
@@ -141,36 +152,120 @@ impl AppState {
         // Only 1 remaining, click and exit
         if filtered_boxes.len() == 1 {
             if let Some(HintBox { idx, .. }) = filtered_boxes.first()
-                && let Some(ElementOfInterest {
-                    element,
-                    context,
-                    center,
-                    ..
-                }) = self.element_cache.cache.get(*idx)
+                && let Some(eoi @ ElementOfInterest { element, .. }) =
+                    self.element_cache.cache.get(*idx)
             {
                 if self.target == Target::Clickable {
                     let _ = element.press();
                     // let _ = element.show_menu();
                     self.deactivate();
-                } else if let Some(text) = context {
-                    copy_to_clipboard(text);
-                    if let Some(def_str) = dictionary_lookup(text) {
-                        draw_dictionary_popup(
-                            &self.window,
-                            &def_str,
-                            center,
-                            self.screen_size,
-                            &self.config.theme,
-                        );
-                    } else {
-                        self.deactivate();
-                    }
+                } else {
+                    self.selected = Some(eoi.clone());
+                    // TODO: Draw action menu
+                    draw_dictionary_popup(
+                        &self.window,
+                        "Select Action:\nCopy (C)\nDictionary (D)",
+                        &(self.screen_size.width / 2.0, self.screen_size.height / 2.0),
+                        self.screen_size,
+                        &self.config.theme,
+                    );
+                    self.mode = Mode::ActionMenu;
                 }
             }
         } else if filtered_boxes.is_empty() {
             self.deactivate();
         } else {
             self.draw(&filtered_boxes);
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.mode != Mode::Idle
+    }
+
+    pub fn act_on_key(&mut self, key: Key) -> bool {
+        let key_char = key.to_char();
+
+        match self.mode {
+            Mode::Idle => {
+                if self.config.global_trigger_key.keys.iter().all(|k| {
+                    k == &key
+                        || self.pressed_keys.contains(k)
+                        || k.right_alternative()
+                            .is_some_and(|r| *k == r || self.pressed_keys.contains(&r))
+                }) {
+                    self.mode = Mode::DashBoard;
+                    // TODO: Draw dashboard
+                    draw_dictionary_popup(
+                        &self.window,
+                        "Select Mode:\nClick (C)\nText (T)",
+                        &(self.screen_size.width / 2.0, self.screen_size.height / 2.0),
+                        self.screen_size,
+                        &self.config.theme,
+                    );
+                    true
+                } else {
+                    false
+                }
+            }
+            Mode::DashBoard => {
+                match key_char {
+                    'C' => {
+                        self.activate(&Target::Clickable);
+                    }
+                    'T' => {
+                        self.activate(&Target::Text);
+                    }
+                    _ => {
+                        self.deactivate();
+                    }
+                }
+                true
+            }
+            Mode::Filtering => {
+                if key_char == ' ' {
+                    self.deactivate();
+                } else {
+                    self.follow_key(key_char);
+                }
+                true
+            }
+            Mode::ActionMenu => {
+                if let Some(ElementOfInterest {
+                    context: Some(text),
+                    center,
+                    ..
+                }) = self.selected.as_ref()
+                {
+                    match key_char {
+                        'C' => {
+                            copy_to_clipboard(text);
+                            self.deactivate();
+                        }
+                        'D' => {
+                            if let Some(def_str) = dictionary_lookup(text) {
+                                draw_dictionary_popup(
+                                    &self.window,
+                                    &def_str,
+                                    center,
+                                    self.screen_size,
+                                    &self.config.theme,
+                                );
+                            } else {
+                                // TODO: Logging
+                                self.deactivate();
+                            }
+                        }
+                        _ => {
+                            self.deactivate();
+                        }
+                    }
+                    true
+                } else {
+                    self.deactivate();
+                    false
+                }
+            }
         }
     }
 }

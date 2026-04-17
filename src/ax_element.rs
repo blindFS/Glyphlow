@@ -15,7 +15,7 @@ use core_foundation::{
 };
 use objc2_core_foundation::{CGPoint, CGSize};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum RoleOfInterest {
     Button,
     TextField,
@@ -24,6 +24,7 @@ pub enum RoleOfInterest {
     MenuItem,
 }
 
+#[derive(Clone)]
 pub struct ElementOfInterest {
     pub element: AXUIElement,
     pub context: Option<String>,
@@ -378,11 +379,6 @@ pub fn traverse_elements(
                                 );
                                 CFString::wrap_under_get_rule(string_ref)
                             })
-                    })
-                    .or_else(|| {
-                        element
-                            .get_attribute(kAXTitleAttribute)
-                            .and_then(|val| val.downcast::<CFString>())
                     })
                     .map(|cf| cf.to_string())
                 {

@@ -1,4 +1,8 @@
+use crate::os_util::AlphabeticKey;
+use rdev::Key;
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GlyphlowTheme {
@@ -31,15 +35,61 @@ pub struct TextAction {
     display: String,
 }
 
-#[derive(Default, Serialize, Deserialize, Debug)]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct KeyBinding {
+    // We use 'with' to point to our custom logic below
+    #[serde(with = "key_combo_format")]
+    pub keys: Vec<Key>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct GlyphlowConfig {
-    pub global_trigger_key: String,
+    pub global_trigger_key: KeyBinding,
     pub theme: GlyphlowTheme,
     pub text_actions: Vec<TextAction>,
 }
 
-use std::fs;
-use std::path::PathBuf;
+impl Default for GlyphlowConfig {
+    fn default() -> Self {
+        GlyphlowConfig {
+            global_trigger_key: KeyBinding {
+                keys: vec![Key::Alt, Key::KeyG],
+            },
+            theme: GlyphlowTheme::default(),
+            text_actions: vec![],
+        }
+    }
+}
+
+impl GlyphlowConfig {
+    pub fn load_config() -> Self {
+        let Some(path) = get_config_path() else {
+            return Self::default();
+        };
+
+        if let Ok(content) = fs::read_to_string(&path) {
+            println!("------------- Loading config from {path:?} -------------");
+            if let Ok(existing_config) = toml::from_str::<Self>(&content) {
+                existing_config
+            } else {
+                eprintln!("Failed to parse config file, using default config instead.");
+                Self::default()
+            }
+        } else {
+            println!("------------- Saving config to {path:?} -------------");
+            let default_config = Self::default();
+            // TODO: error logging
+            let _ = default_config.save_config(&path);
+            default_config
+        }
+    }
+
+    fn save_config(&self, path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+        let content = toml::to_string_pretty(self)?;
+        fs::write(path, content)?;
+        Ok(())
+    }
+}
 
 fn get_config_path() -> Option<PathBuf> {
     let base_dir = std::env::var("XDG_CONFIG_HOME")
@@ -51,29 +101,37 @@ fn get_config_path() -> Option<PathBuf> {
     Some(base_dir.join("config.toml"))
 }
 
-pub fn load_config() -> GlyphlowConfig {
-    let Some(path) = get_config_path() else {
-        return GlyphlowConfig::default();
-    };
+mod key_combo_format {
+    use serde::{Deserializer, Serializer};
 
-    if let Ok(content) = fs::read_to_string(&path) {
-        println!("------------- Loading config from {path:?} -------------");
-        if let Ok(existing_config) = toml::from_str::<GlyphlowConfig>(&content) {
-            existing_config
-        } else {
-            eprintln!("Failed to parse config file, using default config instead.");
-            GlyphlowConfig::default()
-        }
-    } else {
-        println!("------------- Saving config to {path:?} -------------");
-        let default_config = GlyphlowConfig::default();
-        let _ = save_config(&path, &default_config);
-        default_config
+    use super::*;
+
+    /// --- Serialization: Vec<Key> -> e.g. "ALT + G" ---
+    pub fn serialize<S>(keys: &[Key], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let s = keys
+            .iter()
+            .map(|k| k.to_str())
+            .collect::<Vec<_>>()
+            .join(" + ");
+        serializer.serialize_str(&s)
+    }
+
+    // --- Deserialization: e.g. "ALT + G" -> Vec<Key> ---
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<Key>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.split('+')
+            .map(|part| {
+                Key::from_str(part.trim())
+                    .ok_or_else(|| serde::de::Error::custom(format!("Invalid key: {}", part)))
+            })
+            .collect()
     }
 }
 
-fn save_config(path: &PathBuf, config: &GlyphlowConfig) -> Result<(), Box<dyn std::error::Error>> {
-    let content = toml::to_string_pretty(config)?;
-    fs::write(path, content)?;
-    Ok(())
-}
+// TODO: tests

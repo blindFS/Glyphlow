@@ -104,6 +104,9 @@ pub fn copy_to_clipboard(text: &str) {
 
 pub trait AlphabeticKey {
     fn to_char(&self) -> char;
+    fn to_str(&self) -> String;
+    fn from_str(c: &str) -> Option<Key>;
+    fn right_alternative(&self) -> Option<Key>;
 }
 
 impl AlphabeticKey for Key {
@@ -136,6 +139,61 @@ impl AlphabeticKey for Key {
             Key::KeyZ => 'Z',
             Key::Backspace | Key::Delete => '-',
             _ => ' ',
+        }
+    }
+
+    fn to_str(&self) -> String {
+        match self {
+            Key::Alt | Key::AltGr => "ALT".to_string(),
+            Key::ControlLeft | Key::ControlRight => "CTRL".to_string(),
+            Key::MetaLeft | Key::MetaRight => "META".to_string(),
+            Key::ShiftLeft | Key::ShiftRight => "SHIFT".to_string(),
+            _ => self.to_char().to_string(),
+        }
+    }
+
+    fn from_str(c: &str) -> Option<Self> {
+        match c.to_uppercase().as_str() {
+            "A" => Some(Key::KeyA),
+            "B" => Some(Key::KeyB),
+            "C" => Some(Key::KeyC),
+            "D" => Some(Key::KeyD),
+            "E" => Some(Key::KeyE),
+            "F" => Some(Key::KeyF),
+            "G" => Some(Key::KeyG),
+            "H" => Some(Key::KeyH),
+            "I" => Some(Key::KeyI),
+            "J" => Some(Key::KeyJ),
+            "K" => Some(Key::KeyK),
+            "L" => Some(Key::KeyL),
+            "M" => Some(Key::KeyM),
+            "N" => Some(Key::KeyN),
+            "O" => Some(Key::KeyO),
+            "P" => Some(Key::KeyP),
+            "Q" => Some(Key::KeyQ),
+            "R" => Some(Key::KeyR),
+            "T" => Some(Key::KeyT),
+            "U" => Some(Key::KeyU),
+            "V" => Some(Key::KeyV),
+            "W" => Some(Key::KeyW),
+            "X" => Some(Key::KeyX),
+            "Y" => Some(Key::KeyY),
+            "Z" => Some(Key::KeyZ),
+            "ALT" => Some(Key::Alt),
+            "CTRL" => Some(Key::ControlLeft),
+            "SHIFT" => Some(Key::ShiftLeft),
+            "META" => Some(Key::MetaLeft),
+            _ => None,
+        }
+    }
+
+    fn right_alternative(&self) -> Option<Key> {
+        match self {
+            Key::Alt => Some(Key::AltGr),
+            Key::ControlLeft => Some(Key::ControlRight),
+            Key::ShiftLeft => Some(Key::ShiftRight),
+            Key::ShiftRight => Some(Key::MetaRight),
+            _ => None,
         }
     }
 }

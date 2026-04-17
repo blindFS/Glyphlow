@@ -1,11 +1,7 @@
 use std::{rc::Rc, sync::Mutex};
 
-use glyphlow::{
-    AppState,
-    ax_element::Target,
-    os_util::{AlphabeticKey, check_accessibility_permissions},
-};
-use rdev::{EventType, Key, grab};
+use glyphlow::{AppState, os_util::check_accessibility_permissions};
+use rdev::{EventType, grab};
 
 fn main() {
     // Check for Accessibility Permissions
@@ -27,37 +23,13 @@ fn main() {
             EventType::KeyPress(key) => {
                 // Update global state for mod keys
                 cst.pressed_keys.insert(key);
-                let key_char = key.to_char();
 
-                if !cst.is_active && cst.pressed_keys.contains(&Key::Alt)
-                // New procedure for clickable elements triggered by Alt + C
-                && key == Key::KeyC
-                {
-                    should_swallow = true;
-                    // TODO: don't block system events, using Channels instead
-                    cst.activate(&Target::Clickable);
-                } else if !cst.is_active && cst.pressed_keys.contains(&Key::Alt)
-                // New procedure for text elements triggered by Alt + X
-                && key == Key::KeyX
-                {
-                    should_swallow = true;
-                    // TODO: don't block system events, using Channels instead
-                    cst.activate(&Target::Text);
-                } else if cst.is_active {
-                    should_swallow = true;
-
-                    // Any key other than A-Z will cancel the operation
-                    if key_char == ' ' {
-                        cst.deactivate();
-                    } else {
-                        // TODO: don't block system events, using Channels instead
-                        cst.follow_key(key_char);
-                    }
-                }
+                // TODO: don't block system events, using Channels instead
+                should_swallow = cst.act_on_key(key);
             }
             EventType::KeyRelease(key) => {
                 cst.pressed_keys.remove(&key);
-                if cst.is_active {
+                if cst.is_active() {
                     should_swallow = true;
                 }
             }
