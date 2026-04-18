@@ -89,13 +89,22 @@ impl AppState {
         self.window.clear_window();
     }
 
-    fn draw(&self, boxes: &[HintBox]) {
+    fn draw_hints(&self, boxes: &[HintBox]) {
         self.window.draw_hints(
             boxes,
             &self.config.theme,
             self.key_prefix.len(),
             self.screen_size,
         );
+    }
+
+    fn draw_text_action_menu(&self, text: &str) {
+        let mut msg = format!("Select action for text: `{text}`\nCopy (C)\nDictionary (D)");
+        for action in self.config.text_actions.iter() {
+            msg.push_str(&format!("\n{} ({})", action.display, action.key));
+        }
+        self.window
+            .draw_menu(&msg, self.screen_size, &self.config.theme);
     }
 
     /// Activates the app and caches UI elements
@@ -124,7 +133,7 @@ impl AppState {
                     self.element_cache.hint_boxes(self.screen_size.height);
                 self.hint_width = hint_width;
                 self.hint_boxes.extend(new_boxes);
-                self.draw(&self.hint_boxes);
+                self.draw_hints(&self.hint_boxes);
             } else {
                 self.clear_drawing();
             }
@@ -161,20 +170,14 @@ impl AppState {
                     self.deactivate();
                 } else if let Some(text) = context {
                     self.selected = Some(eoi.clone());
-                    let mut msg =
-                        format!("Select action for text: `{text}`\nCopy (C)\nDictionary (D)");
-                    for action in self.config.text_actions.iter() {
-                        msg.push_str(&format!("\n{} ({})", action.display, action.key));
-                    }
-                    self.window
-                        .draw_menu(&msg, self.screen_size, &self.config.theme);
+                    self.draw_text_action_menu(text);
                     self.mode = Mode::ActionMenu;
                 }
             }
         } else if filtered_boxes.is_empty() {
             self.deactivate();
         } else {
-            self.draw(&filtered_boxes);
+            self.draw_hints(&filtered_boxes);
         }
     }
 
@@ -227,66 +230,85 @@ impl AppState {
                 true
             }
             Mode::ActionMenu => {
-                if let Some(ElementOfInterest {
+                let Some(ElementOfInterest {
                     context: Some(text),
                     center,
                     ..
                 }) = self.selected.as_ref()
-                {
-                    match key_char {
-                        'C' => {
-                            text_to_clipboard(text);
-                            self.deactivate();
-                        }
-                        'D' => {
-                            if let Some(def_str) = dictionary_lookup(text) {
-                                self.window.draw_dictionary_popup(
-                                    &def_str,
-                                    center,
-                                    self.screen_size,
-                                    &self.config.theme,
-                                );
-                            } else {
-                                // TODO: Logging
-                                self.deactivate();
-                            }
-                        }
-                        _ => {
-                            for action in &self.config.text_actions {
-                                if action.key.to_ascii_uppercase() == key_char {
-                                    match std::process::Command::new(&action.command)
-                                        .args(
-                                            action
-                                                .args
-                                                .iter()
-                                                .map(|arg| arg.replace("{selection}", text)),
-                                        )
-                                        .spawn()
-                                        .and_then(|child| child.wait_with_output())
-                                    {
-                                        Ok(o) => {
-                                            if !o.stdout.is_empty() {
-                                                println!(
-                                                    "Command output: {}",
-                                                    String::from_utf8_lossy(&o.stdout)
-                                                );
-                                            }
-                                        }
-                                        Err(e) => {
-                                            eprintln!("Failed to run command: {e}");
-                                        }
-                                    };
-                                    break;
-                                }
-                            }
-                            self.deactivate();
+                else {
+                    self.deactivate();
+                    return true;
+                };
+
+                // Chain different actions
+                let mut new_text: Option<String> = None;
+
+                match key_char {
+                    'C' => {
+                        text_to_clipboard(text);
+                    }
+                    'D' => {
+                        if let Some(def_str) = dictionary_lookup(text) {
+                            self.window.draw_dictionary_popup(
+                                &def_str,
+                                center,
+                                self.screen_size,
+                                &self.config.theme,
+                            );
+                            // HACK: don't call deactivate to close the dictionary window
+                            new_text = Some(String::new());
                         }
                     }
-                    true
+                    _ => {
+                        for action in &self.config.text_actions {
+                            if action.key.to_ascii_uppercase() == key_char {
+                                match std::process::Command::new(&action.command)
+                                    .args(
+                                        action
+                                            .args
+                                            .iter()
+                                            .map(|arg| arg.replace("{selection}", text)),
+                                    )
+                                    .stdout(std::process::Stdio::piped())
+                                    .spawn()
+                                    .and_then(|child| child.wait_with_output())
+                                {
+                                    Ok(o) => {
+                                        if !o.stdout.is_empty() {
+                                            new_text = Some(
+                                                String::from_utf8_lossy(&o.stdout)
+                                                    .trim_end_matches('\n')
+                                                    .to_string(),
+                                            );
+                                        }
+                                        if !o.stderr.is_empty() {
+                                            eprintln!(
+                                                "Stderr: {}",
+                                                String::from_utf8_lossy(&o.stderr)
+                                            );
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Failed to run command: {e}");
+                                    }
+                                };
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if let Some(new_text) = new_text {
+                    if !new_text.is_empty()
+                        && let Some(selected) = self.selected.as_mut()
+                    {
+                        selected.context = Some(new_text.clone());
+                        self.draw_text_action_menu(&new_text);
+                    }
                 } else {
                     self.deactivate();
-                    false
                 }
+                true
             }
         }
     }
