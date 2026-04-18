@@ -72,7 +72,7 @@ impl AppState {
         }
     }
 
-    pub fn deactivate(&mut self) {
+    fn deactivate(&mut self) {
         self.mode = Mode::Idle;
         self.clear_cache();
         self.clear_drawing();
@@ -99,7 +99,7 @@ impl AppState {
     }
 
     /// Activates the app and caches UI elements
-    pub fn activate(&mut self, target: &Target) {
+    fn activate(&mut self, target: &Target) {
         self.target = target.clone();
 
         if let Some(pid) = get_focused_pid() {
@@ -133,7 +133,7 @@ impl AppState {
 
     /// Filter the UI elements and redraw hints.
     /// If only 1 remaining, click and exit
-    pub fn follow_key(&mut self, key_char: char) {
+    fn filter_by_key(&mut self, key_char: char) {
         if key_char == '-' {
             self.key_prefix.pop();
         } else {
@@ -149,20 +149,25 @@ impl AppState {
         // Only 1 remaining, click and exit
         if filtered_boxes.len() == 1 {
             if let Some(HintBox { idx, .. }) = filtered_boxes.first()
-                && let Some(eoi @ ElementOfInterest { element, .. }) =
-                    self.element_cache.cache.get(*idx)
+                && let Some(
+                    eoi @ ElementOfInterest {
+                        element, context, ..
+                    },
+                ) = self.element_cache.cache.get(*idx)
             {
                 if self.target == Target::Clickable {
                     let _ = element.press();
                     // let _ = element.show_menu();
                     self.deactivate();
-                } else {
+                } else if let Some(text) = context {
                     self.selected = Some(eoi.clone());
-                    self.window.draw_menu(
-                        "Select Action:\nCopy (C)\nDictionary (D)",
-                        self.screen_size,
-                        &self.config.theme,
-                    );
+                    let mut msg =
+                        format!("Select action for text: `{text}`\nCopy (C)\nDictionary (D)");
+                    for action in self.config.text_actions.iter() {
+                        msg.push_str(&format!("\n{} ({})", action.display, action.key));
+                    }
+                    self.window
+                        .draw_menu(&msg, self.screen_size, &self.config.theme);
                     self.mode = Mode::ActionMenu;
                 }
             }
@@ -217,7 +222,7 @@ impl AppState {
                 if key_char == ' ' {
                     self.deactivate();
                 } else {
-                    self.follow_key(key_char);
+                    self.filter_by_key(key_char);
                 }
                 true
             }
@@ -247,6 +252,22 @@ impl AppState {
                             }
                         }
                         _ => {
+                            for action in &self.config.text_actions {
+                                if action.key.to_ascii_uppercase() == key_char {
+                                    if let Err(e) = std::process::Command::new(&action.command)
+                                        .args(
+                                            action
+                                                .args
+                                                .iter()
+                                                .map(|arg| arg.replace("{selection}", text)),
+                                        )
+                                        .spawn()
+                                    {
+                                        eprintln!("Failed to run command: {e}");
+                                    };
+                                    break;
+                                }
+                            }
                             self.deactivate();
                         }
                     }

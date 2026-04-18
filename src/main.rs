@@ -24,7 +24,7 @@ fn main() {
                 // Update global state for mod keys
                 cst.pressed_keys.insert(key);
 
-                // TODO: don't block system events, using Channels instead
+                // TODO: don't block system events, use Channels instead
                 should_swallow = cst.act_on_key(key);
             }
             EventType::KeyRelease(key) => {

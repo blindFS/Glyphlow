@@ -34,22 +34,24 @@ impl Default for GlyphlowTheme {
             hint_font: NSFont::fontWithName_size(&NSString::from_str("Andale Mono"), 12.0)
                 .expect("Default font should exist."),
             hint_margin_size: 3,
-            hint_bg_color: CGColor::new_generic_rgb(0.1, 0.1, 0.1, 0.8),
-            hint_fg_color: CGColor::new_generic_rgb(1.0, 1.0, 1.0, 1.0),
+            hint_bg_color: CGColor::new_generic_rgb(1.0, 1.0, 1.0, 0.8),
+            hint_fg_color: CGColor::new_generic_rgb(0.1, 0.1, 0.1, 1.0),
             hint_hl_color: CGColor::new_generic_rgb(1.0, 1.0, 1.0, 0.2),
             menu_font: NSFont::fontWithName_size(&NSString::from_str("Andale Mono"), 12.0)
                 .expect("Default font should exist."),
             menu_margin_size: 10,
-            menu_bg_color: CGColor::new_generic_rgb(0.1, 0.1, 0.1, 0.8),
-            menu_fg_color: CGColor::new_generic_rgb(1.0, 1.0, 1.0, 1.0),
+            menu_bg_color: CGColor::new_generic_rgb(1.0, 1.0, 1.0, 0.8),
+            menu_fg_color: CGColor::new_generic_rgb(0.1, 0.1, 0.1, 1.0),
         }
     }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TextAction {
-    command: String,
-    display: String,
+    pub command: String,
+    pub args: Vec<String>,
+    pub display: String,
+    pub key: char,
 }
 
 pub trait AlphabeticKey {
