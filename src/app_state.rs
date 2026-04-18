@@ -254,7 +254,7 @@ impl AppState {
                         _ => {
                             for action in &self.config.text_actions {
                                 if action.key.to_ascii_uppercase() == key_char {
-                                    if let Err(e) = std::process::Command::new(&action.command)
+                                    match std::process::Command::new(&action.command)
                                         .args(
                                             action
                                                 .args
@@ -262,8 +262,19 @@ impl AppState {
                                                 .map(|arg| arg.replace("{selection}", text)),
                                         )
                                         .spawn()
+                                        .and_then(|child| child.wait_with_output())
                                     {
-                                        eprintln!("Failed to run command: {e}");
+                                        Ok(o) => {
+                                            if !o.stdout.is_empty() {
+                                                println!(
+                                                    "Command output: {}",
+                                                    String::from_utf8_lossy(&o.stdout)
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Failed to run command: {e}");
+                                        }
                                     };
                                     break;
                                 }
