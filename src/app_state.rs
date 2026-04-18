@@ -1,12 +1,13 @@
 use std::collections::HashSet;
 
 use crate::{
+    action::{dictionary_lookup, text_to_clipboard},
     ax_element::{
         ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, Target, traverse_elements,
     },
     config::{AlphabeticKey, GlyphlowConfig},
     drawer::{GlyphlowDrawingWindow, create_overlay_window, get_main_screen_size},
-    os_util::{copy_to_clipboard, dictionary_lookup, get_focused_pid},
+    os_util::get_focused_pid,
 };
 use accessibility::{AXUIElement, AXUIElementActions};
 use objc2::{MainThreadMarker, rc::Retained};
@@ -229,7 +230,7 @@ impl AppState {
                 {
                     match key_char {
                         'C' => {
-                            copy_to_clipboard(text);
+                            text_to_clipboard(text);
                             self.deactivate();
                         }
                         'D' => {
