@@ -1,5 +1,8 @@
+use objc2::rc::Retained;
+use objc2_app_kit::NSFont;
 use objc2_core_foundation::CFRetained;
 use objc2_core_graphics::CGColor;
+use objc2_foundation::NSString;
 use rdev::Key;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -7,28 +10,38 @@ use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GlyphlowTheme {
-    pub font: String,
-    pub font_size: u8,
-    pub margin_size: u8,
-    pub hint_radius: u8,
+    #[serde(with = "nsfont_format")]
+    pub hint_font: Retained<NSFont>,
+    pub hint_margin_size: u8,
     #[serde(with = "cgcolor_format")]
     pub hint_bg_color: CFRetained<CGColor>,
     #[serde(with = "cgcolor_format")]
     pub hint_fg_color: CFRetained<CGColor>,
     #[serde(with = "cgcolor_format")]
     pub hint_hl_color: CFRetained<CGColor>,
+    #[serde(with = "nsfont_format")]
+    pub menu_font: Retained<NSFont>,
+    pub menu_margin_size: u8,
+    #[serde(with = "cgcolor_format")]
+    pub menu_bg_color: CFRetained<CGColor>,
+    #[serde(with = "cgcolor_format")]
+    pub menu_fg_color: CFRetained<CGColor>,
 }
 
 impl Default for GlyphlowTheme {
     fn default() -> Self {
         GlyphlowTheme {
-            font: "Andale Mono".to_string(),
-            font_size: 12,
-            margin_size: 3,
-            hint_radius: 5,
-            hint_bg_color: CGColor::new_generic_rgb(0.46, 0.62, 0.94, 0.63),
+            hint_font: NSFont::fontWithName_size(&NSString::from_str("Andale Mono"), 12.0)
+                .expect("Default font should exist."),
+            hint_margin_size: 3,
+            hint_bg_color: CGColor::new_generic_rgb(0.1, 0.1, 0.1, 0.8),
             hint_fg_color: CGColor::new_generic_rgb(1.0, 1.0, 1.0, 1.0),
             hint_hl_color: CGColor::new_generic_rgb(1.0, 1.0, 1.0, 0.2),
+            menu_font: NSFont::fontWithName_size(&NSString::from_str("Andale Mono"), 12.0)
+                .expect("Default font should exist."),
+            menu_margin_size: 10,
+            menu_bg_color: CGColor::new_generic_rgb(0.1, 0.1, 0.1, 0.8),
+            menu_fg_color: CGColor::new_generic_rgb(1.0, 1.0, 1.0, 1.0),
         }
     }
 }
@@ -266,7 +279,6 @@ mod cgcolor_format {
         unsafe {
             let ptr = CGColor::components(Some(color));
             if !ptr.is_null() {
-                // We know RGB has at least 3 components
                 let r = (*ptr.offset(0) * 255.0) as u8;
                 let g = (*ptr.offset(1) * 255.0) as u8;
                 let b = (*ptr.offset(2) * 255.0) as u8;
@@ -288,6 +300,44 @@ mod cgcolor_format {
         let s = String::deserialize(deserializer)?;
         cgcolor_from_hex(&s)
             .ok_or_else(|| serde::de::Error::custom(format!("Invalid color: {}", s)))
+    }
+}
+
+mod nsfont_format {
+    use super::*;
+    use serde::{Deserializer, Serializer};
+
+    /// --- Serialization: NSFont -> e.g. "Helvetica:15" ---
+    pub fn serialize<S>(font: &Retained<NSFont>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let name = NSFont::fontName(font);
+        let size = NSFont::pointSize(font);
+        let s = format!("{}:{}", name, size);
+        serializer.serialize_str(&s)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Retained<NSFont>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let mut iter = s.split(':');
+        let name = iter
+            .next()
+            .ok_or_else(|| serde::de::Error::custom("Missing font name."))?
+            .trim();
+        let size = if let Some(num_str) = iter.next() {
+            num_str
+                .parse::<f64>()
+                .map_err(|e| serde::de::Error::custom(format!("Invalid font size: {e}")))?
+        } else {
+            NSFont::systemFontSize()
+        };
+        NSFont::fontWithName_size(&NSString::from_str(name), size).ok_or_else(|| {
+            serde::de::Error::custom(format!("Failed to find font with name {name}."))
+        })
     }
 }
 

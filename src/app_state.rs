@@ -5,10 +5,7 @@ use crate::{
         ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, Target, traverse_elements,
     },
     config::{AlphabeticKey, GlyphlowConfig},
-    drawer::{
-        clear_window, create_overlay_window, draw_dictionary_popup, draw_hints,
-        get_main_screen_size,
-    },
+    drawer::{GlyphlowDrawingWindow, create_overlay_window, get_main_screen_size},
     os_util::{copy_to_clipboard, dictionary_lookup, get_focused_pid},
 };
 use accessibility::{AXUIElement, AXUIElementActions};
@@ -88,12 +85,11 @@ impl AppState {
     }
 
     fn clear_drawing(&mut self) {
-        clear_window(&self.window);
+        self.window.clear_window();
     }
 
-    fn draw(&self, boxes: &Vec<HintBox>) {
-        draw_hints(
-            &self.window,
+    fn draw(&self, boxes: &[HintBox]) {
+        self.window.draw_hints(
             boxes,
             &self.config.theme,
             self.key_prefix.len(),
@@ -161,11 +157,8 @@ impl AppState {
                     self.deactivate();
                 } else {
                     self.selected = Some(eoi.clone());
-                    // TODO: Draw action menu
-                    draw_dictionary_popup(
-                        &self.window,
+                    self.window.draw_menu(
                         "Select Action:\nCopy (C)\nDictionary (D)",
-                        &(self.screen_size.width / 2.0, self.screen_size.height / 2.0),
                         self.screen_size,
                         &self.config.theme,
                     );
@@ -195,11 +188,8 @@ impl AppState {
                             .is_some_and(|r| *k == r || self.pressed_keys.contains(&r))
                 }) {
                     self.mode = Mode::DashBoard;
-                    // TODO: Draw dashboard
-                    draw_dictionary_popup(
-                        &self.window,
+                    self.window.draw_menu(
                         "Select Mode:\nClick (C)\nText (T)",
-                        &(self.screen_size.width / 2.0, self.screen_size.height / 2.0),
                         self.screen_size,
                         &self.config.theme,
                     );
@@ -244,8 +234,7 @@ impl AppState {
                         }
                         'D' => {
                             if let Some(def_str) = dictionary_lookup(text) {
-                                draw_dictionary_popup(
-                                    &self.window,
+                                self.window.draw_dictionary_popup(
                                     &def_str,
                                     center,
                                     self.screen_size,
