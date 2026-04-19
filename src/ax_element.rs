@@ -21,17 +21,17 @@ pub enum RoleOfInterest {
     Button,
     TextField,
     StaticText,
-    TextArea,
     MenuItem,
+    Group,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ElementOfInterest {
     pub element: AXUIElement,
     pub context: Option<String>,
     // TODO: role based drawing
     pub role: RoleOfInterest,
-    pub center: (f64, f64),
+    pub frame: Frame,
 }
 
 impl ElementOfInterest {
@@ -39,21 +39,21 @@ impl ElementOfInterest {
         element: AXUIElement,
         context: Option<String>,
         role: RoleOfInterest,
-        center: (f64, f64),
+        frame: Frame,
     ) -> Self {
         Self {
             element,
             context,
             role,
-            center,
+            frame,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Frame {
-    top_left: CGPoint,
-    bottom_right: CGPoint,
+    pub top_left: CGPoint,
+    pub bottom_right: CGPoint,
 }
 
 impl Frame {
@@ -62,6 +62,29 @@ impl Frame {
             top_left: CGPoint { x: x1, y: y1 },
             bottom_right: CGPoint { x: x2, y: y2 },
         }
+    }
+
+    pub fn size(&self) -> (f64, f64) {
+        (
+            self.bottom_right.x - self.top_left.x,
+            self.bottom_right.y - self.top_left.y,
+        )
+    }
+
+    pub fn invert_y(&self, height: f64) -> Self {
+        Frame::new(
+            self.top_left.x,
+            height - self.top_left.y,
+            self.bottom_right.x,
+            height - self.bottom_right.y,
+        )
+    }
+
+    pub fn center(&self) -> (f64, f64) {
+        (
+            (self.top_left.x + self.bottom_right.x) / 2.0,
+            (self.top_left.y + self.bottom_right.y) / 2.0,
+        )
     }
 
     pub fn from_origion(size: CGSize) -> Self {
@@ -117,23 +140,25 @@ impl ElementCache {
     }
 
     pub fn add(&mut self, element: AXUIElement, context: Option<String>, role: RoleOfInterest) {
-        if let Some(center) = element.center()
+        if let Some(frame) = element.get_frame() {
+            let (x, y) = frame.center();
+            // f64 to u64 for hashing
+            let center = (x.to_bits(), y.to_bits());
             // NOTE: de-duplication for DOM elements
-            && !self
-                .seen_center
-                .contains(&(center.0.to_bits(), center.1.to_bits()))
-            && (role == RoleOfInterest::Button
-                || context
-                    .as_ref()
-                    // naive filtering
-                    .is_none_or(|ctx| {
-                        !ctx.is_empty() && !ctx.chars().all(|c| c.is_ascii_punctuation())
-                    }))
-        {
-            self.seen_center
-                .insert((center.0.to_bits(), center.1.to_bits()));
-            self.cache
-                .push(ElementOfInterest::new(element, context, role, center));
+            if !self.seen_center.contains(&center)
+                && (role == RoleOfInterest::Button
+                    || role == RoleOfInterest::Group
+                    || context
+                        .as_ref()
+                        // naive filtering
+                        .is_none_or(|ctx| {
+                            !ctx.is_empty() && !ctx.chars().all(|c| c.is_ascii_punctuation())
+                        }))
+            {
+                self.seen_center.insert(center);
+                self.cache
+                    .push(ElementOfInterest::new(element, context, role, frame));
+            }
         }
     }
 
@@ -168,13 +193,9 @@ impl ElementCache {
                 .iter()
                 .enumerate()
                 .map(|(idx, it)| {
-                    let ElementOfInterest { center, .. } = it;
-                    HintBox::new(
-                        Self::int_to_string(idx, digits),
-                        center.0,
-                        screen_height - center.1,
-                        idx,
-                    )
+                    let ElementOfInterest { frame, .. } = it;
+                    let (x, y) = frame.center();
+                    HintBox::new(Self::int_to_string(idx, digits), x, screen_height - y, idx)
                 })
                 .collect(),
         )
@@ -184,17 +205,11 @@ impl ElementCache {
 pub trait GetAttribute {
     fn get_attribute(&self, attribute_name: &str) -> Option<CFType>;
     fn get_attribute_string(&self, attribute_name: &str) -> Option<String>;
-    fn center(&self) -> Option<(f64, f64)>;
     fn get_pos(&self) -> Option<CGPoint>;
     fn get_size(&self) -> Option<CGSize>;
     fn get_frame(&self) -> Option<Frame>;
     fn inspect(&self);
-    fn visible_frame(
-        &self,
-        parent_frame: &Frame,
-        init_frame: &Frame,
-        role: &CFString,
-    ) -> Option<Frame>;
+    fn visible_frame(&self, parent_frame: &Frame, role: &CFString) -> Option<Frame>;
     fn is_clickable(&self) -> bool;
 }
 
@@ -203,15 +218,6 @@ impl GetAttribute for AXUIElement {
     fn get_attribute(&self, attribute_name: &str) -> Option<CFType> {
         self.attribute(&AXAttribute::new(&CFString::new(attribute_name)))
             .ok()
-    }
-
-    fn center(&self) -> Option<(f64, f64)> {
-        self.get_frame().map(|f| {
-            (
-                (f.top_left.x + f.bottom_right.x) / 2.0,
-                (f.top_left.y + f.bottom_right.y) / 2.0,
-            )
-        })
     }
 
     fn get_attribute_string(&self, attribute_name: &str) -> Option<String> {
@@ -253,12 +259,7 @@ impl GetAttribute for AXUIElement {
         }
     }
 
-    fn visible_frame(
-        &self,
-        parent_frame: &Frame,
-        init_frame: &Frame,
-        _role: &CFString,
-    ) -> Option<Frame> {
+    fn visible_frame(&self, parent_frame: &Frame, _role: &CFString) -> Option<Frame> {
         let is_hidden = self
             .get_attribute(kAXHiddenAttribute)
             .and_then(|val| val.downcast::<CFBoolean>())
@@ -272,14 +273,12 @@ impl GetAttribute for AXUIElement {
         // TODO: handle edge cases according to role
         // e.g. popup menu
         if let Some(this_frame) = self.get_frame() {
-            this_frame.intersect(parent_frame)?;
-            // HACK: For some fully visible structure of A -> B -> C,
+            // TODO: For some fully visible structure of A -> B -> C,
             // somehow the intersection of either A and B or B and C is not empty,
             // but the intersection of all those 3 is empty.
-            // We have to introduce the `init_frame` here, typically full screen,
-            // to make sure that C is at least within visible area.
+            // An extra mode that dives elements 1 level at a time, instead of flattening them all at once
             // TODO: trade-off among false-positive, false-negative and performance
-            this_frame.intersect(init_frame)
+            this_frame.intersect(parent_frame)
         } else {
             Some(parent_frame.clone())
         }
@@ -343,23 +342,50 @@ pub enum Target {
     #[default]
     Clickable,
     Text,
+    ChildElement,
 }
 
 pub fn traverse_elements(
     element: &AXUIElement,
     parent_frame: &Frame,
-    init_frame: &Frame,
     cache: &mut ElementCache,
     target: &Target,
 ) {
     if let Ok(role) = element.role() {
+        // Get child elements 1 level lower
+        // for false negatives aggressively filtered by the visibility checker
+        if *target == Target::ChildElement {
+            cache.clear();
+            if let Ok(children) = element.visible_children().or_else(|_| element.children()) {
+                for child in &children {
+                    if child.visible_frame(parent_frame, &role).is_some() {
+                        cache.add((*child).clone(), None, RoleOfInterest::Group);
+                    }
+                }
+            }
+            // Skip element levels where only 1 item available
+            if cache.cache.len() == 1
+                && let Some(ElementOfInterest { element, .. }) = cache.cache.first()
+            {
+                traverse_elements(
+                    &element.clone(),
+                    &element.get_frame().unwrap_or(parent_frame.clone()),
+                    cache,
+                    target,
+                );
+            }
+
+            return;
+        }
+
         // if invisible, return early
-        let Some(new_frame) = element.visible_frame(parent_frame, init_frame, &role) else {
+        let Some(new_frame) = element.visible_frame(parent_frame, &role) else {
             return;
         };
 
         // TODO: Fine-grained control
         // 1. Image
+        // 2. AXCell click
         #[allow(non_upper_case_globals)]
         match role.to_string().as_str() {
             kAXPopUpButtonRole | kAXButtonRole | "AXRadioButton" => {
@@ -399,11 +425,13 @@ pub fn traverse_elements(
             },
             // TODO: select only the visible part, `kAXVisibleCharacterRangeAttribute`
             kAXTextFieldRole | kAXTextAreaRole => {
-                // element.inspect();
                 if *target == Target::Text
                     && let Some(value) = element.get_attribute_string(kAXValueAttribute)
                 {
                     cache.add(element.clone(), Some(value), RoleOfInterest::StaticText);
+                } else if element.is_clickable() {
+                    // element.inspect();
+                    cache.add(element.clone(), None, RoleOfInterest::TextField);
                 }
             }
             kAXMenuBarRole => {
@@ -429,7 +457,7 @@ pub fn traverse_elements(
 
         if let Ok(children) = element.visible_children().or_else(|_| element.children()) {
             for child in &children {
-                traverse_elements(&child, &new_frame, init_frame, cache, target);
+                traverse_elements(&child, &new_frame, cache, target);
             }
         }
     }

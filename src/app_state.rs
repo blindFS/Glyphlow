@@ -3,7 +3,8 @@ use std::collections::HashSet;
 use crate::{
     action::{dictionary_lookup, text_to_clipboard},
     ax_element::{
-        ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, Target, traverse_elements,
+        ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, RoleOfInterest, Target,
+        traverse_elements,
     },
     config::{AlphabeticKey, GlyphlowConfig},
     drawer::{GlyphlowDrawingWindow, create_overlay_window, get_main_screen_size},
@@ -75,6 +76,7 @@ impl AppState {
     fn deactivate(&mut self) {
         self.mode = Mode::Idle;
         self.clear_cache();
+        self.selected = None;
         self.clear_drawing();
     }
 
@@ -82,7 +84,6 @@ impl AppState {
         self.hint_boxes.clear();
         self.element_cache.clear();
         self.key_prefix.clear();
-        self.selected = None;
     }
 
     fn clear_drawing(&mut self) {
@@ -98,6 +99,16 @@ impl AppState {
         );
     }
 
+    fn draw_frame_boxes(&self) {
+        let frames = self
+            .element_cache
+            .cache
+            .iter()
+            .map(|eoi| eoi.frame.invert_y(self.screen_size.height))
+            .collect::<Vec<_>>();
+        self.window.draw_frame_boxes(&frames);
+    }
+
     fn draw_text_action_menu(&self, text: &str) {
         let mut msg = format!("Select action for text: `{text}`\nCopy (C)\nDictionary (D)");
         for action in self.config.text_actions.iter() {
@@ -111,32 +122,45 @@ impl AppState {
     fn activate(&mut self, target: &Target) {
         self.target = target.clone();
 
-        if let Some(pid) = get_focused_pid() {
-            let focused_window = AXUIElement::application(pid);
-            let window_frame = focused_window
-                .get_frame()
-                .unwrap_or_else(|| Frame::from_origion(self.screen_size));
+        if self.selected.is_none() {
+            self.selected = get_focused_pid().map(|pid| {
+                let focused_window = AXUIElement::application(pid);
+                let window_frame = focused_window
+                    .get_frame()
+                    .unwrap_or_else(|| Frame::from_origion(self.screen_size));
 
-            self.clear_cache();
+                ElementOfInterest::new(
+                    focused_window,
+                    None,
+                    RoleOfInterest::Group,
+                    window_frame.clone(),
+                )
+            });
+        }
+
+        self.clear_cache();
+        if let Some(ElementOfInterest { element, .. }) = self.selected.as_ref() {
             traverse_elements(
-                &focused_window,
-                &window_frame,
-                &window_frame,
+                element,
+                // Very loose visibility constraint
+                &Frame::from_origion(self.screen_size),
                 &mut self.element_cache,
                 target,
             );
+        }
 
-            if !self.element_cache.cache.is_empty() {
-                self.mode = Mode::Filtering;
+        if !self.element_cache.cache.is_empty() {
+            self.mode = Mode::Filtering;
 
-                let (hint_width, new_boxes) =
-                    self.element_cache.hint_boxes(self.screen_size.height);
-                self.hint_width = hint_width;
-                self.hint_boxes.extend(new_boxes);
-                self.draw_hints(&self.hint_boxes);
-            } else {
-                self.clear_drawing();
+            let (hint_width, new_boxes) = self.element_cache.hint_boxes(self.screen_size.height);
+            self.hint_width = hint_width;
+            self.hint_boxes.extend(new_boxes);
+            self.draw_hints(&self.hint_boxes);
+            if self.target == Target::ChildElement {
+                self.draw_frame_boxes();
             }
+        } else {
+            self.clear_drawing();
         }
     }
 
@@ -155,7 +179,7 @@ impl AppState {
             .cloned()
             .collect::<Vec<_>>();
 
-        // Only 1 remaining, click and exit
+        // Only 1 remaining, take some actions
         if filtered_boxes.len() == 1 {
             if let Some(HintBox { idx, .. }) = filtered_boxes.first()
                 && let Some(
@@ -164,14 +188,36 @@ impl AppState {
                     },
                 ) = self.element_cache.cache.get(*idx)
             {
-                if self.target == Target::Clickable {
-                    let _ = element.press();
-                    // let _ = element.show_menu();
-                    self.deactivate();
-                } else if let Some(text) = context {
-                    self.selected = Some(eoi.clone());
-                    self.draw_text_action_menu(text);
-                    self.mode = Mode::ActionMenu;
+                match self.target {
+                    Target::Clickable => {
+                        if let Err(e) = element.press() {
+                            eprintln!("Failed to click element: {e}");
+                        };
+                        // let _ = element.show_menu();
+                        self.deactivate();
+                    }
+                    Target::Text => {
+                        if let Some(text) = context {
+                            self.selected = Some(eoi.clone());
+                            self.draw_text_action_menu(text);
+                            self.mode = Mode::ActionMenu;
+                        }
+                    }
+                    Target::ChildElement => {
+                        // eoi.element.inspect();
+                        self.selected = Some(eoi.clone());
+                        self.activate(&Target::ChildElement);
+                        if self.element_cache.cache.is_empty() {
+                            // select actions for current selected element
+                            // TODO: optimize UX for selected element
+                            self.mode = Mode::DashBoard;
+                            self.window.draw_menu(
+                                "Select Mode:\nClick (C)\nText (T)\nElement (E)",
+                                self.screen_size,
+                                &self.config.theme,
+                            );
+                        }
+                    }
                 }
             }
         } else if filtered_boxes.is_empty() {
@@ -198,7 +244,7 @@ impl AppState {
                 }) {
                     self.mode = Mode::DashBoard;
                     self.window.draw_menu(
-                        "Select Mode:\nClick (C)\nText (T)",
+                        "Select Mode:\nClick (C)\nText (T)\nElement (E)",
                         self.screen_size,
                         &self.config.theme,
                     );
@@ -214,6 +260,9 @@ impl AppState {
                     }
                     'T' => {
                         self.activate(&Target::Text);
+                    }
+                    'E' => {
+                        self.activate(&Target::ChildElement);
                     }
                     _ => {
                         self.deactivate();
@@ -232,7 +281,7 @@ impl AppState {
             Mode::ActionMenu => {
                 let Some(ElementOfInterest {
                     context: Some(text),
-                    center,
+                    frame,
                     ..
                 }) = self.selected.as_ref()
                 else {
@@ -243,6 +292,9 @@ impl AppState {
                 // Chain different actions
                 let mut new_text: Option<String> = None;
 
+                // TODO:
+                // 1. Multilingual tokenization with charabia
+                // 2. URL detection and handling
                 match key_char {
                     'C' => {
                         text_to_clipboard(text);
@@ -251,7 +303,7 @@ impl AppState {
                         if let Some(def_str) = dictionary_lookup(text) {
                             self.window.draw_dictionary_popup(
                                 &def_str,
-                                center,
+                                &frame.center(),
                                 self.screen_size,
                                 &self.config.theme,
                             );

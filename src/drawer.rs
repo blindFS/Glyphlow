@@ -12,7 +12,10 @@ use objc2_core_graphics::{CGColor, CGMutablePath};
 use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer, kCAAlignmentCenter};
 
-use crate::{ax_element::HintBox, config::GlyphlowTheme};
+use crate::{
+    ax_element::{Frame, HintBox},
+    config::GlyphlowTheme,
+};
 
 pub fn get_main_screen_size(mtm: MainThreadMarker) -> CGSize {
     let screens = NSScreen::screens(mtm);
@@ -47,8 +50,8 @@ pub fn create_overlay_window(mtm: MainThreadMarker, screen_size: CGSize) -> Reta
 }
 
 pub trait GlyphlowDrawingWindow {
+    fn get_root_layer(&self) -> Option<Retained<CALayer>>;
     fn clear_window(&self) -> Option<Retained<CALayer>>;
-
     fn draw_hints(
         &self,
         hints: &[HintBox],
@@ -56,7 +59,6 @@ pub trait GlyphlowDrawingWindow {
         key_prefix_len: usize,
         screen_size: CGSize,
     );
-
     fn draw_dictionary_popup(
         &self,
         text: &str,
@@ -64,11 +66,18 @@ pub trait GlyphlowDrawingWindow {
         screen_size: CGSize,
         theme: &GlyphlowTheme,
     );
-
     fn draw_menu(&self, text: &str, screen_size: CGSize, theme: &GlyphlowTheme);
+    fn draw_frame_boxes(&self, frames: &[Frame]);
 }
 
 impl GlyphlowDrawingWindow for NSWindow {
+    fn get_root_layer(&self) -> Option<Retained<CALayer>> {
+        let content_view = self.contentView()?;
+        content_view.setWantsLayer(true);
+        let root_layer = content_view.layer()?;
+        Some(root_layer)
+    }
+
     fn clear_window(&self) -> Option<Retained<CALayer>> {
         let content_view = self.contentView()?;
         content_view.setWantsLayer(true);
@@ -206,6 +215,24 @@ impl GlyphlowDrawingWindow for NSWindow {
             screen_size,
         );
         root_layer.addSublayer(&text_box);
+    }
+
+    // TODO: guarantee the order of clear_window, draw_hints, draw_frames
+    fn draw_frame_boxes(&self, frames: &[Frame]) {
+        let root_layer = self.get_root_layer().expect("Failed to get root layer.");
+
+        for frame in frames {
+            let container = CALayer::new();
+            let origin = frame.top_left;
+            let origin = NSPoint::new(origin.x, origin.y);
+            let (w, h) = frame.size();
+            container.setFrame(NSRect::new(origin, NSSize::new(w, h)));
+            container.setBorderWidth(3.0);
+            container.setBorderColor(Some(&NSColor::whiteColor().CGColor()));
+            container.setZPosition(-1.0);
+
+            root_layer.addSublayer(&container);
+        }
     }
 }
 
