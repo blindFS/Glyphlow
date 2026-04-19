@@ -49,7 +49,7 @@ pub fn create_overlay_window(mtm: MainThreadMarker, screen_size: CGSize) -> Reta
     }
 }
 
-// TODO: guarantee the order of clear_window, draw_hints, draw_frames
+// TODO: notification
 pub trait GlyphlowDrawingLayer {
     fn from_window(window: &Retained<NSWindow>) -> Option<Retained<CALayer>>;
     fn clear(&self);
@@ -181,7 +181,7 @@ impl GlyphlowDrawingLayer for CALayer {
             (screen_size.width / 2.0, screen_size.height / 2.0),
             screen_size,
         );
-        text_box.setBorderWidth(3.0);
+        text_box.setBorderWidth(2.0);
         text_box.setBorderColor(Some(&theme.menu_fg_color));
         self.addSublayer(&text_box);
     }
@@ -198,7 +198,7 @@ impl GlyphlowDrawingLayer for CALayer {
             (screen_size.width / 2.0, screen_size.height / 2.0),
             screen_size,
         );
-        text_box.setBorderWidth(3.0);
+        text_box.setBorderWidth(2.0);
         text_box.setBorderColor(Some(&theme.menu_fg_color));
         self.addSublayer(&text_box);
     }

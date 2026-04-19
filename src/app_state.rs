@@ -10,7 +10,8 @@ use crate::{
     drawer::{GlyphlowDrawingLayer, create_overlay_window, get_main_screen_size},
     os_util::get_focused_pid,
 };
-use accessibility::{AXUIElement, AXUIElementActions};
+use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
+use core_foundation::string::CFString;
 use objc2::{MainThreadMarker, rc::Retained};
 use objc2_core_foundation::CGSize;
 use objc2_quartz_core::CALayer;
@@ -22,6 +23,7 @@ enum Mode {
     DashBoard,
     Filtering,
     TextActionMenu,
+    ElementActionMenu,
 }
 
 /// Global state for Glyphlow,
@@ -155,6 +157,13 @@ impl AppState {
         }
     }
 
+    fn press_on_element(element: &AXUIElement) {
+        if let Err(e) = element.press() {
+            eprintln!("Failed to click element: {e}");
+        };
+        // let _ = element.show_menu();
+    }
+
     /// Filter the UI elements and redraw hints.
     fn filter_by_key(&mut self, key_char: char) {
         if key_char == '-' {
@@ -181,10 +190,7 @@ impl AppState {
                 self.clear_drawing();
                 match self.target {
                     Target::Clickable => {
-                        if let Err(e) = element.press() {
-                            eprintln!("Failed to click element: {e}");
-                        };
-                        // let _ = element.show_menu();
+                        Self::press_on_element(element);
                         self.deactivate();
                     }
                     Target::Text => {
@@ -199,17 +205,17 @@ impl AppState {
                         self.selected = Some(eoi.clone());
                         // TODO: optimize UX for selected element
                         // 1. Parent frame
-                        // 2. Color diff
-                        // 3. Action menu for parent
+                        // 2. Action menu for parent
                         self.activate(&Target::ChildElement);
                         if self.element_cache.cache.is_empty() {
                             // select actions for current selected element
-                            self.mode = Mode::DashBoard;
+                            // TODO: screen shot
                             self.window.draw_menu(
-                                "Select Mode:\n\nClick (C)\nText (T)\nElement (E)",
+                                "Select Mode:\n\nPress (P)\nText (T)",
                                 self.screen_size,
                                 &self.config.theme,
                             );
+                            self.mode = Mode::ElementActionMenu;
                         }
                     }
                 }
@@ -238,7 +244,7 @@ impl AppState {
                 }) {
                     self.mode = Mode::DashBoard;
                     self.window.draw_menu(
-                        "Select Mode:\n\nClick (C)\nText (T)\nElement (E)",
+                        "Select Mode:\n\nPress (P)\nText (T)\nElement (E)",
                         self.screen_size,
                         &self.config.theme,
                     );
@@ -249,7 +255,7 @@ impl AppState {
             }
             Mode::DashBoard => {
                 match key_char {
-                    'C' => {
+                    'P' => {
                         self.activate(&Target::Clickable);
                     }
                     'T' => {
@@ -269,6 +275,42 @@ impl AppState {
                     self.deactivate();
                 } else {
                     self.filter_by_key(key_char);
+                }
+                true
+            }
+            Mode::ElementActionMenu => {
+                match key_char {
+                    'P' => {
+                        if let Some(ElementOfInterest { element, .. }) = self.selected.as_ref() {
+                            Self::press_on_element(element);
+                        }
+                        self.deactivate();
+                    }
+                    'T' => {
+                        if let Some(ElementOfInterest {
+                            element, context, ..
+                        }) = self.selected.as_mut()
+                            && let Ok(text) = element
+                                .value()
+                                .and_then(|val| {
+                                    val.downcast::<CFString>()
+                                        .ok_or(accessibility::Error::NotFound)
+                                })
+                                .or_else(|_| element.label_value())
+                                .or_else(|_| element.title())
+                                .map(|s| s.to_string())
+                        {
+                            *context = Some(text.clone());
+                            self.clear_drawing();
+                            self.draw_text_action_menu(&text);
+                            self.mode = Mode::TextActionMenu;
+                        } else {
+                            self.deactivate();
+                        }
+                    }
+                    _ => {
+                        self.deactivate();
+                    }
                 }
                 true
             }

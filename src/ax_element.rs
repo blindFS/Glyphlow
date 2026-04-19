@@ -81,6 +81,7 @@ impl Frame {
         )
     }
 
+    // FIXME: don't go out of screen
     pub fn center(&self) -> (f64, f64) {
         (
             (self.top_left.x + self.bottom_right.x) / 2.0,
