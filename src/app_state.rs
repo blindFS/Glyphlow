@@ -7,13 +7,13 @@ use crate::{
         traverse_elements,
     },
     config::{AlphabeticKey, GlyphlowConfig},
-    drawer::{GlyphlowDrawingWindow, create_overlay_window, get_main_screen_size},
+    drawer::{GlyphlowDrawingLayer, create_overlay_window, get_main_screen_size},
     os_util::get_focused_pid,
 };
 use accessibility::{AXUIElement, AXUIElementActions};
 use objc2::{MainThreadMarker, rc::Retained};
-use objc2_app_kit::NSWindow;
 use objc2_core_foundation::CGSize;
+use objc2_quartz_core::CALayer;
 use rdev::Key;
 
 #[derive(PartialEq)]
@@ -21,7 +21,7 @@ enum Mode {
     Idle,
     DashBoard,
     Filtering,
-    ActionMenu,
+    TextActionMenu,
 }
 
 /// Global state for Glyphlow,
@@ -35,7 +35,7 @@ pub struct AppState {
     element_cache: ElementCache,
     key_prefix: String,
     screen_size: CGSize,
-    window: Retained<NSWindow>,
+    window: Retained<CALayer>,
     /// Which elements of interest to look for
     target: Target,
     config: GlyphlowConfig,
@@ -55,6 +55,7 @@ impl AppState {
         let screen_size = get_main_screen_size(mtm);
         let window = create_overlay_window(mtm, screen_size);
         window.makeKeyAndOrderFront(None);
+        let window = CALayer::from_window(&window).expect("Failed to get root layer of window.");
 
         let config = GlyphlowConfig::load_config();
 
@@ -86,11 +87,12 @@ impl AppState {
         self.key_prefix.clear();
     }
 
-    fn clear_drawing(&mut self) {
-        self.window.clear_window();
+    fn clear_drawing(&self) {
+        self.window.clear();
     }
 
     fn draw_hints(&self, boxes: &[HintBox]) {
+        self.clear_drawing();
         self.window.draw_hints(
             boxes,
             &self.config.theme,
@@ -99,18 +101,8 @@ impl AppState {
         );
     }
 
-    fn draw_frame_boxes(&self) {
-        let frames = self
-            .element_cache
-            .cache
-            .iter()
-            .map(|eoi| eoi.frame.invert_y(self.screen_size.height))
-            .collect::<Vec<_>>();
-        self.window.draw_frame_boxes(&frames);
-    }
-
     fn draw_text_action_menu(&self, text: &str) {
-        let mut msg = format!("Select action for text: `{text}`\nCopy (C)\nDictionary (D)");
+        let mut msg = format!("Select action for text: `{text}`\n\nCopy (C)\nDictionary (D)");
         for action in self.config.text_actions.iter() {
             msg.push_str(&format!("\n{} ({})", action.display, action.key));
         }
@@ -152,20 +144,18 @@ impl AppState {
         if !self.element_cache.cache.is_empty() {
             self.mode = Mode::Filtering;
 
-            let (hint_width, new_boxes) = self.element_cache.hint_boxes(self.screen_size.height);
+            let (hint_width, new_boxes) = self
+                .element_cache
+                .hint_boxes(self.screen_size.height, &self.config.theme.frame_colors);
             self.hint_width = hint_width;
             self.hint_boxes.extend(new_boxes);
             self.draw_hints(&self.hint_boxes);
-            if self.target == Target::ChildElement {
-                self.draw_frame_boxes();
-            }
         } else {
             self.clear_drawing();
         }
     }
 
     /// Filter the UI elements and redraw hints.
-    /// If only 1 remaining, click and exit
     fn filter_by_key(&mut self, key_char: char) {
         if key_char == '-' {
             self.key_prefix.pop();
@@ -188,6 +178,7 @@ impl AppState {
                     },
                 ) = self.element_cache.cache.get(*idx)
             {
+                self.clear_drawing();
                 match self.target {
                     Target::Clickable => {
                         if let Err(e) = element.press() {
@@ -200,19 +191,22 @@ impl AppState {
                         if let Some(text) = context {
                             self.selected = Some(eoi.clone());
                             self.draw_text_action_menu(text);
-                            self.mode = Mode::ActionMenu;
+                            self.mode = Mode::TextActionMenu;
                         }
                     }
                     Target::ChildElement => {
                         // eoi.element.inspect();
                         self.selected = Some(eoi.clone());
+                        // TODO: optimize UX for selected element
+                        // 1. Parent frame
+                        // 2. Color diff
+                        // 3. Action menu for parent
                         self.activate(&Target::ChildElement);
                         if self.element_cache.cache.is_empty() {
                             // select actions for current selected element
-                            // TODO: optimize UX for selected element
                             self.mode = Mode::DashBoard;
                             self.window.draw_menu(
-                                "Select Mode:\nClick (C)\nText (T)\nElement (E)",
+                                "Select Mode:\n\nClick (C)\nText (T)\nElement (E)",
                                 self.screen_size,
                                 &self.config.theme,
                             );
@@ -244,7 +238,7 @@ impl AppState {
                 }) {
                     self.mode = Mode::DashBoard;
                     self.window.draw_menu(
-                        "Select Mode:\nClick (C)\nText (T)\nElement (E)",
+                        "Select Mode:\n\nClick (C)\nText (T)\nElement (E)",
                         self.screen_size,
                         &self.config.theme,
                     );
@@ -278,10 +272,9 @@ impl AppState {
                 }
                 true
             }
-            Mode::ActionMenu => {
+            Mode::TextActionMenu => {
                 let Some(ElementOfInterest {
                     context: Some(text),
-                    frame,
                     ..
                 }) = self.selected.as_ref()
                 else {
@@ -291,6 +284,10 @@ impl AppState {
 
                 // Chain different actions
                 let mut new_text: Option<String> = None;
+                let mut keep_drawing = false;
+
+                // Clear old menu no matter which action is taken
+                self.clear_drawing();
 
                 // TODO:
                 // 1. Multilingual tokenization with charabia
@@ -298,18 +295,30 @@ impl AppState {
                 match key_char {
                     'C' => {
                         text_to_clipboard(text);
+                        // TODO: better notification
+                        self.window.draw_menu(
+                            "Copied to clipboard.",
+                            self.screen_size,
+                            &self.config.theme,
+                        );
+                        keep_drawing = true;
                     }
                     'D' => {
                         if let Some(def_str) = dictionary_lookup(text) {
                             self.window.draw_dictionary_popup(
                                 &def_str,
-                                &frame.center(),
                                 self.screen_size,
                                 &self.config.theme,
                             );
-                            // HACK: don't call deactivate to close the dictionary window
-                            new_text = Some(String::new());
+                        } else {
+                            // TODO: better notification
+                            self.window.draw_menu(
+                                "No definition found.",
+                                self.screen_size,
+                                &self.config.theme,
+                            );
                         }
+                        keep_drawing = true;
                     }
                     _ => {
                         for action in &self.config.text_actions {
@@ -332,6 +341,7 @@ impl AppState {
                                                     .trim_end_matches('\n')
                                                     .to_string(),
                                             );
+                                            keep_drawing = true;
                                         }
                                         if !o.stderr.is_empty() {
                                             eprintln!(
@@ -350,16 +360,18 @@ impl AppState {
                     }
                 }
 
-                if let Some(new_text) = new_text {
-                    if !new_text.is_empty()
-                        && let Some(selected) = self.selected.as_mut()
-                    {
-                        selected.context = Some(new_text.clone());
-                        self.draw_text_action_menu(&new_text);
-                    }
-                } else {
+                if let Some(new_txt) = new_text
+                    && !new_txt.is_empty()
+                    && let Some(selected) = self.selected.as_mut()
+                {
+                    selected.context = Some(new_txt.clone());
+                    self.draw_text_action_menu(&new_txt);
+                }
+
+                if !keep_drawing {
                     self.deactivate();
                 }
+
                 true
             }
         }

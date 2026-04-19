@@ -49,9 +49,10 @@ pub fn create_overlay_window(mtm: MainThreadMarker, screen_size: CGSize) -> Reta
     }
 }
 
-pub trait GlyphlowDrawingWindow {
-    fn get_root_layer(&self) -> Option<Retained<CALayer>>;
-    fn clear_window(&self) -> Option<Retained<CALayer>>;
+// TODO: guarantee the order of clear_window, draw_hints, draw_frames
+pub trait GlyphlowDrawingLayer {
+    fn from_window(window: &Retained<NSWindow>) -> Option<Retained<CALayer>>;
+    fn clear(&self);
     fn draw_hints(
         &self,
         hints: &[HintBox],
@@ -59,33 +60,25 @@ pub trait GlyphlowDrawingWindow {
         key_prefix_len: usize,
         screen_size: CGSize,
     );
-    fn draw_dictionary_popup(
-        &self,
-        text: &str,
-        pos: &(f64, f64),
-        screen_size: CGSize,
-        theme: &GlyphlowTheme,
-    );
+    fn draw_dictionary_popup(&self, text: &str, screen_size: CGSize, theme: &GlyphlowTheme);
     fn draw_menu(&self, text: &str, screen_size: CGSize, theme: &GlyphlowTheme);
-    fn draw_frame_boxes(&self, frames: &[Frame]);
+    fn draw_frame_box(&self, frames: &Frame, color: &CFRetained<CGColor>);
 }
 
-impl GlyphlowDrawingWindow for NSWindow {
-    fn get_root_layer(&self) -> Option<Retained<CALayer>> {
-        let content_view = self.contentView()?;
-        content_view.setWantsLayer(true);
-        let root_layer = content_view.layer()?;
-        Some(root_layer)
+// TODO: notification
+impl GlyphlowDrawingLayer for CALayer {
+    fn clear(&self) {
+        unsafe {
+            self.setSublayers(None);
+        }
     }
 
-    fn clear_window(&self) -> Option<Retained<CALayer>> {
-        let content_view = self.contentView()?;
+    fn from_window(window: &Retained<NSWindow>) -> Option<Retained<CALayer>> {
+        let content_view = window.contentView()?;
         content_view.setWantsLayer(true);
         let root_layer = content_view.layer()?;
         // Clear existing sublayers
-        unsafe {
-            root_layer.setSublayers(None);
-        }
+        root_layer.clear();
         Some(root_layer)
     }
 
@@ -96,10 +89,6 @@ impl GlyphlowDrawingWindow for NSWindow {
         key_prefix_len: usize,
         screen_size: CGSize,
     ) {
-        let root_layer = self
-            .clear_window()
-            .expect("Failed to get root layer of the window.");
-
         // Geometry determined by font size
         let font_size = NSFont::pointSize(&theme.hint_font);
         let tri_height = font_size / 2.0;
@@ -113,6 +102,11 @@ impl GlyphlowDrawingWindow for NSWindow {
 
         unsafe {
             for hint in hints {
+                let bg_color = hint.color.as_ref().unwrap_or(bg_color);
+
+                if let Some(frame) = &hint.frame {
+                    self.draw_frame_box(frame, bg_color);
+                }
                 // Create NSMutableAttributedString first to estimate the size
                 // Highlight prefixed keys
                 let label_string = NSString::from_str(&hint.label);
@@ -170,21 +164,12 @@ impl GlyphlowDrawingWindow for NSWindow {
                 ));
 
                 box_layer.addSublayer(&tri_layer);
-                root_layer.addSublayer(&box_layer);
+                self.addSublayer(&box_layer);
             }
         }
     }
 
-    fn draw_dictionary_popup(
-        &self,
-        text: &str,
-        center: &(f64, f64),
-        screen_size: CGSize,
-        theme: &GlyphlowTheme,
-    ) {
-        let root_layer = self
-            .clear_window()
-            .expect("Failed to get root layer of the window.");
+    fn draw_dictionary_popup(&self, text: &str, screen_size: CGSize, theme: &GlyphlowTheme) {
         let text_box = draw_text_box(
             text,
             false,
@@ -193,16 +178,15 @@ impl GlyphlowDrawingWindow for NSWindow {
             &theme.menu_fg_color,
             &theme.menu_bg_color,
             theme.menu_margin_size as f64,
-            (center.0, screen_size.height - center.1),
+            (screen_size.width / 2.0, screen_size.height / 2.0),
             screen_size,
         );
-        root_layer.addSublayer(&text_box);
+        text_box.setBorderWidth(3.0);
+        text_box.setBorderColor(Some(&theme.menu_fg_color));
+        self.addSublayer(&text_box);
     }
 
     fn draw_menu(&self, text: &str, screen_size: CGSize, theme: &GlyphlowTheme) {
-        let root_layer = self
-            .clear_window()
-            .expect("Failed to get root layer of the window.");
         let text_box = draw_text_box(
             text,
             false,
@@ -214,25 +198,22 @@ impl GlyphlowDrawingWindow for NSWindow {
             (screen_size.width / 2.0, screen_size.height / 2.0),
             screen_size,
         );
-        root_layer.addSublayer(&text_box);
+        text_box.setBorderWidth(3.0);
+        text_box.setBorderColor(Some(&theme.menu_fg_color));
+        self.addSublayer(&text_box);
     }
 
-    // TODO: guarantee the order of clear_window, draw_hints, draw_frames
-    fn draw_frame_boxes(&self, frames: &[Frame]) {
-        let root_layer = self.get_root_layer().expect("Failed to get root layer.");
+    fn draw_frame_box(&self, frame: &Frame, color: &CFRetained<CGColor>) {
+        let container = CALayer::new();
+        let origin = frame.top_left;
+        let origin = NSPoint::new(origin.x, origin.y);
+        let (w, h) = frame.size();
+        container.setFrame(NSRect::new(origin, NSSize::new(w, h)));
+        container.setBorderWidth(2.0);
+        container.setBorderColor(Some(color));
+        container.setZPosition(-1.0);
 
-        for frame in frames {
-            let container = CALayer::new();
-            let origin = frame.top_left;
-            let origin = NSPoint::new(origin.x, origin.y);
-            let (w, h) = frame.size();
-            container.setFrame(NSRect::new(origin, NSSize::new(w, h)));
-            container.setBorderWidth(3.0);
-            container.setBorderColor(Some(&NSColor::whiteColor().CGColor()));
-            container.setZPosition(-1.0);
-
-            root_layer.addSublayer(&container);
-        }
+        self.addSublayer(&container);
     }
 }
 

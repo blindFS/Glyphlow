@@ -26,6 +26,31 @@ pub struct GlyphlowTheme {
     pub menu_bg_color: CFRetained<CGColor>,
     #[serde(with = "cgcolor_format")]
     pub menu_fg_color: CFRetained<CGColor>,
+    #[serde(with = "vec_cgcolor_format")]
+    pub frame_colors: Vec<CFRetained<CGColor>>,
+}
+
+fn hex_to_rgba(hex: &str) -> Option<(f64, f64, f64, f64)> {
+    let hex = hex.trim_start_matches('#');
+    let to_float = |i: std::ops::Range<usize>| -> Option<f64> {
+        hex.get(i)
+            .and_then(|s| u8::from_str_radix(s, 16).ok())
+            .map(|iu8| iu8 as f64 / 255.0)
+    };
+    let r = to_float(0..2)?;
+    let g = to_float(2..4)?;
+    let b = to_float(4..6)?;
+    let a = if hex.len() == 8 { to_float(6..8)? } else { 1.0 };
+    Some((r, g, b, a))
+}
+
+fn color_try_from_hex(hex: &str) -> Option<CFRetained<CGColor>> {
+    let (r, g, b, a) = hex_to_rgba(hex)?;
+    Some(CGColor::new_generic_rgb(r, g, b, a))
+}
+
+fn color_from_hex(hex: &str) -> CFRetained<CGColor> {
+    color_try_from_hex(hex).expect("Invalid color")
 }
 
 impl Default for GlyphlowTheme {
@@ -34,14 +59,19 @@ impl Default for GlyphlowTheme {
             hint_font: NSFont::fontWithName_size(&NSString::from_str("Andale Mono"), 12.0)
                 .expect("Default font should exist."),
             hint_margin_size: 3,
-            hint_bg_color: CGColor::new_generic_rgb(1.0, 1.0, 1.0, 0.8),
-            hint_fg_color: CGColor::new_generic_rgb(0.1, 0.1, 0.1, 1.0),
-            hint_hl_color: CGColor::new_generic_rgb(1.0, 1.0, 1.0, 0.2),
+            hint_bg_color: color_from_hex("#769ff0a0"),
+            hint_fg_color: color_from_hex("#111726ff"),
+            hint_hl_color: color_from_hex("#11172620"),
             menu_font: NSFont::fontWithName_size(&NSString::from_str("Andale Mono"), 12.0)
                 .expect("Default font should exist."),
             menu_margin_size: 10,
-            menu_bg_color: CGColor::new_generic_rgb(1.0, 1.0, 1.0, 0.8),
-            menu_fg_color: CGColor::new_generic_rgb(0.1, 0.1, 0.1, 1.0),
+            menu_bg_color: color_from_hex("#111726a0"),
+            menu_fg_color: color_from_hex("#a3aed2ff"),
+            frame_colors: vec![
+                color_from_hex("#e0af68ff"),
+                color_from_hex("#9ece6aff"),
+                color_from_hex("#bb9af7ff"),
+            ],
         }
     }
 }
@@ -257,25 +287,6 @@ mod cgcolor_format {
     use super::*;
     use serde::{Deserializer, Serializer};
 
-    fn hex_to_rgba(hex: &str) -> Option<(f64, f64, f64, f64)> {
-        let hex = hex.trim_start_matches('#');
-        let to_float = |i: std::ops::Range<usize>| -> Option<f64> {
-            hex.get(i)
-                .and_then(|s| u8::from_str_radix(s, 16).ok())
-                .map(|iu8| iu8 as f64 / 255.0)
-        };
-        let r = to_float(0..2)?;
-        let g = to_float(2..4)?;
-        let b = to_float(4..6)?;
-        let a = if hex.len() == 8 { to_float(6..8)? } else { 1.0 };
-        Some((r, g, b, a))
-    }
-
-    fn cgcolor_from_hex(hex: &str) -> Option<CFRetained<CGColor>> {
-        let (r, g, b, a) = hex_to_rgba(hex)?;
-        Some(CGColor::new_generic_rgb(r, g, b, a))
-    }
-
     pub fn serialize<S>(color: &CFRetained<CGColor>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -302,7 +313,7 @@ mod cgcolor_format {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        cgcolor_from_hex(&s)
+        color_try_from_hex(&s)
             .ok_or_else(|| serde::de::Error::custom(format!("Invalid color: {}", s)))
     }
 }
@@ -342,6 +353,33 @@ mod nsfont_format {
         NSFont::fontWithName_size(&NSString::from_str(name), size).ok_or_else(|| {
             serde::de::Error::custom(format!("Failed to find font with name {name}."))
         })
+    }
+}
+
+mod vec_cgcolor_format {
+    use super::*;
+    use serde::{Deserializer, Serializer};
+
+    pub fn serialize<S>(v: &[CFRetained<CGColor>], s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Use a local wrapper to bridge the "with" module to the vector
+        #[derive(Serialize)]
+        struct Wrapper<'a>(#[serde(with = "cgcolor_format")] &'a CFRetained<CGColor>);
+
+        v.iter().map(Wrapper).collect::<Vec<_>>().serialize(s)
+    }
+
+    pub fn deserialize<'de, D>(d: D) -> Result<Vec<CFRetained<CGColor>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wrapper(#[serde(with = "cgcolor_format")] CFRetained<CGColor>);
+
+        let vec = Vec::<Wrapper>::deserialize(d)?;
+        Ok(vec.into_iter().map(|w| w.0).collect())
     }
 }
 

@@ -14,7 +14,8 @@ use core_foundation::{
     boolean::CFBoolean,
     string::CFString,
 };
-use objc2_core_foundation::{CGPoint, CGSize};
+use objc2_core_foundation::{CFRetained, CGPoint, CGSize};
+use objc2_core_graphics::CGColor;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum RoleOfInterest {
@@ -112,12 +113,8 @@ pub struct HintBox {
     pub x: f64,
     pub y: f64,
     pub idx: usize,
-}
-
-impl HintBox {
-    pub fn new(label: String, x: f64, y: f64, idx: usize) -> Self {
-        Self { label, x, y, idx }
-    }
+    pub frame: Option<Frame>,
+    pub color: Option<CFRetained<CGColor>>,
 }
 
 #[derive(Default)]
@@ -180,12 +177,18 @@ impl ElementCache {
         result.into_iter().rev().collect()
     }
 
-    pub fn hint_boxes(&self, screen_height: f64) -> (u32, Vec<HintBox>) {
+    pub fn hint_boxes(
+        &self,
+        screen_height: f64,
+        frame_colors: &[CFRetained<CGColor>],
+    ) -> (u32, Vec<HintBox>) {
         if self.cache.is_empty() {
             return (0, vec![]);
         }
 
         let digits = self.cache.len().ilog(26) + 1;
+        let color_num = frame_colors.len();
+        let mut color_idx = 0;
 
         (
             digits,
@@ -193,9 +196,28 @@ impl ElementCache {
                 .iter()
                 .enumerate()
                 .map(|(idx, it)| {
-                    let ElementOfInterest { frame, .. } = it;
+                    let ElementOfInterest { frame, role, .. } = it;
                     let (x, y) = frame.center();
-                    HintBox::new(Self::int_to_string(idx, digits), x, screen_height - y, idx)
+                    let frame = match role {
+                        RoleOfInterest::Button
+                        | RoleOfInterest::StaticText
+                        | RoleOfInterest::MenuItem => None,
+                        _ => {
+                            color_idx += 1;
+                            Some(frame.invert_y(screen_height))
+                        }
+                    };
+                    let color = frame
+                        .as_ref()
+                        .and_then(|_| frame_colors.get(color_idx % color_num).cloned());
+                    HintBox {
+                        label: Self::int_to_string(idx, digits),
+                        x,
+                        y: (screen_height - y),
+                        idx,
+                        frame,
+                        color,
+                    }
                 })
                 .collect(),
         )
@@ -428,7 +450,7 @@ pub fn traverse_elements(
                 if *target == Target::Text
                     && let Some(value) = element.get_attribute_string(kAXValueAttribute)
                 {
-                    cache.add(element.clone(), Some(value), RoleOfInterest::StaticText);
+                    cache.add(element.clone(), Some(value), RoleOfInterest::TextField);
                 } else if element.is_clickable() {
                     // element.inspect();
                     cache.add(element.clone(), None, RoleOfInterest::TextField);
