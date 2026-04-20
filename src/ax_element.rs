@@ -174,7 +174,7 @@ impl ElementCache {
         while result.len() < digits as usize {
             result.push('A');
         }
-        result.into_iter().rev().collect()
+        result.iter().collect()
     }
 
     pub fn hint_boxes(
