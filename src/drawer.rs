@@ -17,6 +17,11 @@ use crate::{
     config::GlyphlowTheme,
 };
 
+enum Center {
+    Top(f64, f64),
+    Middle(f64, f64),
+}
+
 pub fn get_main_screen_size(mtm: MainThreadMarker) -> CGSize {
     let screens = NSScreen::screens(mtm);
     // The first screen in the array is always the "primary" screen
@@ -136,7 +141,7 @@ impl GlyphlowDrawingLayer for CALayer {
                     true,
                     bg_color,
                     theme.hint_margin_size as f64,
-                    (hint.x, hint.y - tri_height),
+                    Center::Top(hint.x, hint.y - tri_height),
                     screen_size,
                 );
 
@@ -178,7 +183,7 @@ impl GlyphlowDrawingLayer for CALayer {
             &theme.menu_fg_color,
             &theme.menu_bg_color,
             theme.menu_margin_size as f64,
-            (screen_size.width / 2.0, screen_size.height / 2.0),
+            Center::Middle(screen_size.width / 2.0, screen_size.height / 2.0),
             screen_size,
         );
         text_box.setBorderWidth(2.0);
@@ -190,12 +195,12 @@ impl GlyphlowDrawingLayer for CALayer {
         let text_box = draw_text_box(
             text,
             false,
-            false,
+            true,
             &theme.menu_font,
             &theme.menu_fg_color,
             &theme.menu_bg_color,
             theme.menu_margin_size as f64,
-            (screen_size.width / 2.0, screen_size.height / 2.0),
+            Center::Middle(screen_size.width / 2.0, screen_size.height / 2.0),
             screen_size,
         );
         text_box.setBorderWidth(2.0);
@@ -226,7 +231,7 @@ fn draw_text_box(
     fg_color: &CFRetained<CGColor>,
     bg_color: &CFRetained<CGColor>,
     margin: f64,
-    center: (f64, f64),
+    center: Center,
     screen_size: CGSize,
 ) -> Retained<CALayer> {
     unsafe {
@@ -236,7 +241,7 @@ fn draw_text_box(
             NSMutableAttributedString::alloc(),
             &ns_string,
         );
-        let full_range = NSRange::new(0, text.chars().count());
+        let full_range = NSRange::new(0, attr_string.length());
 
         attr_string.addAttribute_value_range(
             NSForegroundColorAttributeName,
@@ -268,7 +273,7 @@ fn text_box_with_attributed_string(
     center_text: bool,
     bg_color: &CFRetained<CGColor>,
     margin: f64,
-    center: (f64, f64),
+    center: Center,
     screen_size: CGSize,
 ) -> Retained<CALayer> {
     unsafe {
@@ -280,13 +285,13 @@ fn text_box_with_attributed_string(
         // Determined the box size and position
         let box_width = text_bounds.size.width + (margin * 2.0);
         let box_height = text_bounds.size.height + (margin * 2.0);
+        let (o_x, o_y) = match center {
+            Center::Top(x, y) => (x - box_width / 2.0, y - box_height),
+            Center::Middle(x, y) => (x - box_width / 2.0, y - box_height / 2.0),
+        };
         let origin = NSPoint::new(
-            (center.0 - (box_width / 2.0))
-                .min(screen_size.width - box_width)
-                .max(0.0),
-            (center.1 - box_height)
-                .max(0.0)
-                .min(screen_size.height - box_height),
+            o_x.min(screen_size.width - box_width).max(0.0),
+            o_y.max(0.0).min(screen_size.height - box_height),
         );
 
         let container = CALayer::new();

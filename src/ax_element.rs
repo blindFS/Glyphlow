@@ -81,7 +81,6 @@ impl Frame {
         )
     }
 
-    // FIXME: don't go out of screen
     pub fn center(&self) -> (f64, f64) {
         (
             (self.top_left.x + self.bottom_right.x) / 2.0,
@@ -180,7 +179,7 @@ impl ElementCache {
 
     pub fn hint_boxes(
         &self,
-        screen_height: f64,
+        screen_frame: &Frame,
         frame_colors: &[CFRetained<CGColor>],
     ) -> (u32, Vec<HintBox>) {
         if self.cache.is_empty() {
@@ -196,29 +195,33 @@ impl ElementCache {
             self.cache
                 .iter()
                 .enumerate()
-                .map(|(idx, it)| {
-                    let ElementOfInterest { frame, role, .. } = it;
-                    let (x, y) = frame.center();
-                    let frame = match role {
-                        RoleOfInterest::Button
-                        | RoleOfInterest::StaticText
-                        | RoleOfInterest::MenuItem => None,
-                        _ => {
-                            color_idx += 1;
-                            Some(frame.invert_y(screen_height))
-                        }
+                .filter_map(|(idx, it)| {
+                    let ElementOfInterest { frame, .. } = it;
+                    let (_, screen_height) = screen_frame.size();
+                    // NOTE: better positioning
+                    let (x, y) = frame.intersect(screen_frame)?.center();
+                    let (w, h) = frame.size();
+
+                    // Draw frames for large enough elements
+                    // TODO: configurable?
+                    let frame = if w.max(h) > screen_height / 10.0 {
+                        color_idx += 1;
+                        Some(frame.invert_y(screen_height))
+                    } else {
+                        None
                     };
                     let color = frame
                         .as_ref()
                         .and_then(|_| frame_colors.get(color_idx % color_num).cloned());
-                    HintBox {
+
+                    Some(HintBox {
                         label: Self::int_to_string(idx, digits),
                         x,
                         y: (screen_height - y),
                         idx,
                         frame,
                         color,
-                    }
+                    })
                 })
                 .collect(),
         )
@@ -388,14 +391,9 @@ pub fn traverse_elements(
             }
             // Skip element levels where only 1 item available
             if cache.cache.len() == 1
-                && let Some(ElementOfInterest { element, .. }) = cache.cache.first()
+                && let Some(ElementOfInterest { element, frame, .. }) = cache.cache.first()
             {
-                traverse_elements(
-                    &element.clone(),
-                    &element.get_frame().unwrap_or(parent_frame.clone()),
-                    cache,
-                    target,
-                );
+                traverse_elements(&element.clone(), &frame.clone(), cache, target);
             }
 
             return;

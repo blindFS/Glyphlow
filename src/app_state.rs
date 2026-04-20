@@ -10,8 +10,7 @@ use crate::{
     drawer::{GlyphlowDrawingLayer, create_overlay_window, get_main_screen_size},
     os_util::get_focused_pid,
 };
-use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
-use core_foundation::string::CFString;
+use accessibility::{AXUIElement, AXUIElementActions};
 use objc2::{MainThreadMarker, rc::Retained};
 use objc2_core_foundation::CGSize;
 use objc2_quartz_core::CALayer;
@@ -103,8 +102,20 @@ impl AppState {
         );
     }
 
+    const MAX_TEXT_DISPLAY_LEN: usize = 30;
+
     fn draw_text_action_menu(&self, text: &str) {
-        let mut msg = format!("Select action for text: `{text}`\n\nCopy (C)\nDictionary (D)");
+        // Truncate long text
+        let text = if text.len() > Self::MAX_TEXT_DISPLAY_LEN {
+            &format!(
+                "{:.max_len$}...",
+                text,
+                max_len = Self::MAX_TEXT_DISPLAY_LEN
+            )
+        } else {
+            text
+        };
+        let mut msg = format!("Select action for text:\n\n{text}\n\n⮺ Copy (C)\n◫ Dictionary (D)");
         for action in self.config.text_actions.iter() {
             msg.push_str(&format!("\n{} ({})", action.display, action.key));
         }
@@ -146,9 +157,10 @@ impl AppState {
         if !self.element_cache.cache.is_empty() {
             self.mode = Mode::Filtering;
 
-            let (hint_width, new_boxes) = self
-                .element_cache
-                .hint_boxes(self.screen_size.height, &self.config.theme.frame_colors);
+            let (hint_width, new_boxes) = self.element_cache.hint_boxes(
+                &Frame::from_origion(self.screen_size),
+                &self.config.theme.frame_colors,
+            );
             self.hint_width = hint_width;
             self.hint_boxes.extend(new_boxes);
             self.draw_hints(&self.hint_boxes);
@@ -209,9 +221,11 @@ impl AppState {
                         self.activate(&Target::ChildElement);
                         if self.element_cache.cache.is_empty() {
                             // select actions for current selected element
-                            // TODO: screen shot
+                            // TODO:
+                            // 1. Screen shot
+                            // 2. Mouse ops
                             self.window.draw_menu(
-                                "Select Mode:\n\nPress (P)\nText (T)",
+                                "Select Mode:\n\nText (T)\nPress (P)",
                                 self.screen_size,
                                 &self.config.theme,
                             );
@@ -270,6 +284,7 @@ impl AppState {
                 }
                 true
             }
+            // TODO: select parent, into Mode::ElementActionMenu
             Mode::Filtering => {
                 if key_char == ' ' {
                     self.deactivate();
@@ -281,32 +296,12 @@ impl AppState {
             Mode::ElementActionMenu => {
                 match key_char {
                     'P' => {
-                        if let Some(ElementOfInterest { element, .. }) = self.selected.as_ref() {
-                            Self::press_on_element(element);
-                        }
-                        self.deactivate();
+                        self.activate(&Target::Clickable);
+                        self.filter_by_key('A');
                     }
                     'T' => {
-                        if let Some(ElementOfInterest {
-                            element, context, ..
-                        }) = self.selected.as_mut()
-                            && let Ok(text) = element
-                                .value()
-                                .and_then(|val| {
-                                    val.downcast::<CFString>()
-                                        .ok_or(accessibility::Error::NotFound)
-                                })
-                                .or_else(|_| element.label_value())
-                                .or_else(|_| element.title())
-                                .map(|s| s.to_string())
-                        {
-                            *context = Some(text.clone());
-                            self.clear_drawing();
-                            self.draw_text_action_menu(&text);
-                            self.mode = Mode::TextActionMenu;
-                        } else {
-                            self.deactivate();
-                        }
+                        self.activate(&Target::Text);
+                        self.filter_by_key('A');
                     }
                     _ => {
                         self.deactivate();
