@@ -23,7 +23,7 @@ pub enum RoleOfInterest {
     TextField,
     StaticText,
     MenuItem,
-    Group,
+    GenericNode,
     ScrollBar,
 }
 
@@ -123,14 +123,16 @@ pub struct ElementCache {
     pub cache: Vec<ElementOfInterest>,
     seen_center: HashSet<(u64, u64)>,
     element_min_width: f64,
+    element_min_height: f64,
 }
 
 impl ElementCache {
-    pub fn new(min_width: f64) -> Self {
+    pub fn new(min_width: f64, min_height: f64) -> Self {
         ElementCache {
             cache: vec![],
             seen_center: HashSet::new(),
             element_min_width: min_width,
+            element_min_height: min_height,
         }
     }
 
@@ -141,9 +143,10 @@ impl ElementCache {
 
     pub fn add(&mut self, element: AXUIElement, context: Option<String>, role: RoleOfInterest) {
         if let Some(frame) = element.get_frame() {
-            if role != RoleOfInterest::Group
+            let (w, h) = frame.size();
+            if role != RoleOfInterest::GenericNode
                 && role != RoleOfInterest::ScrollBar
-                && frame.size().0 < self.element_min_width
+                && (w < self.element_min_width || h < self.element_min_height)
             {
                 return;
             }
@@ -153,7 +156,7 @@ impl ElementCache {
             // NOTE: de-duplication for DOM elements
             if !self.seen_center.contains(&center)
                 && (role == RoleOfInterest::Button
-                    || role == RoleOfInterest::Group
+                    || role == RoleOfInterest::GenericNode
                     || context
                         .as_ref()
                         // naive filtering
@@ -347,7 +350,9 @@ pub trait SetAttribute {
 impl SetAttribute for AXUIElement {
     fn set_attribute_by_name(&self, attribute_name: &str, value: CFType) {
         let attr = AXAttribute::new(&CFString::new(attribute_name));
-        let _ = self.set_attribute(&attr, value);
+        if let Err(e) = self.set_attribute(&attr, value) {
+            eprintln!("Failed to set attribute: {e}");
+        };
     }
 
     fn set_selected_range(&self, location: isize, length: isize) {
@@ -405,7 +410,7 @@ pub fn traverse_elements(
             if let Ok(children) = element.visible_children().or_else(|_| element.children()) {
                 for child in &children {
                     if child.visible_frame(parent_frame, &role).is_some() {
-                        cache.add((*child).clone(), None, RoleOfInterest::Group);
+                        cache.add((*child).clone(), None, RoleOfInterest::GenericNode);
                     }
                 }
             }

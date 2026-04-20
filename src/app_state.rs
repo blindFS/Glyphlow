@@ -3,15 +3,16 @@ use std::collections::HashSet;
 use crate::{
     action::{dictionary_lookup, text_to_clipboard},
     ax_element::{
-        ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, RoleOfInterest, Target,
-        traverse_elements,
+        ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, RoleOfInterest,
+        SetAttribute, Target, traverse_elements,
     },
     config::{AlphabeticKey, GlyphlowConfig},
     drawer::{GlyphlowDrawingLayer, create_overlay_window, get_main_screen_size},
     os_util::get_focused_pid,
 };
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
-use core_foundation::{base::TCFType, number::CFNumber};
+use accessibility_sys::kAXFocusedAttribute;
+use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber};
 use objc2::{MainThreadMarker, rc::Retained};
 use objc2_core_foundation::CGSize;
 use objc2_quartz_core::CALayer;
@@ -68,7 +69,10 @@ impl AppState {
             pressed_keys: HashSet::new(),
             mode: Mode::Idle,
             hint_boxes: vec![],
-            element_cache: ElementCache::new(config.element_min_width as f64),
+            element_cache: ElementCache::new(
+                config.element_min_width as f64,
+                config.element_min_height as f64,
+            ),
             key_prefix: String::new(),
             target: Target::default(),
             hint_width: 0,
@@ -135,7 +139,7 @@ impl AppState {
                 ElementOfInterest::new(
                     focused_window,
                     None,
-                    RoleOfInterest::Group,
+                    RoleOfInterest::GenericNode,
                     window_frame.clone(),
                 )
             });
@@ -169,6 +173,7 @@ impl AppState {
     }
 
     fn press_on_element(element: &AXUIElement) {
+        element.set_attribute_by_name(kAXFocusedAttribute, CFBoolean::true_value().as_CFType());
         if let Err(e) = element.press() {
             eprintln!("Failed to click element: {e}");
         };
@@ -198,6 +203,7 @@ impl AppState {
                     },
                 ) = self.element_cache.cache.get(*idx)
             {
+                // eoi.element.inspect();
                 self.clear_drawing();
                 match self.target {
                     Target::Clickable => {
@@ -212,7 +218,6 @@ impl AppState {
                         }
                     }
                     Target::ChildElement => {
-                        // eoi.element.inspect();
                         self.selected = Some(eoi.clone());
                         // TODO: optimize UX for selected element
                         // 1. Parent frame
