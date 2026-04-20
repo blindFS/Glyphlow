@@ -2,10 +2,10 @@ use std::collections::HashSet;
 
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
-    AXValueCreate, AXValueGetValue, AXValueRef, kAXButtonRole, kAXHiddenAttribute, kAXMenuBarRole,
-    kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction, kAXScrollBarRole,
-    kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
-    kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
+    AXValueCreate, AXValueGetValue, AXValueRef, kAXButtonRole, kAXGroupRole, kAXHiddenAttribute,
+    kAXMenuBarRole, kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction,
+    kAXScrollBarRole, kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole,
+    kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
     kAXValueTypeCGPoint, kAXValueTypeCGSize,
 };
 use core_foundation::{
@@ -118,19 +118,19 @@ pub struct HintBox {
     pub color: Option<CFRetained<CGColor>>,
 }
 
-static MIN_ELEMENT_WIDTH: f64 = 20.0;
-
 #[derive(Default)]
 pub struct ElementCache {
     pub cache: Vec<ElementOfInterest>,
-    pub seen_center: HashSet<(u64, u64)>,
+    seen_center: HashSet<(u64, u64)>,
+    element_min_width: f64,
 }
 
 impl ElementCache {
-    pub fn new() -> Self {
+    pub fn new(min_width: f64) -> Self {
         ElementCache {
             cache: vec![],
             seen_center: HashSet::new(),
+            element_min_width: min_width,
         }
     }
 
@@ -143,7 +143,7 @@ impl ElementCache {
         if let Some(frame) = element.get_frame() {
             if role != RoleOfInterest::Group
                 && role != RoleOfInterest::ScrollBar
-                && frame.size().0 < MIN_ELEMENT_WIDTH
+                && frame.size().0 < self.element_min_width
             {
                 return;
             }
@@ -190,6 +190,7 @@ impl ElementCache {
         &self,
         screen_frame: &Frame,
         frame_colors: &[CFRetained<CGColor>],
+        colored_frame_min_size: f64,
     ) -> (u32, Vec<HintBox>) {
         if self.cache.is_empty() {
             return (0, vec![]);
@@ -217,7 +218,7 @@ impl ElementCache {
 
                     // Draw frames for large enough elements
                     // TODO: configurable?
-                    let frame = if w.max(h) > screen_height / 10.0 {
+                    let frame = if w.max(h) >= colored_frame_min_size {
                         color_idx += 1;
                         Some(frame.invert_y(screen_height))
                     } else {
@@ -489,6 +490,19 @@ pub fn traverse_elements(
                     return;
                 }
             }
+            kAXGroupRole => match target {
+                // NOTE: Add AXGroup only if it has children and is clickable
+                Target::Clickable
+                    if element
+                        .children()
+                        .ok()
+                        .is_none_or(|children| children.is_empty())
+                        && element.is_clickable() =>
+                {
+                    cache.add(element.clone(), None, RoleOfInterest::Button);
+                }
+                _ => (),
+            },
             kAXMenuItemRole => match target {
                 Target::Text => {
                     if let Some(title) = element.get_attribute_string(kAXTitleAttribute) {

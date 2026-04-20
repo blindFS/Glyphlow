@@ -40,7 +40,7 @@ fn default_hint_margin() -> u8 {
     3
 }
 fn default_hint_bg() -> CFRetained<CGColor> {
-    color_from_hex("#769ff0a0")
+    color_from_hex("#769ff0d0")
 }
 fn default_hint_fg() -> CFRetained<CGColor> {
     color_from_hex("#111726ff")
@@ -230,6 +230,10 @@ pub struct GlyphlowConfig {
     pub text_actions: Vec<TextAction>,
     #[serde(default = "default_scroll_distance")]
     pub scroll_distance: f64,
+    #[serde(default = "default_element_min_width")]
+    pub element_min_width: u16,
+    #[serde(default = "default_frame_min_size")]
+    pub colored_frame_min_size: u16,
 }
 
 fn default_global_keybinding() -> KeyBinding {
@@ -243,6 +247,12 @@ fn default_text_actions() -> Vec<TextAction> {
 fn default_scroll_distance() -> f64 {
     0.05
 }
+fn default_element_min_width() -> u16 {
+    20
+}
+fn default_frame_min_size() -> u16 {
+    200
+}
 
 impl Default for GlyphlowConfig {
     fn default() -> Self {
@@ -251,6 +261,8 @@ impl Default for GlyphlowConfig {
             theme: GlyphlowTheme::default(),
             text_actions: default_text_actions(),
             scroll_distance: default_scroll_distance(),
+            element_min_width: default_element_min_width(),
+            colored_frame_min_size: default_frame_min_size(),
         }
     }
 }

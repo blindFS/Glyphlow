@@ -68,7 +68,7 @@ impl AppState {
             pressed_keys: HashSet::new(),
             mode: Mode::Idle,
             hint_boxes: vec![],
-            element_cache: ElementCache::new(),
+            element_cache: ElementCache::new(config.element_min_width as f64),
             key_prefix: String::new(),
             target: Target::default(),
             hint_width: 0,
@@ -158,6 +158,7 @@ impl AppState {
             let (hint_width, new_boxes) = self.element_cache.hint_boxes(
                 &Frame::from_origion(self.screen_size),
                 &self.config.theme.frame_colors,
+                self.config.colored_frame_min_size as f64,
             );
             self.hint_width = hint_width;
             self.hint_boxes.extend(new_boxes);
