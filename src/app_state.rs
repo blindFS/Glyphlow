@@ -10,7 +10,8 @@ use crate::{
     drawer::{GlyphlowDrawingLayer, create_overlay_window, get_main_screen_size},
     os_util::get_focused_pid,
 };
-use accessibility::{AXUIElement, AXUIElementActions};
+use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
+use core_foundation::{base::TCFType, number::CFNumber};
 use objc2::{MainThreadMarker, rc::Retained};
 use objc2_core_foundation::CGSize;
 use objc2_quartz_core::CALayer;
@@ -23,6 +24,7 @@ enum Mode {
     Filtering,
     TextActionMenu,
     ElementActionMenu,
+    Scrolling,
 }
 
 static MAX_TEXT_DISPLAY_LEN: usize = 30;
@@ -228,6 +230,17 @@ impl AppState {
                             self.mode = Mode::ElementActionMenu;
                         }
                     }
+                    Target::ScrollBar => {
+                        self.selected = Some(eoi.clone());
+                        self.clear_cache();
+                        self.clear_drawing();
+                        self.window.draw_menu(
+                            "Scroll With Following Keys:\n\nDown (J)\nUp (K)\nDistance Increase (I)\nDistance Decrease (D)",
+                            self.screen_size,
+                            &self.config.theme,
+                        );
+                        self.mode = Mode::Scrolling;
+                    }
                 }
             }
         } else if filtered_boxes.is_empty() {
@@ -254,7 +267,7 @@ impl AppState {
                 }) {
                     self.mode = Mode::DashBoard;
                     self.window.draw_menu(
-                        "Select Mode:\n\nPress (P)\nText (T)\nElement (E)",
+                        "Select Mode:\n\nPress (P)\nText (T)\nElement (E)\nScrollBar (S)",
                         self.screen_size,
                         &self.config.theme,
                     );
@@ -273,6 +286,9 @@ impl AppState {
                     }
                     'E' => {
                         self.activate(&Target::ChildElement);
+                    }
+                    'S' => {
+                        self.activate(&Target::ScrollBar);
                     }
                     _ => {
                         self.deactivate();
@@ -416,6 +432,45 @@ impl AppState {
                     self.deactivate();
                 }
 
+                true
+            }
+            Mode::Scrolling => {
+                let Some(ElementOfInterest { element, .. }) = self.selected.as_ref() else {
+                    self.deactivate();
+                    return true;
+                };
+
+                if let Some(old_val) = element
+                    .value()
+                    .ok()
+                    .and_then(|v| v.downcast::<CFNumber>())
+                    .and_then(|f| f.to_f64())
+                {
+                    let scroll_unit = self.config.scroll_distance;
+                    match key_char {
+                        'J' => {
+                            let _ = element.set_value(
+                                CFNumber::from((old_val + scroll_unit).min(1.0)).as_CFType(),
+                            );
+                        }
+                        'K' => {
+                            let _ = element.set_value(
+                                CFNumber::from((old_val - scroll_unit).max(0.0)).as_CFType(),
+                            );
+                        }
+                        'I' => {
+                            self.config.scroll_distance *= 1.5;
+                        }
+                        'D' => {
+                            self.config.scroll_distance /= 1.5;
+                        }
+                        _ => {
+                            self.deactivate();
+                        }
+                    }
+                } else {
+                    self.deactivate();
+                }
                 true
             }
         }

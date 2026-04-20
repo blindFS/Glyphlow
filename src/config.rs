@@ -193,6 +193,7 @@ pub struct GlyphlowConfig {
     pub global_trigger_key: KeyBinding,
     pub theme: GlyphlowTheme,
     pub text_actions: Vec<TextAction>,
+    pub scroll_distance: f64,
 }
 
 impl Default for GlyphlowConfig {
@@ -203,6 +204,7 @@ impl Default for GlyphlowConfig {
             },
             theme: GlyphlowTheme::default(),
             text_actions: vec![],
+            scroll_distance: 0.05,
         }
     }
 }
@@ -215,6 +217,7 @@ impl GlyphlowConfig {
 
         if let Ok(content) = fs::read_to_string(&path) {
             println!("------------- Loading config from {path:?} -------------");
+            // TODO: auto merging
             match toml::from_str::<Self>(&content) {
                 Ok(existing_config) => existing_config,
                 Err(e) => {

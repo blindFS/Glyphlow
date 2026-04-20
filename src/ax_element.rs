@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     AXValueCreate, AXValueGetValue, AXValueRef, kAXButtonRole, kAXHiddenAttribute, kAXMenuBarRole,
-    kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction,
+    kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction, kAXScrollBarRole,
     kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
     kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
     kAXValueTypeCGPoint, kAXValueTypeCGSize,
@@ -24,6 +24,7 @@ pub enum RoleOfInterest {
     StaticText,
     MenuItem,
     Group,
+    ScrollBar,
 }
 
 #[derive(Clone, Debug)]
@@ -140,7 +141,10 @@ impl ElementCache {
 
     pub fn add(&mut self, element: AXUIElement, context: Option<String>, role: RoleOfInterest) {
         if let Some(frame) = element.get_frame() {
-            if frame.size().0 < MIN_ELEMENT_WIDTH {
+            if role != RoleOfInterest::Group
+                && role != RoleOfInterest::ScrollBar
+                && frame.size().0 < MIN_ELEMENT_WIDTH
+            {
                 return;
             }
             let (x, y) = frame.center();
@@ -200,11 +204,15 @@ impl ElementCache {
             self.cache
                 .iter()
                 .enumerate()
-                .filter_map(|(idx, it)| {
+                .map(|(idx, it)| {
                     let ElementOfInterest { frame, .. } = it;
-                    let (_, screen_height) = screen_frame.size();
                     // NOTE: better positioning
-                    let (x, y) = frame.intersect(screen_frame)?.center();
+                    let (_, screen_height) = screen_frame.size();
+                    let frame = frame
+                        .intersect(screen_frame)
+                        .unwrap_or_else(|| screen_frame.clone());
+
+                    let (x, y) = frame.center();
                     let (w, h) = frame.size();
 
                     // Draw frames for large enough elements
@@ -219,14 +227,14 @@ impl ElementCache {
                         .as_ref()
                         .and_then(|_| frame_colors.get(color_idx % color_num).cloned());
 
-                    Some(HintBox {
+                    HintBox {
                         label: Self::int_to_string(idx, digits),
                         x,
                         y: (screen_height - y),
                         idx,
                         frame,
                         color,
-                    })
+                    }
                 })
                 .collect(),
         )
@@ -290,7 +298,12 @@ impl GetAttribute for AXUIElement {
         }
     }
 
-    fn visible_frame(&self, parent_frame: &Frame, _role: &CFString) -> Option<Frame> {
+    fn visible_frame(&self, parent_frame: &Frame, role: &CFString) -> Option<Frame> {
+        // NOTE: scroll bar positioning depends on its value
+        if *role == kAXScrollBarRole {
+            return Some(parent_frame.clone());
+        }
+
         let is_hidden = self
             .get_attribute(kAXHiddenAttribute)
             .and_then(|val| val.downcast::<CFBoolean>())
@@ -374,6 +387,7 @@ pub enum Target {
     Clickable,
     Text,
     ChildElement,
+    ScrollBar,
 }
 
 pub fn traverse_elements(
@@ -414,31 +428,35 @@ pub fn traverse_elements(
         // 2. AXCell click
         #[allow(non_upper_case_globals)]
         match role.to_string().as_str() {
-            kAXPopUpButtonRole | kAXButtonRole | "AXRadioButton" => {
-                if *target == Target::Clickable {
+            kAXPopUpButtonRole | kAXButtonRole | "AXRadioButton" => match target {
+                Target::Clickable => {
                     cache.add(element.clone(), None, RoleOfInterest::Button);
-                } else if let Some(ctx) = element
-                    .label_value()
-                    .ok()
-                    .or_else(|| {
-                        element
-                            .get_attribute("AXAttributedDescription")
-                            .and_then(|val| unsafe {
-                                let string_ref = CFAttributedStringGetString(
-                                    val.as_concrete_TypeRef() as CFAttributedStringRef,
-                                );
-                                if string_ref.is_null() {
-                                    return None;
-                                }
-                                Some(CFString::wrap_under_get_rule(string_ref))
-                            })
-                    })
-                    .or_else(|| element.title().ok())
-                    .map(|cf| cf.to_string())
-                {
-                    cache.add(element.clone(), Some(ctx), RoleOfInterest::Button);
                 }
-            }
+                Target::Text => {
+                    if let Some(ctx) = element
+                        .label_value()
+                        .ok()
+                        .or_else(|| {
+                            element.get_attribute("AXAttributedDescription").and_then(
+                                |val| unsafe {
+                                    let string_ref = CFAttributedStringGetString(
+                                        val.as_concrete_TypeRef() as CFAttributedStringRef,
+                                    );
+                                    if string_ref.is_null() {
+                                        return None;
+                                    }
+                                    Some(CFString::wrap_under_get_rule(string_ref))
+                                },
+                            )
+                        })
+                        .or_else(|| element.title().ok())
+                        .map(|cf| cf.to_string())
+                    {
+                        cache.add(element.clone(), Some(ctx), RoleOfInterest::Button);
+                    }
+                }
+                _ => (),
+            },
             kAXStaticTextRole => match target {
                 Target::Clickable if element.is_clickable() => {
                     cache.add(element.clone(), None, RoleOfInterest::Button);
@@ -451,16 +469,17 @@ pub fn traverse_elements(
                 _ => (),
             },
             // TODO: select only the visible part, `kAXVisibleCharacterRangeAttribute`
-            kAXTextFieldRole | kAXTextAreaRole => {
-                if *target == Target::Text
-                    && let Some(value) = element.get_attribute_string(kAXValueAttribute)
-                {
-                    cache.add(element.clone(), Some(value), RoleOfInterest::TextField);
-                } else if element.is_clickable() {
-                    // element.inspect();
+            kAXTextFieldRole | kAXTextAreaRole => match target {
+                Target::Text => {
+                    if let Some(value) = element.get_attribute_string(kAXValueAttribute) {
+                        cache.add(element.clone(), Some(value), RoleOfInterest::TextField);
+                    }
+                }
+                Target::Clickable if element.is_clickable() => {
                     cache.add(element.clone(), None, RoleOfInterest::TextField);
                 }
-            }
+                _ => (),
+            },
             kAXMenuBarRole => {
                 // NOTE: Exclude system menu bar items
                 if let Some(CGPoint { x, y }) = element.get_pos()
@@ -470,9 +489,20 @@ pub fn traverse_elements(
                     return;
                 }
             }
-            kAXMenuItemRole => {
-                if let Some(title) = element.get_attribute_string(kAXTitleAttribute) {
-                    cache.add(element.clone(), Some(title), RoleOfInterest::MenuItem);
+            kAXMenuItemRole => match target {
+                Target::Text => {
+                    if let Some(title) = element.get_attribute_string(kAXTitleAttribute) {
+                        cache.add(element.clone(), Some(title), RoleOfInterest::MenuItem);
+                    }
+                }
+                Target::Clickable => {
+                    cache.add(element.clone(), None, RoleOfInterest::MenuItem);
+                }
+                _ => (),
+            },
+            kAXScrollBarRole => {
+                if *target == Target::ScrollBar {
+                    cache.add(element.clone(), None, RoleOfInterest::ScrollBar);
                 }
             }
             _ => {
