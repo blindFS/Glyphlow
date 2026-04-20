@@ -117,6 +117,8 @@ pub struct HintBox {
     pub color: Option<CFRetained<CGColor>>,
 }
 
+static MIN_ELEMENT_WIDTH: f64 = 20.0;
+
 #[derive(Default)]
 pub struct ElementCache {
     pub cache: Vec<ElementOfInterest>,
@@ -138,6 +140,9 @@ impl ElementCache {
 
     pub fn add(&mut self, element: AXUIElement, context: Option<String>, role: RoleOfInterest) {
         if let Some(frame) = element.get_frame() {
+            if frame.size().0 < MIN_ELEMENT_WIDTH {
+                return;
+            }
             let (x, y) = frame.center();
             // f64 to u64 for hashing
             let center = (x.to_bits(), y.to_bits());
@@ -428,6 +433,7 @@ pub fn traverse_elements(
                                 Some(CFString::wrap_under_get_rule(string_ref))
                             })
                     })
+                    .or_else(|| element.title().ok())
                     .map(|cf| cf.to_string())
                 {
                     cache.add(element.clone(), Some(ctx), RoleOfInterest::Button);

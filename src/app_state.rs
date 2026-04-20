@@ -25,6 +25,8 @@ enum Mode {
     ElementActionMenu,
 }
 
+static MAX_TEXT_DISPLAY_LEN: usize = 30;
+
 /// Global state for Glyphlow,
 /// mainly cached UI elements, and some related drawings
 pub struct AppState {
@@ -102,16 +104,10 @@ impl AppState {
         );
     }
 
-    const MAX_TEXT_DISPLAY_LEN: usize = 30;
-
     fn draw_text_action_menu(&self, text: &str) {
         // Truncate long text
-        let text = if text.len() > Self::MAX_TEXT_DISPLAY_LEN {
-            &format!(
-                "{:.max_len$}...",
-                text,
-                max_len = Self::MAX_TEXT_DISPLAY_LEN
-            )
+        let text = if text.len() > MAX_TEXT_DISPLAY_LEN {
+            &format!("{:.max_len$}...", text, max_len = MAX_TEXT_DISPLAY_LEN)
         } else {
             text
         };
@@ -286,7 +282,14 @@ impl AppState {
             }
             // TODO: select parent, into Mode::ElementActionMenu
             Mode::Filtering => {
-                if key_char == ' ' {
+                if key == Key::Return && self.selected.is_some() {
+                    self.window.draw_menu(
+                        "Select Mode:\n\nText (T)\nPress (P)",
+                        self.screen_size,
+                        &self.config.theme,
+                    );
+                    self.mode = Mode::ElementActionMenu;
+                } else if key_char == ' ' {
                     self.deactivate();
                 } else {
                     self.filter_by_key(key_char);
@@ -297,11 +300,15 @@ impl AppState {
                 match key_char {
                     'P' => {
                         self.activate(&Target::Clickable);
-                        self.filter_by_key('A');
+                        if self.element_cache.cache.len() == 1 {
+                            self.filter_by_key('A');
+                        }
                     }
                     'T' => {
                         self.activate(&Target::Text);
-                        self.filter_by_key('A');
+                        if self.element_cache.cache.len() == 1 {
+                            self.filter_by_key('A');
+                        }
                     }
                     _ => {
                         self.deactivate();
