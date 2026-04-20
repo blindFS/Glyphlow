@@ -233,9 +233,8 @@ impl AppState {
                     Target::ScrollBar => {
                         self.selected = Some(eoi.clone());
                         self.clear_cache();
-                        self.clear_drawing();
                         self.window.draw_menu(
-                            "Scroll With Following Keys:\n\nDown (J)\nUp (K)\nDistance Increase (I)\nDistance Decrease (D)",
+                            "Scroll With Following Keys:\n\nDown/Right (J)\nUp/Left (K)\nDistance Increase (I)\nDistance Decrease (D)",
                             self.screen_size,
                             &self.config.theme,
                         );

@@ -10,24 +10,80 @@ use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GlyphlowTheme {
-    #[serde(with = "nsfont_format")]
+    #[serde(with = "nsfont_format", default = "default_hint_font")]
     pub hint_font: Retained<NSFont>,
+    #[serde(default = "default_hint_margin")]
     pub hint_margin_size: u8,
-    #[serde(with = "cgcolor_format")]
+    #[serde(with = "cgcolor_format", default = "default_hint_bg")]
     pub hint_bg_color: CFRetained<CGColor>,
-    #[serde(with = "cgcolor_format")]
+    #[serde(with = "cgcolor_format", default = "default_hint_fg")]
     pub hint_fg_color: CFRetained<CGColor>,
-    #[serde(with = "cgcolor_format")]
+    #[serde(with = "cgcolor_format", default = "default_hint_hl")]
     pub hint_hl_color: CFRetained<CGColor>,
-    #[serde(with = "nsfont_format")]
+    #[serde(with = "nsfont_format", default = "default_menu_font")]
     pub menu_font: Retained<NSFont>,
+    #[serde(default = "default_menu_margin")]
     pub menu_margin_size: u8,
-    #[serde(with = "cgcolor_format")]
+    #[serde(with = "cgcolor_format", default = "default_menu_bg")]
     pub menu_bg_color: CFRetained<CGColor>,
-    #[serde(with = "cgcolor_format")]
+    #[serde(with = "cgcolor_format", default = "default_menu_fg")]
     pub menu_fg_color: CFRetained<CGColor>,
-    #[serde(with = "vec_cgcolor_format")]
+    #[serde(with = "vec_cgcolor_format", default = "default_frame_colors")]
     pub frame_colors: Vec<CFRetained<CGColor>>,
+}
+
+fn default_hint_font() -> Retained<NSFont> {
+    NSFont::fontWithName_size(&NSString::from_str("Andale Mono"), 12.0)
+        .expect("Default font should exist.")
+}
+fn default_hint_margin() -> u8 {
+    3
+}
+fn default_hint_bg() -> CFRetained<CGColor> {
+    color_from_hex("#769ff0a0")
+}
+fn default_hint_fg() -> CFRetained<CGColor> {
+    color_from_hex("#111726ff")
+}
+fn default_hint_hl() -> CFRetained<CGColor> {
+    color_from_hex("#11172620")
+}
+fn default_menu_font() -> Retained<NSFont> {
+    NSFont::fontWithName_size(&NSString::from_str("Andale Mono"), 12.0)
+        .expect("Default font should exist.")
+}
+fn default_menu_margin() -> u8 {
+    10
+}
+fn default_menu_bg() -> CFRetained<CGColor> {
+    color_from_hex("#111726a0")
+}
+fn default_menu_fg() -> CFRetained<CGColor> {
+    color_from_hex("#a3aed2ff")
+}
+fn default_frame_colors() -> Vec<CFRetained<CGColor>> {
+    vec![
+        color_from_hex("#e0af68ff"),
+        color_from_hex("#9ece6aff"),
+        color_from_hex("#bb9af7ff"),
+    ]
+}
+
+impl Default for GlyphlowTheme {
+    fn default() -> Self {
+        Self {
+            hint_font: default_hint_font(),
+            hint_margin_size: default_hint_margin(),
+            hint_bg_color: default_hint_bg(),
+            hint_fg_color: default_hint_fg(),
+            hint_hl_color: default_hint_hl(),
+            menu_font: default_menu_font(),
+            menu_margin_size: default_menu_margin(),
+            menu_bg_color: default_menu_bg(),
+            menu_fg_color: default_menu_fg(),
+            frame_colors: default_frame_colors(),
+        }
+    }
 }
 
 fn hex_to_rgba(hex: &str) -> Option<(f64, f64, f64, f64)> {
@@ -51,29 +107,6 @@ fn color_try_from_hex(hex: &str) -> Option<CFRetained<CGColor>> {
 
 fn color_from_hex(hex: &str) -> CFRetained<CGColor> {
     color_try_from_hex(hex).expect("Invalid color")
-}
-
-impl Default for GlyphlowTheme {
-    fn default() -> Self {
-        GlyphlowTheme {
-            hint_font: NSFont::fontWithName_size(&NSString::from_str("Andale Mono"), 12.0)
-                .expect("Default font should exist."),
-            hint_margin_size: 3,
-            hint_bg_color: color_from_hex("#769ff0a0"),
-            hint_fg_color: color_from_hex("#111726ff"),
-            hint_hl_color: color_from_hex("#11172620"),
-            menu_font: NSFont::fontWithName_size(&NSString::from_str("Andale Mono"), 12.0)
-                .expect("Default font should exist."),
-            menu_margin_size: 10,
-            menu_bg_color: color_from_hex("#111726a0"),
-            menu_fg_color: color_from_hex("#a3aed2ff"),
-            frame_colors: vec![
-                color_from_hex("#e0af68ff"),
-                color_from_hex("#9ece6aff"),
-                color_from_hex("#bb9af7ff"),
-            ],
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -190,21 +223,34 @@ pub struct KeyBinding {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GlyphlowConfig {
+    #[serde(default = "default_global_keybinding")]
     pub global_trigger_key: KeyBinding,
     pub theme: GlyphlowTheme,
+    #[serde(default = "default_text_actions")]
     pub text_actions: Vec<TextAction>,
+    #[serde(default = "default_scroll_distance")]
     pub scroll_distance: f64,
+}
+
+fn default_global_keybinding() -> KeyBinding {
+    KeyBinding {
+        keys: vec![Key::Alt, Key::KeyG],
+    }
+}
+fn default_text_actions() -> Vec<TextAction> {
+    vec![]
+}
+fn default_scroll_distance() -> f64 {
+    0.05
 }
 
 impl Default for GlyphlowConfig {
     fn default() -> Self {
         GlyphlowConfig {
-            global_trigger_key: KeyBinding {
-                keys: vec![Key::Alt, Key::KeyG],
-            },
+            global_trigger_key: default_global_keybinding(),
             theme: GlyphlowTheme::default(),
-            text_actions: vec![],
-            scroll_distance: 0.05,
+            text_actions: default_text_actions(),
+            scroll_distance: default_scroll_distance(),
         }
     }
 }
@@ -217,7 +263,6 @@ impl GlyphlowConfig {
 
         if let Ok(content) = fs::read_to_string(&path) {
             println!("------------- Loading config from {path:?} -------------");
-            // TODO: auto merging
             match toml::from_str::<Self>(&content) {
                 Ok(existing_config) => existing_config,
                 Err(e) => {
