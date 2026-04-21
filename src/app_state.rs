@@ -125,6 +125,14 @@ impl AppState {
             .draw_menu(&msg, self.screen_size, &self.config.theme);
     }
 
+    fn draw_element_action_menu(&self) {
+        self.window.draw_menu(
+            "Select Mode:\n\nText (T)\nPress (P)\nScrollBar (S)",
+            self.screen_size,
+            &self.config.theme,
+        );
+    }
+
     /// Activates the app and caches UI elements
     fn activate(&mut self, target: &Target) {
         self.target = target.clone();
@@ -228,11 +236,7 @@ impl AppState {
                             // TODO:
                             // 1. Screen shot
                             // 2. Mouse ops
-                            self.window.draw_menu(
-                                "Select Mode:\n\nText (T)\nPress (P)",
-                                self.screen_size,
-                                &self.config.theme,
-                            );
+                            self.draw_element_action_menu();
                             self.mode = Mode::ElementActionMenu;
                         }
                     }
@@ -301,14 +305,10 @@ impl AppState {
                 }
                 true
             }
-            // TODO: select parent, into Mode::ElementActionMenu
             Mode::Filtering => {
+                // NOTE: Act on currently selected parent node
                 if key == Key::Return && self.selected.is_some() {
-                    self.window.draw_menu(
-                        "Select Mode:\n\nText (T)\nPress (P)",
-                        self.screen_size,
-                        &self.config.theme,
-                    );
+                    self.draw_element_action_menu();
                     self.mode = Mode::ElementActionMenu;
                 } else if key_char == ' ' {
                     self.deactivate();
