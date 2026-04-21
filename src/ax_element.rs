@@ -10,7 +10,7 @@ use accessibility_sys::{
 };
 use core_foundation::{
     attributed_string::{CFAttributedStringGetString, CFAttributedStringRef},
-    base::{CFRange, CFType, FromVoid, TCFType, TCFTypeRef},
+    base::{CFRange, CFType, CFTypeRef, TCFType},
     boolean::CFBoolean,
     string::CFString,
 };
@@ -141,7 +141,7 @@ impl ElementCache {
         self.seen_center.clear();
     }
 
-    pub fn add(&mut self, element: AXUIElement, context: Option<String>, role: RoleOfInterest) {
+    pub fn add(&mut self, element: &AXUIElement, context: Option<String>, role: RoleOfInterest) {
         if let Some(frame) = element.get_frame() {
             let (w, h) = frame.size();
             if role != RoleOfInterest::GenericNode
@@ -165,8 +165,12 @@ impl ElementCache {
                         }))
             {
                 self.seen_center.insert(center);
-                self.cache
-                    .push(ElementOfInterest::new(element, context, role, frame));
+                self.cache.push(ElementOfInterest::new(
+                    element.clone(),
+                    context,
+                    role,
+                    frame,
+                ));
             }
         }
     }
@@ -382,7 +386,7 @@ fn rust_type_to_cftype<T>(value: T, value_type: u32) -> Option<CFType> {
             return None;
         }
 
-        Some(CFType::from_void(raw_value.as_void_ptr()).as_CFType())
+        Some(CFType::wrap_under_create_rule(raw_value as CFTypeRef))
     }
 }
 
@@ -410,7 +414,7 @@ pub fn traverse_elements(
             if let Ok(children) = element.visible_children().or_else(|_| element.children()) {
                 for child in &children {
                     if child.visible_frame(parent_frame, &role).is_some() {
-                        cache.add((*child).clone(), None, RoleOfInterest::GenericNode);
+                        cache.add(&child, None, RoleOfInterest::GenericNode);
                     }
                 }
             }
@@ -436,7 +440,7 @@ pub fn traverse_elements(
         match role.to_string().as_str() {
             kAXPopUpButtonRole | kAXButtonRole | "AXRadioButton" => match target {
                 Target::Clickable => {
-                    cache.add(element.clone(), None, RoleOfInterest::Button);
+                    cache.add(element, None, RoleOfInterest::Button);
                 }
                 Target::Text => {
                     if let Some(ctx) = element
@@ -458,18 +462,18 @@ pub fn traverse_elements(
                         .or_else(|| element.title().ok())
                         .map(|cf| cf.to_string())
                     {
-                        cache.add(element.clone(), Some(ctx), RoleOfInterest::Button);
+                        cache.add(element, Some(ctx), RoleOfInterest::Button);
                     }
                 }
                 _ => (),
             },
             kAXStaticTextRole => match target {
                 Target::Clickable if element.is_clickable() => {
-                    cache.add(element.clone(), None, RoleOfInterest::Button);
+                    cache.add(element, None, RoleOfInterest::Button);
                 }
                 Target::Text => {
                     if let Some(value) = element.get_attribute_string(kAXValueAttribute) {
-                        cache.add(element.clone(), Some(value), RoleOfInterest::StaticText);
+                        cache.add(element, Some(value), RoleOfInterest::StaticText);
                     }
                 }
                 _ => (),
@@ -478,11 +482,12 @@ pub fn traverse_elements(
             kAXTextFieldRole | kAXTextAreaRole => match target {
                 Target::Text => {
                     if let Some(value) = element.get_attribute_string(kAXValueAttribute) {
-                        cache.add(element.clone(), Some(value), RoleOfInterest::TextField);
+                        cache.add(element, Some(value), RoleOfInterest::TextField);
                     }
                 }
-                Target::Clickable if element.is_clickable() => {
-                    cache.add(element.clone(), None, RoleOfInterest::TextField);
+                // NOTE: Even if not clickable, still could be focused on click
+                Target::Clickable => {
+                    cache.add(element, None, RoleOfInterest::TextField);
                 }
                 _ => (),
             },
@@ -504,29 +509,29 @@ pub fn traverse_elements(
                         .is_none_or(|children| children.is_empty())
                         && element.is_clickable() =>
                 {
-                    cache.add(element.clone(), None, RoleOfInterest::Button);
+                    cache.add(element, None, RoleOfInterest::Button);
                 }
                 _ => (),
             },
             kAXMenuItemRole => match target {
                 Target::Text => {
                     if let Some(title) = element.get_attribute_string(kAXTitleAttribute) {
-                        cache.add(element.clone(), Some(title), RoleOfInterest::MenuItem);
+                        cache.add(element, Some(title), RoleOfInterest::MenuItem);
                     }
                 }
                 Target::Clickable => {
-                    cache.add(element.clone(), None, RoleOfInterest::MenuItem);
+                    cache.add(element, None, RoleOfInterest::MenuItem);
                 }
                 _ => (),
             },
             kAXScrollBarRole => {
                 if *target == Target::ScrollBar {
-                    cache.add(element.clone(), None, RoleOfInterest::ScrollBar);
+                    cache.add(element, None, RoleOfInterest::ScrollBar);
                 }
             }
             _ => {
                 if *target == Target::Clickable && element.is_clickable() {
-                    cache.add(element.clone(), None, RoleOfInterest::Button);
+                    cache.add(element, None, RoleOfInterest::Button);
                 }
             }
         }

@@ -1,11 +1,13 @@
+use core_foundation::{attributed_string::CFAttributedStringRef, base::CFRange};
+use core_graphics_types::geometry::CGSize as CCGSize;
+use core_text::framesetter::CTFramesetter;
 use objc2::{
     AnyThread, MainThreadMarker, MainThreadOnly,
     rc::{DefaultRetained, Retained},
 };
 use objc2_app_kit::{
-    NSAttributedStringNSStringDrawingDeprecated, NSBackingStoreType, NSColor, NSFont,
-    NSFontAttributeName, NSForegroundColorAttributeName, NSMutableParagraphStyle,
-    NSParagraphStyleAttributeName, NSScreen, NSStringDrawingOptions, NSWindow, NSWindowStyleMask,
+    NSBackingStoreType, NSColor, NSFont, NSFontAttributeName, NSForegroundColorAttributeName,
+    NSMutableParagraphStyle, NSParagraphStyleAttributeName, NSScreen, NSWindow, NSWindowStyleMask,
 };
 use objc2_core_foundation::{CFRetained, CGSize};
 use objc2_core_graphics::{CGColor, CGMutablePath};
@@ -65,7 +67,6 @@ pub trait GlyphlowDrawingLayer {
         key_prefix_len: usize,
         screen_size: CGSize,
     );
-    fn draw_dictionary_popup(&self, text: &str, screen_size: CGSize, theme: &GlyphlowTheme);
     fn draw_menu(&self, text: &str, screen_size: CGSize, theme: &GlyphlowTheme);
     fn draw_frame_box(&self, frames: &Frame, color: &CFRetained<CGColor>);
 }
@@ -174,28 +175,10 @@ impl GlyphlowDrawingLayer for CALayer {
         }
     }
 
-    fn draw_dictionary_popup(&self, text: &str, screen_size: CGSize, theme: &GlyphlowTheme) {
-        let text_box = draw_text_box(
-            text,
-            false,
-            true,
-            &theme.hint_font,
-            &theme.menu_fg_color,
-            &theme.menu_bg_color,
-            theme.menu_margin_size as f64,
-            Center::Middle(screen_size.width / 2.0, screen_size.height / 2.0),
-            screen_size,
-        );
-        text_box.setBorderWidth(2.0);
-        text_box.setBorderColor(Some(&theme.menu_fg_color));
-        self.addSublayer(&text_box);
-    }
-
     fn draw_menu(&self, text: &str, screen_size: CGSize, theme: &GlyphlowTheme) {
         let text_box = draw_text_box(
             text,
             false,
-            true,
             &theme.menu_font,
             &theme.menu_fg_color,
             &theme.menu_bg_color,
@@ -226,7 +209,6 @@ impl GlyphlowDrawingLayer for CALayer {
 fn draw_text_box(
     text: &str,
     center_text: bool,
-    line_spacing: bool,
     font: &Retained<NSFont>,
     fg_color: &CFRetained<CGColor>,
     bg_color: &CFRetained<CGColor>,
@@ -250,12 +232,12 @@ fn draw_text_box(
         );
 
         attr_string.addAttribute_value_range(NSFontAttributeName, font, full_range);
-        // HACK: Somehow it underestimates the height without line spacing, it's still not accurate
-        if line_spacing {
-            let style = NSMutableParagraphStyle::default_retained();
-            style.setLineSpacing(font.pointSize() / 3.0);
-            attr_string.addAttribute_value_range(NSParagraphStyleAttributeName, &style, full_range);
-        }
+
+        // HACK: For multilingual text, height is underestimated due to fallback fonts.
+        // This ensures more vertical spacing.
+        let style = NSMutableParagraphStyle::default_retained();
+        style.setLineSpacing(font.pointSize() / 3.5);
+        attr_string.addAttribute_value_range(NSParagraphStyleAttributeName, &style, full_range);
 
         text_box_with_attributed_string(
             attr_string,
@@ -276,41 +258,48 @@ fn text_box_with_attributed_string(
     center: Center,
     screen_size: CGSize,
 ) -> Retained<CALayer> {
+    let cf_attr_string = Retained::as_ptr(&attr_string) as CFAttributedStringRef;
+    let framesetter = CTFramesetter::new_with_attributed_string(cf_attr_string);
+    let (size, _) = framesetter.suggest_frame_size_with_constraints(
+        CFRange {
+            location: 0,
+            length: 0,
+        },
+        std::ptr::null(),
+        CCGSize::new(screen_size.width, screen_size.height),
+    );
+
+    let box_width = size.width + (margin * 2.0);
+    let box_height = size.height + (margin * 2.0);
+
+    let (o_x, o_y) = match center {
+        Center::Top(x, y) => (x - box_width / 2.0, y - box_height),
+        Center::Middle(x, y) => (x - box_width / 2.0, y - box_height / 2.0),
+    };
+    let origin = NSPoint::new(
+        o_x.min(screen_size.width - box_width).max(0.0),
+        o_y.max(0.0).min(screen_size.height - box_height),
+    );
+
+    let container = CALayer::new();
+    container.setFrame(NSRect::new(origin, NSSize::new(box_width, box_height)));
+    container.setBackgroundColor(Some(bg_color));
+
+    let text_layer = CATextLayer::new();
+    text_layer.setFrame(NSRect::new(
+        NSPoint::new(margin, margin), // Positioned exactly at margin
+        CGSize::new(size.width, size.height),
+    ));
+
     unsafe {
-        let max_size = NSSize::new(10000.0, 10000.0);
-        let options = NSStringDrawingOptions::UsesLineFragmentOrigin
-            | NSStringDrawingOptions::UsesFontLeading;
-        let text_bounds = attr_string.boundingRectWithSize_options(max_size, options);
-
-        // Determined the box size and position
-        let box_width = text_bounds.size.width + (margin * 2.0);
-        let box_height = text_bounds.size.height + (margin * 2.0);
-        let (o_x, o_y) = match center {
-            Center::Top(x, y) => (x - box_width / 2.0, y - box_height),
-            Center::Middle(x, y) => (x - box_width / 2.0, y - box_height / 2.0),
-        };
-        let origin = NSPoint::new(
-            o_x.min(screen_size.width - box_width).max(0.0),
-            o_y.max(0.0).min(screen_size.height - box_height),
-        );
-
-        let container = CALayer::new();
-        container.setFrame(NSRect::new(origin, NSSize::new(box_width, box_height)));
-        container.setBackgroundColor(Some(bg_color));
-
-        let text_layer = CATextLayer::new();
-        text_layer.setFrame(NSRect::new(
-            NSPoint::new(margin, margin), // Positioned exactly at margin
-            text_bounds.size,
-        ));
-
         text_layer.setString(Some(&attr_string));
-        text_layer.setContentsScale(2.0); // Retina crispness
         if center_text {
             text_layer.setAlignmentMode(kCAAlignmentCenter);
         }
-        container.addSublayer(&text_layer);
-        container.setCornerRadius(margin);
-        container
     }
+
+    text_layer.setContentsScale(2.0); // Retina crispness
+    container.addSublayer(&text_layer);
+    container.setCornerRadius(margin);
+    container
 }

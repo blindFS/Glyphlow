@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::{
-    action::{dictionary_lookup, text_to_clipboard},
+    action::{dictionary_lookup, multilingual_split, text_to_clipboard},
     ax_element::{
         ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, RoleOfInterest,
         SetAttribute, Target, traverse_elements,
@@ -203,59 +203,65 @@ impl AppState {
             .collect::<Vec<_>>();
 
         // Only 1 remaining, take some actions
-        if filtered_boxes.len() == 1 {
-            if let Some(HintBox { idx, .. }) = filtered_boxes.first()
-                && let Some(
-                    eoi @ ElementOfInterest {
-                        element, context, ..
-                    },
-                ) = self.element_cache.cache.get(*idx)
-            {
-                // eoi.element.inspect();
-                self.clear_drawing();
-                match self.target {
-                    Target::Clickable => {
-                        Self::press_on_element(element);
-                        self.deactivate();
-                    }
-                    Target::Text => {
-                        if let Some(text) = context {
-                            self.selected = Some(eoi.clone());
-                            self.draw_text_action_menu(text);
-                            self.mode = Mode::TextActionMenu;
-                        }
-                    }
-                    Target::ChildElement => {
+        if self.key_prefix.len() == self.hint_width as usize
+            && filtered_boxes.len() == 1
+            && let Some(HintBox { idx, .. }) = filtered_boxes.first()
+            && let Some(
+                eoi @ ElementOfInterest {
+                    element, context, ..
+                },
+            ) = self.element_cache.cache.get(*idx)
+        {
+            // eoi.element.inspect();
+            self.clear_drawing();
+            match self.target {
+                Target::Clickable => {
+                    Self::press_on_element(element);
+                    self.deactivate();
+                }
+                Target::Text => {
+                    if let Some(text) = context {
                         self.selected = Some(eoi.clone());
-                        // TODO: optimize UX for selected element
-                        // 1. Parent frame
-                        // 2. Action menu for parent
-                        self.activate(&Target::ChildElement);
-                        if self.element_cache.cache.is_empty() {
-                            // select actions for current selected element
-                            // TODO:
-                            // 1. Screen shot
-                            // 2. Mouse ops
-                            self.draw_element_action_menu();
-                            self.mode = Mode::ElementActionMenu;
-                        }
+                        self.draw_text_action_menu(text);
+                        self.mode = Mode::TextActionMenu;
                     }
-                    Target::ScrollBar => {
-                        self.selected = Some(eoi.clone());
-                        self.clear_cache();
-                        self.window.draw_menu(
+                }
+                Target::ChildElement => {
+                    self.selected = Some(eoi.clone());
+                    // TODO: optimize UX for selected element
+                    // 1. Parent frame
+                    // 2. Action menu for parent
+                    self.activate(&Target::ChildElement);
+                    if self.element_cache.cache.is_empty() {
+                        // select actions for current selected element
+                        // TODO:
+                        // 1. Screen shot
+                        // 2. Mouse ops
+                        self.draw_element_action_menu();
+                        self.mode = Mode::ElementActionMenu;
+                    }
+                }
+                Target::ScrollBar => {
+                    self.selected = Some(eoi.clone());
+                    self.clear_cache();
+                    self.window.draw_menu(
                             "Scroll With Following Keys:\n\nDown/Right (J)\nUp/Left (K)\nDistance Increase (I)\nDistance Decrease (D)",
                             self.screen_size,
                             &self.config.theme,
                         );
-                        self.mode = Mode::Scrolling;
-                    }
+                    self.mode = Mode::Scrolling;
                 }
             }
         } else if filtered_boxes.is_empty() {
             self.deactivate();
         } else {
             self.draw_hints(&filtered_boxes);
+        }
+    }
+
+    fn quick_follow(&mut self) {
+        if self.element_cache.cache.len() == 1 {
+            self.filter_by_key('A');
         }
     }
 
@@ -285,6 +291,7 @@ impl AppState {
                     false
                 }
             }
+            // TODO: Mode::Input for input text fields/areas
             Mode::DashBoard => {
                 match key_char {
                     'P' => {
@@ -298,6 +305,7 @@ impl AppState {
                     }
                     'S' => {
                         self.activate(&Target::ScrollBar);
+                        self.quick_follow();
                     }
                     _ => {
                         self.deactivate();
@@ -321,20 +329,19 @@ impl AppState {
                 match key_char {
                     'P' => {
                         self.activate(&Target::Clickable);
-                        if self.element_cache.cache.len() == 1 {
-                            self.filter_by_key('A');
-                        }
                     }
                     'T' => {
                         self.activate(&Target::Text);
-                        if self.element_cache.cache.len() == 1 {
-                            self.filter_by_key('A');
-                        }
+                    }
+                    'S' => {
+                        self.activate(&Target::ScrollBar);
                     }
                     _ => {
                         self.deactivate();
+                        return false;
                     }
                 }
+                self.quick_follow();
                 true
             }
             Mode::TextActionMenu => {
@@ -355,8 +362,7 @@ impl AppState {
                 self.clear_drawing();
 
                 // TODO:
-                // 1. Multilingual tokenization with charabia
-                // 2. URL detection and handling
+                // 1. URL handling
                 match key_char {
                     'C' => {
                         text_to_clipboard(text);
@@ -370,11 +376,8 @@ impl AppState {
                     }
                     'D' => {
                         if let Some(def_str) = dictionary_lookup(text) {
-                            self.window.draw_dictionary_popup(
-                                &def_str,
-                                self.screen_size,
-                                &self.config.theme,
-                            );
+                            self.window
+                                .draw_menu(&def_str, self.screen_size, &self.config.theme);
                         } else {
                             // TODO: better notification
                             self.window.draw_menu(
@@ -385,42 +388,49 @@ impl AppState {
                         }
                         keep_drawing = true;
                     }
+                    'S' => {
+                        let words = multilingual_split(text);
+                        self.window.draw_menu(
+                            &words.join(" "),
+                            self.screen_size,
+                            &self.config.theme,
+                        );
+                        keep_drawing = true;
+                    }
                     _ => {
                         for action in &self.config.text_actions {
-                            if action.key.to_ascii_uppercase() == key_char {
-                                match std::process::Command::new(&action.command)
-                                    .args(
-                                        action
-                                            .args
-                                            .iter()
-                                            .map(|arg| arg.replace("{selection}", text)),
-                                    )
-                                    .stdout(std::process::Stdio::piped())
-                                    .spawn()
-                                    .and_then(|child| child.wait_with_output())
-                                {
-                                    Ok(o) => {
-                                        if !o.stdout.is_empty() {
-                                            new_text = Some(
-                                                String::from_utf8_lossy(&o.stdout)
-                                                    .trim_end_matches('\n')
-                                                    .to_string(),
-                                            );
-                                            keep_drawing = true;
-                                        }
-                                        if !o.stderr.is_empty() {
-                                            eprintln!(
-                                                "Stderr: {}",
-                                                String::from_utf8_lossy(&o.stderr)
-                                            );
-                                        }
-                                    }
-                                    Err(e) => {
-                                        eprintln!("Failed to run command: {e}");
-                                    }
-                                };
-                                break;
+                            if action.key.to_ascii_uppercase() != key_char {
+                                continue;
                             }
+                            match std::process::Command::new(&action.command)
+                                .args(
+                                    action
+                                        .args
+                                        .iter()
+                                        .map(|arg| arg.replace("{selection}", text)),
+                                )
+                                .stdout(std::process::Stdio::piped())
+                                .spawn()
+                                .and_then(|child| child.wait_with_output())
+                            {
+                                Ok(o) => {
+                                    if !o.stdout.is_empty() {
+                                        new_text = Some(
+                                            String::from_utf8_lossy(&o.stdout)
+                                                .trim_end_matches('\n')
+                                                .to_string(),
+                                        );
+                                        keep_drawing = true;
+                                    }
+                                    if !o.stderr.is_empty() {
+                                        eprintln!("Stderr: {}", String::from_utf8_lossy(&o.stderr));
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to run command: {e}");
+                                }
+                            };
+                            break;
                         }
                     }
                 }
@@ -440,41 +450,41 @@ impl AppState {
                 true
             }
             Mode::Scrolling => {
-                let Some(ElementOfInterest { element, .. }) = self.selected.as_ref() else {
-                    self.deactivate();
-                    return true;
-                };
+                let ElementOfInterest { element, .. } = self.selected.as_ref().expect(
+                    "A scrollbar is supposed to be selected before entering Mode::Scrolling!",
+                );
 
-                if let Some(old_val) = element
+                let Some(old_val) = element
                     .value()
                     .ok()
                     .and_then(|v| v.downcast::<CFNumber>())
                     .and_then(|f| f.to_f64())
-                {
-                    let scroll_unit = self.config.scroll_distance;
-                    match key_char {
-                        'J' => {
-                            let _ = element.set_value(
-                                CFNumber::from((old_val + scroll_unit).min(1.0)).as_CFType(),
-                            );
-                        }
-                        'K' => {
-                            let _ = element.set_value(
-                                CFNumber::from((old_val - scroll_unit).max(0.0)).as_CFType(),
-                            );
-                        }
-                        'I' => {
-                            self.config.scroll_distance *= 1.5;
-                        }
-                        'D' => {
-                            self.config.scroll_distance /= 1.5;
-                        }
-                        _ => {
-                            self.deactivate();
-                        }
-                    }
-                } else {
+                else {
                     self.deactivate();
+                    return false;
+                };
+
+                let scroll_unit = self.config.scroll_distance;
+                match key_char {
+                    'J' => {
+                        let _ = element.set_value(
+                            CFNumber::from((old_val + scroll_unit).min(1.0)).as_CFType(),
+                        );
+                    }
+                    'K' => {
+                        let _ = element.set_value(
+                            CFNumber::from((old_val - scroll_unit).max(0.0)).as_CFType(),
+                        );
+                    }
+                    'I' => {
+                        self.config.scroll_distance *= 1.5;
+                    }
+                    'D' => {
+                        self.config.scroll_distance /= 1.5;
+                    }
+                    _ => {
+                        self.deactivate();
+                    }
                 }
                 true
             }
