@@ -236,7 +236,8 @@ fn draw_text_box(
         // HACK: For multilingual text, height is underestimated due to fallback fonts.
         // This ensures more vertical spacing.
         let style = NSMutableParagraphStyle::default_retained();
-        style.setLineSpacing(font.pointSize() / 3.5);
+        style.setLineSpacing(1.0);
+        // style.setLineHeightMultiple(1.2);
         attr_string.addAttribute_value_range(NSParagraphStyleAttributeName, &style, full_range);
 
         text_box_with_attributed_string(
@@ -290,6 +291,7 @@ fn text_box_with_attributed_string(
         NSPoint::new(margin, margin), // Positioned exactly at margin
         CGSize::new(size.width, size.height),
     ));
+    text_layer.setWrapped(true);
 
     unsafe {
         text_layer.setString(Some(&attr_string));

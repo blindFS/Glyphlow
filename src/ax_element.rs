@@ -31,7 +31,7 @@ pub enum RoleOfInterest {
 pub struct ElementOfInterest {
     pub element: AXUIElement,
     pub context: Option<String>,
-    // TODO: role based drawing
+    // TODO: role based drawing?
     pub role: RoleOfInterest,
     pub frame: Frame,
 }
@@ -224,7 +224,6 @@ impl ElementCache {
                     let (w, h) = frame.size();
 
                     // Draw frames for large enough elements
-                    // TODO: configurable?
                     let frame = if w.max(h) >= colored_frame_min_size {
                         color_idx += 1;
                         Some(frame.invert_y(screen_height))

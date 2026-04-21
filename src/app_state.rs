@@ -291,7 +291,6 @@ impl AppState {
                     false
                 }
             }
-            // TODO: Mode::Input for input text fields/areas
             Mode::DashBoard => {
                 match key_char {
                     'P' => {
@@ -388,13 +387,10 @@ impl AppState {
                         }
                         keep_drawing = true;
                     }
+                    // TODO: new word selecting mode
                     'S' => {
                         let words = multilingual_split(text);
-                        self.window.draw_menu(
-                            &words.join(" "),
-                            self.screen_size,
-                            &self.config.theme,
-                        );
+                        new_text = Some(words.join(" "));
                         keep_drawing = true;
                     }
                     _ => {
