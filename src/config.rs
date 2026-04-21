@@ -56,7 +56,7 @@ fn default_menu_margin() -> u8 {
     10
 }
 fn default_menu_bg() -> CFRetained<CGColor> {
-    color_from_hex("#111726a0")
+    color_from_hex("#111726dd")
 }
 fn default_menu_fg() -> CFRetained<CGColor> {
     color_from_hex("#a3aed2ff")
@@ -109,12 +109,24 @@ fn color_from_hex(hex: &str) -> CFRetained<CGColor> {
     color_try_from_hex(hex).expect("Invalid color")
 }
 
+#[derive(Deserialize, Serialize, Debug, PartialEq)]
+pub enum ActionKind {
+    Blocking,
+    NonBlocking,
+}
+
+fn default_action_kind() -> ActionKind {
+    ActionKind::Blocking
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TextAction {
     pub command: String,
     pub args: Vec<String>,
     pub display: String,
     pub key: char,
+    #[serde(default = "default_action_kind")]
+    pub kind: ActionKind,
 }
 
 pub trait AlphabeticKey {

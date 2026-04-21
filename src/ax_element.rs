@@ -142,36 +142,47 @@ impl ElementCache {
     }
 
     pub fn add(&mut self, element: &AXUIElement, context: Option<String>, role: RoleOfInterest) {
-        if let Some(frame) = element.get_frame() {
-            let (w, h) = frame.size();
-            if role != RoleOfInterest::GenericNode
-                && role != RoleOfInterest::ScrollBar
-                && (w < self.element_min_width || h < self.element_min_height)
-            {
-                return;
+        // Has to be concrete leaf elements with frames
+        // TODO: false negatives in some apps, e.g. chrome
+        let Some(frame) = element.get_frame() else {
+            return;
+        };
+
+        // Size based filtering
+        let (w, h) = frame.size();
+        if role != RoleOfInterest::GenericNode
+            && role != RoleOfInterest::ScrollBar
+            && (w < self.element_min_width || h < self.element_min_height)
+        {
+            return;
+        }
+
+        // Role specific filtering
+        match role {
+            RoleOfInterest::StaticText | RoleOfInterest::Button | RoleOfInterest::MenuItem => {
+                if let Some(ctx) = context.as_ref()
+                    && (ctx.is_empty() || ctx.chars().all(|c| c.is_ascii_punctuation()))
+                {
+                    return;
+                }
             }
-            let (x, y) = frame.center();
-            // f64 to u64 for hashing
-            let center = (x.to_bits(), y.to_bits());
-            // NOTE: de-duplication for DOM elements
-            if !self.seen_center.contains(&center)
-                && (role == RoleOfInterest::Button
-                    || role == RoleOfInterest::GenericNode
-                    || context
-                        .as_ref()
-                        // naive filtering
-                        .is_none_or(|ctx| {
-                            !ctx.is_empty() && !ctx.chars().all(|c| c.is_ascii_punctuation())
-                        }))
-            {
-                self.seen_center.insert(center);
-                self.cache.push(ElementOfInterest::new(
-                    element.clone(),
-                    context,
-                    role,
-                    frame,
-                ));
-            }
+            // NOTE: keep text fields
+            _ => (),
+        }
+
+        let (x, y) = frame.center();
+        // f64 to u64 for hashing
+        let center = (x.to_bits(), y.to_bits());
+
+        // NOTE: de-duplication for DOM elements
+        if !self.seen_center.contains(&center) {
+            self.seen_center.insert(center);
+            self.cache.push(ElementOfInterest::new(
+                element.clone(),
+                context,
+                role,
+                frame,
+            ));
         }
     }
 

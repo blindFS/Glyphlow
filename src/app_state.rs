@@ -1,31 +1,47 @@
-use std::collections::HashSet;
-
 use crate::{
     action::{dictionary_lookup, multilingual_split, text_to_clipboard},
     ax_element::{
         ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, RoleOfInterest,
         SetAttribute, Target, traverse_elements,
     },
-    config::{AlphabeticKey, GlyphlowConfig},
+    config::{ActionKind, AlphabeticKey, GlyphlowConfig},
     drawer::{GlyphlowDrawingLayer, create_overlay_window, get_main_screen_size},
     os_util::get_focused_pid,
 };
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
 use accessibility_sys::kAXFocusedAttribute;
-use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber};
+use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber, string::CFString};
+
+use notify::{FsEventWatcher, RecursiveMode};
 use objc2::{MainThreadMarker, rc::Retained};
 use objc2_core_foundation::CGSize;
 use objc2_quartz_core::CALayer;
+
+use notify_debouncer_mini::{Debouncer, new_debouncer};
 use rdev::Key;
+use std::{
+    collections::HashSet,
+    path::PathBuf,
+    process::Child,
+    sync::mpsc::{self, Receiver, Sender},
+    time::Duration,
+};
 
 #[derive(PartialEq)]
 enum Mode {
-    Idle,
     DashBoard,
-    Filtering,
-    TextActionMenu,
     ElementActionMenu,
+    Filtering,
+    Idle,
     Scrolling,
+    TextActionMenu,
+    Transparent,
+}
+
+enum Signal {
+    Stdout(String),
+    Stderr(String),
+    Exit,
 }
 
 static MAX_TEXT_DISPLAY_LEN: usize = 30;
@@ -47,6 +63,10 @@ pub struct AppState {
     config: GlyphlowConfig,
     hint_width: u32,
     selected: Option<ElementOfInterest>,
+    call_listener: Option<Receiver<Signal>>,
+    /// For editing element text values
+    temp_file: PathBuf,
+    temp_file_listener: Option<(Debouncer<FsEventWatcher>, Receiver<()>)>,
 }
 
 impl Default for AppState {
@@ -64,6 +84,7 @@ impl AppState {
         let window = CALayer::from_window(&window).expect("Failed to get root layer of window.");
 
         let config = GlyphlowConfig::load_config();
+        let temp_file = Self::create_cache_file().expect("Failed to create temp file.");
 
         Self {
             pressed_keys: HashSet::new(),
@@ -80,7 +101,21 @@ impl AppState {
             window,
             config,
             selected: None,
+            call_listener: None,
+            temp_file,
+            temp_file_listener: None,
         }
+    }
+
+    fn create_cache_file() -> Option<PathBuf> {
+        let cache_dir = std::env::var("HOME")
+            .ok()
+            .map(|dir| PathBuf::from(dir).join(".cache/glyphlow"))?;
+        if !cache_dir.exists() {
+            std::fs::create_dir_all(&cache_dir).ok()?;
+        }
+        let cache_file = cache_dir.join("tempfile");
+        Some(cache_file)
     }
 
     fn deactivate(&mut self) {
@@ -91,6 +126,7 @@ impl AppState {
     }
 
     fn clear_cache(&mut self) {
+        self.temp_file_listener = None;
         self.hint_boxes.clear();
         self.element_cache.clear();
         self.key_prefix.clear();
@@ -180,8 +216,12 @@ impl AppState {
         }
     }
 
-    fn press_on_element(element: &AXUIElement) {
+    fn focus_on_element(element: &AXUIElement) {
         element.set_attribute_by_name(kAXFocusedAttribute, CFBoolean::true_value().as_CFType());
+    }
+
+    fn press_on_element(element: &AXUIElement) {
+        Self::focus_on_element(element);
         if let Err(e) = element.press() {
             eprintln!("Failed to click element: {e}");
         };
@@ -265,14 +305,177 @@ impl AppState {
         }
     }
 
+    fn take_external_action(&mut self, key_char: char, selected_text: &str) -> bool {
+        let mut read_from_file = false;
+
+        for action in &self.config.text_actions {
+            if action.key.to_ascii_uppercase() != key_char {
+                continue;
+            }
+
+            let raw_args = action.args.iter();
+
+            let args: Vec<String> = if action
+                .args
+                .iter()
+                .any(|arg| arg.contains("{glyphlow_temp_file}"))
+            {
+                // Write current selected text to temp file
+                let _ = std::fs::write(&self.temp_file, selected_text);
+                let temp_fp = self.temp_file.to_str().unwrap_or_else(|| {
+                    panic!("Failed to get temp file path for {:?}.", self.temp_file)
+                });
+
+                let (ftx, frx) = mpsc::channel();
+                read_from_file = true;
+
+                let Ok(mut debouncer) =
+                    new_debouncer(Duration::from_millis(200), move |res| match res {
+                        Ok(_) => {
+                            // Notify: file updated
+                            ftx.send(()).expect("Failed to send file update signal.");
+                        }
+                        Err(e) => eprintln!("Watch error: {:?}", e),
+                    })
+                else {
+                    return false;
+                };
+
+                let _ = debouncer
+                    .watcher()
+                    .watch(self.temp_file.as_path(), RecursiveMode::NonRecursive);
+
+                self.temp_file_listener = Some((debouncer, frx));
+                self.mode = Mode::Idle;
+
+                raw_args
+                    .map(|arg| arg.replace("{glyphlow_temp_file}", temp_fp))
+                    .collect()
+            } else {
+                raw_args
+                    .map(|arg| arg.replace("{glyphlow_text}", selected_text))
+                    .collect()
+            };
+
+            let Ok(child) = std::process::Command::new(&action.command)
+                .args(args)
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+            else {
+                eprintln!(
+                    "Failed to spawn command: {} {}",
+                    action.command,
+                    action.args.join(" ")
+                );
+                return false;
+            };
+
+            if action.kind == ActionKind::NonBlocking {
+                let (tx, rx) = mpsc::channel();
+                if !read_from_file {
+                    // Don't react to any key event before the finishing signal
+                    self.call_listener = Some(rx);
+                    self.mode = Mode::Transparent;
+                }
+                external_call(child, tx, read_from_file);
+            } else {
+                // Wait for the stdout as the new text
+                match child.wait_with_output() {
+                    Ok(o) => {
+                        if !o.stdout.is_empty() {
+                            let new_text = String::from_utf8_lossy(&o.stdout)
+                                .trim_end_matches('\n')
+                                .to_string();
+                            self.update_selected_text_and_show_menu(new_text);
+                        } else if !o.stderr.is_empty() {
+                            eprintln!("External stderr: {}", String::from_utf8_lossy(&o.stderr));
+                            return false;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to run command: {e}");
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+        false
+    }
+
+    fn update_selected_text(&mut self, new_text: String) {
+        if let Some(ElementOfInterest {
+            element,
+            context,
+            // role,
+            ..
+        }) = self.selected.as_mut()
+        {
+            // if *role == RoleOfInterest::TextField {
+            if let Err(e) = element.set_value(CFString::new(&new_text).as_CFType()) {
+                eprintln!("Failed to set the text of focused element: {element:?}\n Error: {e}");
+            }
+            // }
+            *context = Some(new_text);
+        }
+    }
+
+    fn update_selected_text_and_show_menu(&mut self, new_text: String) {
+        self.clear_drawing();
+        self.draw_text_action_menu(&new_text);
+        self.update_selected_text(new_text);
+        self.mode = Mode::TextActionMenu;
+    }
+
     pub fn is_active(&self) -> bool {
-        self.mode != Mode::Idle
+        self.mode != Mode::Idle && self.mode != Mode::Transparent
+    }
+
+    pub fn check_external_output(&mut self) -> bool {
+        // Temp file updated usually means the text is changed in an external editor,
+        // update the text value of current selected AXUIElement.
+        if self
+            .temp_file_listener
+            .as_ref()
+            .and_then(|(_, rx)| rx.try_recv().ok())
+            .is_some()
+            && let Ok(new_text) = std::fs::read_to_string(&self.temp_file)
+        {
+            // println!("Temp file updated: {}\nEOI: {:?}", new_text, self.selected);
+            self.update_selected_text(new_text);
+            return true;
+        }
+
+        if let Some(msg) = self
+            .call_listener
+            .as_ref()
+            .and_then(|rx| rx.try_recv().ok())
+        {
+            match msg {
+                Signal::Stdout(msg) => {
+                    self.update_selected_text_and_show_menu(msg);
+                    return true;
+                }
+                Signal::Stderr(msg) => {
+                    eprintln!("Error: {msg}");
+                    self.deactivate();
+                }
+                Signal::Exit => {
+                    self.deactivate();
+                }
+            }
+            self.call_listener = None;
+        }
+        false
     }
 
     pub fn act_on_key(&mut self, key: Key) -> bool {
         let key_char = key.to_char();
 
         match self.mode {
+            // Don't swallow any key
+            Mode::Transparent => false,
             Mode::Idle => {
                 if self.config.global_trigger_key.keys.iter().all(|k| {
                     k == &key
@@ -353,28 +556,29 @@ impl AppState {
                     return true;
                 };
 
+                let text = text.clone();
+
                 // Chain different actions
                 let mut new_text: Option<String> = None;
-                let mut keep_drawing = false;
 
                 // Clear old menu no matter which action is taken
                 self.clear_drawing();
 
                 // TODO:
                 // 1. URL handling
-                match key_char {
+                let keep_drawing = match key_char {
                     'C' => {
-                        text_to_clipboard(text);
+                        text_to_clipboard(&text);
                         // TODO: better notification
                         self.window.draw_menu(
                             "Copied to clipboard.",
                             self.screen_size,
                             &self.config.theme,
                         );
-                        keep_drawing = true;
+                        true
                     }
                     'D' => {
-                        if let Some(def_str) = dictionary_lookup(text) {
+                        if let Some(def_str) = dictionary_lookup(&text) {
                             self.window
                                 .draw_menu(&def_str, self.screen_size, &self.config.theme);
                         } else {
@@ -385,51 +589,16 @@ impl AppState {
                                 &self.config.theme,
                             );
                         }
-                        keep_drawing = true;
+                        true
                     }
                     // TODO: new word selecting mode
                     'S' => {
-                        let words = multilingual_split(text);
+                        let words = multilingual_split(&text);
                         new_text = Some(words.join(" "));
-                        keep_drawing = true;
+                        true
                     }
-                    _ => {
-                        for action in &self.config.text_actions {
-                            if action.key.to_ascii_uppercase() != key_char {
-                                continue;
-                            }
-                            match std::process::Command::new(&action.command)
-                                .args(
-                                    action
-                                        .args
-                                        .iter()
-                                        .map(|arg| arg.replace("{selection}", text)),
-                                )
-                                .stdout(std::process::Stdio::piped())
-                                .spawn()
-                                .and_then(|child| child.wait_with_output())
-                            {
-                                Ok(o) => {
-                                    if !o.stdout.is_empty() {
-                                        new_text = Some(
-                                            String::from_utf8_lossy(&o.stdout)
-                                                .trim_end_matches('\n')
-                                                .to_string(),
-                                        );
-                                        keep_drawing = true;
-                                    }
-                                    if !o.stderr.is_empty() {
-                                        eprintln!("Stderr: {}", String::from_utf8_lossy(&o.stderr));
-                                    }
-                                }
-                                Err(e) => {
-                                    eprintln!("Failed to run command: {e}");
-                                }
-                            };
-                            break;
-                        }
-                    }
-                }
+                    _ => self.take_external_action(key_char, &text),
+                };
 
                 if let Some(new_txt) = new_text
                     && !new_txt.is_empty()
@@ -486,4 +655,35 @@ impl AppState {
             }
         }
     }
+}
+
+fn external_call(child: Child, tx: Sender<Signal>, read_from_file: bool) {
+    std::thread::spawn(move || {
+        let output = child.wait_with_output();
+        if !read_from_file {
+            match output {
+                Ok(o) => {
+                    if !o.stdout.is_empty() {
+                        let _ = tx.send(Signal::Stdout(
+                            String::from_utf8_lossy(&o.stdout)
+                                .trim_end_matches('\n')
+                                .to_string(),
+                        ));
+                    } else if !o.stderr.is_empty() {
+                        let _ = tx.send(Signal::Stderr(
+                            String::from_utf8_lossy(&o.stderr)
+                                .trim_end_matches('\n')
+                                .to_string(),
+                        ));
+                    } else {
+                        let _ = tx.send(Signal::Exit);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to run command: {e}");
+                    let _ = tx.send(Signal::Exit);
+                }
+            }
+        }
+    });
 }
