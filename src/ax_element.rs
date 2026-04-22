@@ -2,11 +2,11 @@ use std::collections::HashSet;
 
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
-    AXValueCreate, AXValueGetValue, AXValueRef, kAXButtonRole, kAXGroupRole, kAXHiddenAttribute,
-    kAXMenuBarRole, kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction,
-    kAXScrollBarRole, kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole,
-    kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
-    kAXValueTypeCGPoint, kAXValueTypeCGSize,
+    AXValueCreate, AXValueGetValue, AXValueRef, kAXButtonRole, kAXComboBoxRole, kAXGroupRole,
+    kAXHiddenAttribute, kAXMenuBarRole, kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute,
+    kAXPressAction, kAXScrollBarRole, kAXSelectedTextRangeAttribute, kAXSizeAttribute,
+    kAXStaticTextRole, kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute,
+    kAXValueTypeCFRange, kAXValueTypeCGPoint, kAXValueTypeCGSize,
 };
 use core_foundation::{
     attributed_string::{CFAttributedStringGetString, CFAttributedStringRef},
@@ -489,7 +489,7 @@ pub fn traverse_elements(
                 _ => (),
             },
             // TODO: select only the visible part, `kAXVisibleCharacterRangeAttribute`
-            kAXTextFieldRole | kAXTextAreaRole => match target {
+            kAXComboBoxRole | kAXTextFieldRole | kAXTextAreaRole => match target {
                 Target::Text => {
                     if let Some(value) = element.get_attribute_string(kAXValueAttribute) {
                         cache.add(element, Some(value), RoleOfInterest::TextField);

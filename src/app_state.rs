@@ -153,7 +153,9 @@ impl AppState {
         } else {
             text
         };
-        let mut msg = format!("Select action for text:\n\n{text}\n\n⮺ Copy (C)\n◫ Dictionary (D)");
+        let mut msg = format!(
+            "Select action for text:\n\n{text}\n\n⮺ Copy (C)\n◫ Dictionary (D)\n󰃻 Split (S)"
+        );
         for action in self.config.text_actions.iter() {
             msg.push_str(&format!("\n{} ({})", action.display, action.key));
         }
@@ -305,7 +307,12 @@ impl AppState {
         }
     }
 
-    fn take_external_action(&mut self, key_char: char, selected_text: &str) -> bool {
+    fn take_external_action(
+        &mut self,
+        element: &AXUIElement,
+        key_char: char,
+        selected_text: &str,
+    ) -> bool {
         let mut read_from_file = false;
 
         for action in &self.config.text_actions {
@@ -329,6 +336,7 @@ impl AppState {
                 let (ftx, frx) = mpsc::channel();
                 read_from_file = true;
 
+                // NOTE: listen to file updates with FsEvent
                 let Ok(mut debouncer) =
                     new_debouncer(Duration::from_millis(200), move |res| match res {
                         Ok(_) => {
@@ -347,6 +355,9 @@ impl AppState {
 
                 self.temp_file_listener = Some((debouncer, frx));
                 self.mode = Mode::Idle;
+                // Focus before editing,
+                // which increases the success rate of text updating
+                Self::focus_on_element(element);
 
                 raw_args
                     .map(|arg| arg.replace("{glyphlow_temp_file}", temp_fp))
@@ -483,6 +494,7 @@ impl AppState {
                         || k.right_alternative()
                             .is_some_and(|r| *k == r || self.pressed_keys.contains(&r))
                 }) {
+                    self.selected = None;
                     self.mode = Mode::DashBoard;
                     self.window.draw_menu(
                         "Select Mode:\n\nPress (P)\nText (T)\nElement (E)\nScrollBar (S)",
@@ -548,6 +560,7 @@ impl AppState {
             }
             Mode::TextActionMenu => {
                 let Some(ElementOfInterest {
+                    element,
                     context: Some(text),
                     ..
                 }) = self.selected.as_ref()
@@ -597,7 +610,7 @@ impl AppState {
                         new_text = Some(words.join(" "));
                         true
                     }
-                    _ => self.take_external_action(key_char, &text),
+                    _ => self.take_external_action(&element.clone(), key_char, &text),
                 };
 
                 if let Some(new_txt) = new_text
