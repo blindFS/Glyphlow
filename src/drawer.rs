@@ -1,6 +1,3 @@
-use core_foundation::{attributed_string::CFAttributedStringRef, base::CFRange};
-use core_graphics_types::geometry::CGSize as CCGSize;
-use core_text::framesetter::CTFramesetter;
 use objc2::{
     AnyThread, MainThreadMarker, MainThreadOnly,
     rc::{DefaultRetained, Retained},
@@ -17,6 +14,7 @@ use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer, kCAAlignmentCenter};
 use crate::{
     ax_element::{Frame, HintBox},
     config::GlyphlowTheme,
+    util::estimate_frame_for_text,
 };
 
 enum Center {
@@ -69,6 +67,13 @@ pub trait GlyphlowDrawingLayer {
     );
     fn draw_menu(&self, text: &str, screen_size: CGSize, theme: &GlyphlowTheme);
     fn draw_frame_box(&self, frames: &Frame, color: &CFRetained<CGColor>);
+    fn draw_attributed_string(
+        &self,
+        attr_string: Retained<NSMutableAttributedString>,
+        screen_size: CGSize,
+        text_size: CGSize,
+        theme: &GlyphlowTheme,
+    );
 }
 
 // TODO: notification
@@ -96,7 +101,7 @@ impl GlyphlowDrawingLayer for CALayer {
         screen_size: CGSize,
     ) {
         // Geometry determined by font size
-        let font_size = NSFont::pointSize(&theme.hint_font);
+        let font_size = &theme.hint_font.pointSize();
         let tri_height = font_size / 2.0;
         let tri_width = font_size / 2.0;
 
@@ -106,20 +111,20 @@ impl GlyphlowDrawingLayer for CALayer {
         let fg_color = &theme.hint_fg_color;
         let font = &theme.hint_font;
 
-        unsafe {
-            for hint in hints {
-                let bg_color = hint.color.as_ref().unwrap_or(bg_color);
+        for hint in hints {
+            let bg_color = hint.color.as_ref().unwrap_or(bg_color);
 
-                if let Some(frame) = &hint.frame {
-                    self.draw_frame_box(frame, bg_color);
-                }
-                // Create NSMutableAttributedString first to estimate the size
-                // Highlight prefixed keys
-                let label_string = NSString::from_str(&hint.label);
-                let attr_string = NSMutableAttributedString::initWithString(
-                    NSMutableAttributedString::alloc(),
-                    &label_string,
-                );
+            if let Some(frame) = &hint.frame {
+                self.draw_frame_box(frame, bg_color);
+            }
+            // Create NSMutableAttributedString first to estimate the size
+            // Highlight prefixed keys
+            let label_string = NSString::from_str(&hint.label);
+            let attr_string = NSMutableAttributedString::initWithString(
+                NSMutableAttributedString::alloc(),
+                &label_string,
+            );
+            unsafe {
                 attr_string.addAttribute_value_range(
                     NSForegroundColorAttributeName,
                     hl_color.as_ref(),
@@ -135,23 +140,27 @@ impl GlyphlowDrawingLayer for CALayer {
                     font,
                     NSRange::new(0, hint.label.len()),
                 );
+            }
 
-                // Background Box
-                let box_layer = text_box_with_attributed_string(
-                    attr_string,
-                    true,
-                    bg_color,
-                    theme.hint_margin_size as f64,
-                    Center::Top(hint.x, hint.y - tri_height),
-                    screen_size,
-                );
+            // Background Box
+            let box_layer = text_box_with_attributed_string(
+                attr_string,
+                true,
+                bg_color,
+                theme.hint_margin_size as f64,
+                Center::Top(hint.x, hint.y - tri_height),
+                screen_size,
+                None,
+            );
 
-                // Create the triangle pointing to the center
-                let box_size = box_layer.bounds().size;
-                let tri_y_offset = box_size.height;
-                let tri_x_offset = (box_size.width - tri_width) / 2.0;
-                let tri_layer = CAShapeLayer::new();
-                let path = CGMutablePath::new();
+            // Create the triangle pointing to the center
+            let box_size = box_layer.bounds().size;
+            let tri_y_offset = box_size.height;
+            let tri_x_offset = (box_size.width - tri_width) / 2.0;
+            let tri_layer = CAShapeLayer::new();
+            let path = CGMutablePath::new();
+
+            unsafe {
                 CGMutablePath::move_to_point(Some(&path), std::ptr::null(), 0.0, 0.0); // A
                 CGMutablePath::add_line_to_point(
                     Some(&path),
@@ -160,19 +169,50 @@ impl GlyphlowDrawingLayer for CALayer {
                     tri_height,
                 ); // B
                 CGMutablePath::add_line_to_point(Some(&path), std::ptr::null(), tri_width, 0.0); // C
-                CGMutablePath::close_subpath(Some(&path));
-
-                tri_layer.setPath(Some(&path));
-                tri_layer.setFillColor(Some(bg_color));
-                tri_layer.setFrame(NSRect::new(
-                    NSPoint::new(tri_x_offset, tri_y_offset),
-                    NSSize::new(tri_width, tri_height),
-                ));
-
-                box_layer.addSublayer(&tri_layer);
-                self.addSublayer(&box_layer);
             }
+            CGMutablePath::close_subpath(Some(&path));
+
+            tri_layer.setPath(Some(&path));
+            tri_layer.setFillColor(Some(bg_color));
+            tri_layer.setFrame(NSRect::new(
+                NSPoint::new(tri_x_offset, tri_y_offset),
+                NSSize::new(tri_width, tri_height),
+            ));
+
+            box_layer.addSublayer(&tri_layer);
+            self.addSublayer(&box_layer);
         }
+    }
+
+    fn draw_attributed_string(
+        &self,
+        attr_string: Retained<NSMutableAttributedString>,
+        screen_size: CGSize,
+        text_size: CGSize,
+        theme: &GlyphlowTheme,
+    ) {
+        let full_range = NSRange::new(0, attr_string.length());
+
+        unsafe {
+            attr_string.addAttribute_value_range(
+                NSForegroundColorAttributeName,
+                theme.menu_fg_color.as_ref(),
+                full_range,
+            );
+        }
+
+        let text_box = text_box_with_attributed_string(
+            attr_string,
+            false,
+            &theme.menu_bg_color,
+            theme.menu_margin_size as f64,
+            Center::Middle(screen_size.width / 2.0, screen_size.height / 2.0),
+            screen_size,
+            Some(text_size),
+        );
+        text_box.setBorderWidth(2.0);
+        text_box.setBorderColor(Some(&theme.menu_fg_color));
+        self.addSublayer(&text_box);
     }
 
     fn draw_menu(&self, text: &str, screen_size: CGSize, theme: &GlyphlowTheme) {
@@ -247,6 +287,7 @@ fn draw_text_box(
             margin,
             center,
             screen_size,
+            None,
         )
     }
 }
@@ -258,20 +299,14 @@ fn text_box_with_attributed_string(
     margin: f64,
     center: Center,
     screen_size: CGSize,
+    frame_size: Option<CGSize>,
 ) -> Retained<CALayer> {
-    let cf_attr_string = Retained::as_ptr(&attr_string) as CFAttributedStringRef;
-    let framesetter = CTFramesetter::new_with_attributed_string(cf_attr_string);
-    let (size, _) = framesetter.suggest_frame_size_with_constraints(
-        CFRange {
-            location: 0,
-            length: 0,
-        },
-        std::ptr::null(),
-        CCGSize::new(screen_size.width, screen_size.height),
-    );
+    let size @ CGSize { width, height } = frame_size.unwrap_or_else(|| {
+        estimate_frame_for_text(&attr_string, (screen_size.width, screen_size.height))
+    });
 
-    let box_width = size.width + (margin * 2.0);
-    let box_height = size.height + (margin * 2.0);
+    let box_width = width + (margin * 2.0);
+    let box_height = height + (margin * 2.0);
 
     let (o_x, o_y) = match center {
         Center::Top(x, y) => (x - box_width / 2.0, y - box_height),
@@ -289,7 +324,7 @@ fn text_box_with_attributed_string(
     let text_layer = CATextLayer::new();
     text_layer.setFrame(NSRect::new(
         NSPoint::new(margin, margin), // Positioned exactly at margin
-        CGSize::new(size.width, size.height),
+        size,
     ));
     text_layer.setWrapped(true);
 

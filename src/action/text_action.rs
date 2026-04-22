@@ -110,6 +110,16 @@ pub fn multilingual_split(input: &str) -> Vec<String> {
     let segment_re = get_segment_re();
     let mut result = Vec::new();
 
+    // For a single piece without spaces, split by punctuations
+    if !input.contains(' ') {
+        return input
+            .split(|c: char| c.is_ascii_punctuation())
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect();
+    }
+
+    // Split into words, CJK words are separated
     for token in input.split_whitespace() {
         if url_re.is_match(token) {
             result.push(token.to_string());

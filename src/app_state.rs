@@ -1,5 +1,5 @@
 use crate::{
-    action::{dictionary_lookup, multilingual_split, text_to_clipboard},
+    action::{Word, WordPicker, dictionary_lookup, multilingual_split, text_to_clipboard},
     ax_element::{
         ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, RoleOfInterest,
         SetAttribute, Target, traverse_elements,
@@ -36,6 +36,7 @@ enum Mode {
     Scrolling,
     TextActionMenu,
     Transparent,
+    WordPicking,
 }
 
 enum Signal {
@@ -67,6 +68,7 @@ pub struct AppState {
     /// For editing element text values
     temp_file: PathBuf,
     temp_file_listener: Option<(Debouncer<FsEventWatcher>, Receiver<()>)>,
+    word_picker: Option<WordPicker>,
 }
 
 impl Default for AppState {
@@ -104,6 +106,7 @@ impl AppState {
             call_listener: None,
             temp_file,
             temp_file_listener: None,
+            word_picker: None,
         }
     }
 
@@ -127,6 +130,7 @@ impl AppState {
 
     fn clear_cache(&mut self) {
         self.temp_file_listener = None;
+        self.word_picker = None;
         self.hint_boxes.clear();
         self.element_cache.clear();
         self.key_prefix.clear();
@@ -237,6 +241,7 @@ impl AppState {
         } else {
             self.key_prefix.push(key_char);
         }
+
         let filtered_boxes = self
             .hint_boxes
             .iter()
@@ -415,7 +420,7 @@ impl AppState {
         false
     }
 
-    fn update_selected_text(&mut self, new_text: String) {
+    fn update_selected_text(&mut self, new_text: String, replace: bool) {
         if let Some(ElementOfInterest {
             element,
             context,
@@ -424,7 +429,7 @@ impl AppState {
         }) = self.selected.as_mut()
         {
             // if *role == RoleOfInterest::TextField {
-            if let Err(e) = element.set_value(CFString::new(&new_text).as_CFType()) {
+            if replace && let Err(e) = element.set_value(CFString::new(&new_text).as_CFType()) {
                 eprintln!("Failed to set the text of focused element: {element:?}\n Error: {e}");
             }
             // }
@@ -435,7 +440,7 @@ impl AppState {
     fn update_selected_text_and_show_menu(&mut self, new_text: String) {
         self.clear_drawing();
         self.draw_text_action_menu(&new_text);
-        self.update_selected_text(new_text);
+        self.update_selected_text(new_text, false);
         self.mode = Mode::TextActionMenu;
     }
 
@@ -454,7 +459,7 @@ impl AppState {
             && let Ok(new_text) = std::fs::read_to_string(&self.temp_file)
         {
             // println!("Temp file updated: {}\nEOI: {:?}", new_text, self.selected);
-            self.update_selected_text(new_text);
+            self.update_selected_text(new_text, true);
             return true;
         }
 
@@ -571,9 +576,6 @@ impl AppState {
 
                 let text = text.clone();
 
-                // Chain different actions
-                let mut new_text: Option<String> = None;
-
                 // Clear old menu no matter which action is taken
                 self.clear_drawing();
 
@@ -607,22 +609,57 @@ impl AppState {
                     // TODO: new word selecting mode
                     'S' => {
                         let words = multilingual_split(&text);
-                        new_text = Some(words.join(" "));
+                        let word_picker = WordPicker::new(words);
+
+                        let (text_size, attr_string) = word_picker
+                            .get_attributed_string(self.screen_size, &self.config.theme.menu_font);
+                        self.window.draw_attributed_string(
+                            attr_string,
+                            self.screen_size,
+                            text_size,
+                            &self.config.theme,
+                        );
+
+                        self.clear_cache();
+                        self.word_picker = Some(word_picker);
+                        self.mode = Mode::WordPicking;
                         true
                     }
                     _ => self.take_external_action(&element.clone(), key_char, &text),
                 };
 
-                if let Some(new_txt) = new_text
-                    && !new_txt.is_empty()
-                    && let Some(selected) = self.selected.as_mut()
-                {
-                    selected.context = Some(new_txt.clone());
-                    self.draw_text_action_menu(&new_txt);
-                }
-
                 if !keep_drawing {
                     self.deactivate();
+                }
+
+                true
+            }
+            Mode::WordPicking => {
+                let Some(word_picker) = self.word_picker.as_ref() else {
+                    self.deactivate();
+                    return false;
+                };
+
+                if key_char == ' ' {
+                    self.deactivate();
+                    return true;
+                } else if key_char == '-' {
+                    self.key_prefix.pop();
+                } else {
+                    self.key_prefix.push(key_char);
+                }
+
+                let filtered_words = word_picker
+                    .words
+                    .iter()
+                    .filter(|w| w.label.starts_with(&self.key_prefix))
+                    .collect::<Vec<_>>();
+
+                if self.key_prefix.len() == word_picker.digits as usize
+                    && filtered_words.len() == 1
+                    && let Some(Word { text, .. }) = filtered_words.first()
+                {
+                    self.update_selected_text_and_show_menu(text.clone())
                 }
 
                 true
@@ -673,29 +710,31 @@ impl AppState {
 fn external_call(child: Child, tx: Sender<Signal>, read_from_file: bool) {
     std::thread::spawn(move || {
         let output = child.wait_with_output();
-        if !read_from_file {
-            match output {
-                Ok(o) => {
-                    if !o.stdout.is_empty() {
-                        let _ = tx.send(Signal::Stdout(
-                            String::from_utf8_lossy(&o.stdout)
-                                .trim_end_matches('\n')
-                                .to_string(),
-                        ));
-                    } else if !o.stderr.is_empty() {
-                        let _ = tx.send(Signal::Stderr(
-                            String::from_utf8_lossy(&o.stderr)
-                                .trim_end_matches('\n')
-                                .to_string(),
-                        ));
-                    } else {
-                        let _ = tx.send(Signal::Exit);
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Failed to run command: {e}");
+        // Ignore the output, message passed via file listener
+        if read_from_file {
+            return;
+        }
+        match output {
+            Ok(o) => {
+                if !o.stdout.is_empty() {
+                    let _ = tx.send(Signal::Stdout(
+                        String::from_utf8_lossy(&o.stdout)
+                            .trim_end_matches('\n')
+                            .to_string(),
+                    ));
+                } else if !o.stderr.is_empty() {
+                    let _ = tx.send(Signal::Stderr(
+                        String::from_utf8_lossy(&o.stderr)
+                            .trim_end_matches('\n')
+                            .to_string(),
+                    ));
+                } else {
                     let _ = tx.send(Signal::Exit);
                 }
+            }
+            Err(e) => {
+                eprintln!("Failed to run command: {e}");
+                let _ = tx.send(Signal::Exit);
             }
         }
     });

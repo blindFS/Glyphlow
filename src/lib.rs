@@ -4,5 +4,6 @@ pub mod ax_element;
 mod config;
 mod drawer;
 pub mod os_util;
+pub mod util;
 
 pub use app_state::*;

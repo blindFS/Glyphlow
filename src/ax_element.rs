@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use crate::util::hint_label_from_index;
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     AXValueCreate, AXValueGetValue, AXValueRef, kAXButtonRole, kAXComboBoxRole, kAXGroupRole,
@@ -186,24 +187,6 @@ impl ElementCache {
         }
     }
 
-    fn int_to_string(i: usize, digits: u32) -> String {
-        let mut n = i;
-        let mut result = Vec::new();
-
-        while n > 0 {
-            let remainder = (n % 26) as u8;
-            let char = (b'A' + remainder) as char;
-            result.push(char);
-            n /= 26;
-        }
-
-        // pad to fixed length
-        while result.len() < digits as usize {
-            result.push('A');
-        }
-        result.iter().collect()
-    }
-
     pub fn hint_boxes(
         &self,
         screen_frame: &Frame,
@@ -246,7 +229,7 @@ impl ElementCache {
                         .and_then(|_| frame_colors.get(color_idx % color_num).cloned());
 
                     HintBox {
-                        label: Self::int_to_string(idx, digits),
+                        label: hint_label_from_index(idx, digits),
                         x,
                         y: (screen_height - y),
                         idx,
