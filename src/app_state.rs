@@ -158,7 +158,7 @@ impl AppState {
             text
         };
         let mut msg = format!(
-            "Select action for text:\n\n{text}\n\n⮺ Copy (C)\n◫ Dictionary (D)\n󰃻 Split (S)"
+            "Select Action for Text:\n\n{text}\n\n⮺ Copy (C)\n◫ Dictionary (D)\n󰃻 Split (S)"
         );
         for action in self.config.text_actions.iter() {
             msg.push_str(&format!("\n{} ({})", action.display, action.key));
@@ -169,7 +169,7 @@ impl AppState {
 
     fn draw_element_action_menu(&self) {
         self.window.draw_menu(
-            "Select Mode:\n\nText (T)\nPress (P)\nScrollBar (S)",
+            "Select Target:\n\n󰦨 Text (T)\n󰳽 Press (P)\n󱕒 ScrollBar (S)",
             self.screen_size,
             &self.config.theme,
         );
@@ -292,7 +292,7 @@ impl AppState {
                     self.selected = Some(eoi.clone());
                     self.clear_cache();
                     self.window.draw_menu(
-                            "Scroll With Following Keys:\n\nDown/Right (J)\nUp/Left (K)\nDistance Increase (I)\nDistance Decrease (D)",
+                            "Scroll With Following Keys:\n\n> Down/Right (J)\n< Up/Left (K)\n+ Distance Increase (I)\n- Distance Decrease (D)",
                             self.screen_size,
                             &self.config.theme,
                         );
@@ -502,7 +502,7 @@ impl AppState {
                     self.selected = None;
                     self.mode = Mode::DashBoard;
                     self.window.draw_menu(
-                        "Select Mode:\n\nPress (P)\nText (T)\nElement (E)\nScrollBar (S)",
+                        "Select Target:\n\n󰦨 Text (T)\n󰳽 Press (P)\n󱕒 ScrollBar (S)\n󰙅 Element (E)",
                         self.screen_size,
                         &self.config.theme,
                     );
