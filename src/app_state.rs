@@ -1,5 +1,5 @@
 use crate::{
-    action::{Word, WordPicker, dictionary_lookup, multilingual_split, text_to_clipboard},
+    action::{Word, WordPicker, dictionary_lookup, text_to_clipboard},
     ax_element::{
         ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, RoleOfInterest,
         SetAttribute, Target, traverse_elements,
@@ -606,10 +606,8 @@ impl AppState {
                         }
                         true
                     }
-                    // TODO: new word selecting mode
                     'S' => {
-                        let words = multilingual_split(&text);
-                        let word_picker = WordPicker::new(words);
+                        let word_picker = WordPicker::new(text);
 
                         let (text_size, attr_string) = word_picker
                             .get_attributed_string(self.screen_size, &self.config.theme.menu_font);

@@ -1,5 +1,4 @@
-use std::fmt::Display;
-
+use crate::util::{estimate_frame_for_text, hint_label_from_index};
 use objc2::{
     AnyThread,
     rc::{DefaultRetained, Retained},
@@ -9,8 +8,9 @@ use objc2_app_kit::{
 };
 use objc2_core_foundation::CGSize;
 use objc2_foundation::{NSMutableAttributedString, NSRange, NSString};
-
-use crate::util::{estimate_frame_for_text, hint_label_from_index};
+use regex::Regex;
+use std::fmt::Display;
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone)]
 pub struct Word {
@@ -24,7 +24,8 @@ pub struct WordPicker {
 }
 
 impl WordPicker {
-    pub fn new(words: Vec<String>) -> Self {
+    pub fn new(text: String) -> Self {
+        let words = multilingual_split(&text);
         let digits = words.len().ilog(26) + 1;
         let mut result = Vec::new();
         for (i, text) in words.into_iter().enumerate() {
@@ -94,5 +95,129 @@ impl Display for WordPicker {
             .collect::<Vec<_>>()
             .join(" ");
         write!(f, "{str}")
+    }
+}
+
+const URL_PATTERN: &str = r"^[a-zA-Z][a-zA-Z0-9+.-]*://\S+$";
+
+// Matches EITHER a sequence of CJK characters OR a sequence of everything else.
+// This naturally separates them when they are adjacent.
+const SCRIPT_SEGMENT_PATTERN: &str = r"([\u{4E00}-\u{9FFF}\u{3040}-\u{30FF}\u{AC00}-\u{D7AF}]+|[^\u{4E00}-\u{9FFF}\u{3040}-\u{30FF}\u{AC00}-\u{D7AF}]+)";
+
+fn get_url_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(URL_PATTERN).unwrap())
+}
+
+fn get_segment_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(SCRIPT_SEGMENT_PATTERN).unwrap())
+}
+
+// TODO: smarter split
+fn multilingual_split(input: &str) -> Vec<String> {
+    let url_re = get_url_re();
+    let segment_re = get_segment_re();
+    let mut result = Vec::new();
+
+    // For a single piece without spaces, split by punctuations
+    if !input.contains(' ') {
+        return input
+            .split(|c: char| c.is_ascii_punctuation())
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect();
+    }
+
+    // Split into words, CJK words are separated
+    for token in input.split_whitespace() {
+        if url_re.is_match(token) {
+            result.push(token.to_string());
+        } else {
+            for mat in segment_re.find_iter(token) {
+                result.push(mat.as_str().to_string());
+            }
+        }
+    }
+
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_basic_latin_splitting() {
+        let input = "Hello world rust";
+        let expected = vec!["Hello", "world", "rust"];
+        assert_eq!(multilingual_split(input), expected);
+    }
+
+    #[test]
+    fn test_cjk_only_splitting() {
+        // CJK groups should stay together if not separated by spaces
+        let input = "こんにちは 世界 常用漢字";
+        let expected = vec!["こんにちは", "世界", "常用漢字"];
+        assert_eq!(multilingual_split(input), expected);
+    }
+
+    #[test]
+    fn test_mixed_adjacency_splitting() {
+        // This is the core requirement: split when script types change
+        let input = "Hello世界2024年";
+        let expected = vec!["Hello", "世界", "2024", "年"];
+        assert_eq!(multilingual_split(input), expected);
+    }
+
+    #[test]
+    fn test_url_protection() {
+        // URLs containing CJK or special chars should remain intact
+        let input =
+            "Check https://example.com/path/世界/page?query=1#hash and ftp://files.org/data";
+        let result = multilingual_split(input);
+
+        assert!(result.contains(&"https://example.com/path/世界/page?query=1#hash".to_string()));
+        assert!(result.contains(&"ftp://files.org/data".to_string()));
+        assert_eq!(result[0], "Check");
+    }
+
+    #[test]
+    fn test_multiple_script_boundaries() {
+        // Testing complex mixed strings
+        let input = "Rustはawesomeです";
+        let expected = vec!["Rust", "は", "awesome", "です"];
+        assert_eq!(multilingual_split(input), expected);
+    }
+
+    #[test]
+    fn test_punctuation_behavior() {
+        // Standard punctuation usually falls into the "Non-CJK" category
+        // but since they are non-CJK, they cluster with ASCII words.
+        let input = "Wait!世界...";
+        let expected = vec!["Wait!", "世界", "..."];
+        assert_eq!(multilingual_split(input), expected);
+    }
+
+    #[test]
+    fn test_edge_case_empty_and_whitespace() {
+        assert_eq!(multilingual_split(""), Vec::<String>::new());
+        assert_eq!(multilingual_split("   "), Vec::<String>::new());
+        assert_eq!(multilingual_split("\n\t "), Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_non_standard_protocols() {
+        let input = "magnet:?xt=urn:btih:123 custom+proto://data";
+        let expected = vec!["magnet:?xt=urn:btih:123", "custom+proto://data"];
+        assert_eq!(multilingual_split(input), expected);
+    }
+
+    #[test]
+    fn test_cjk_extensions_and_mixed_korean() {
+        // Testing Hangul (Korean) adjacency
+        let input = "Rust랑한국어";
+        let expected = vec!["Rust", "랑한국어"];
+        assert_eq!(multilingual_split(input), expected);
     }
 }
