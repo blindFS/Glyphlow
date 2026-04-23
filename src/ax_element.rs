@@ -4,10 +4,10 @@ use crate::util::hint_label_from_index;
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     AXValueCreate, AXValueGetValue, AXValueRef, kAXButtonRole, kAXComboBoxRole, kAXGroupRole,
-    kAXHiddenAttribute, kAXMenuBarRole, kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute,
-    kAXPressAction, kAXScrollBarRole, kAXSelectedTextRangeAttribute, kAXSizeAttribute,
-    kAXStaticTextRole, kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute,
-    kAXValueTypeCFRange, kAXValueTypeCGPoint, kAXValueTypeCGSize,
+    kAXHiddenAttribute, kAXImageRole, kAXMenuBarRole, kAXMenuItemRole, kAXPopUpButtonRole,
+    kAXPositionAttribute, kAXPressAction, kAXScrollBarRole, kAXSelectedTextRangeAttribute,
+    kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute,
+    kAXValueAttribute, kAXValueTypeCFRange, kAXValueTypeCGPoint, kAXValueTypeCGSize,
 };
 use core_foundation::{
     attributed_string::{CFAttributedStringGetString, CFAttributedStringRef},
@@ -21,11 +21,12 @@ use objc2_core_graphics::CGColor;
 #[derive(Debug, PartialEq, Clone)]
 pub enum RoleOfInterest {
     Button,
-    TextField,
-    StaticText,
-    MenuItem,
     GenericNode,
+    Image,
+    MenuItem,
     ScrollBar,
+    StaticText,
+    TextField,
 }
 
 #[derive(Clone, Debug)]
@@ -254,6 +255,7 @@ pub trait GetAttribute {
     fn inspect(&self);
     fn visible_frame(&self, parent_frame: &Frame, role: &CFString) -> Option<Frame>;
     fn is_clickable(&self) -> bool;
+    fn has_children(&self) -> bool;
 }
 
 // TODO: logging
@@ -339,6 +341,12 @@ impl GetAttribute for AXUIElement {
                 .any(|action| action.to_string() == kAXPressAction)
         })
     }
+
+    fn has_children(&self) -> bool {
+        self.children()
+            .ok()
+            .is_some_and(|children| !children.is_empty())
+    }
 }
 
 pub trait SetAttribute {
@@ -391,9 +399,11 @@ fn rust_type_to_cftype<T>(value: T, value_type: u32) -> Option<CFType> {
 pub enum Target {
     #[default]
     Clickable,
+    Image,
     Editable,
     Edit,
     Text,
+    MenuItem,
     ChildElement,
     ScrollBar,
 }
@@ -465,6 +475,15 @@ pub fn traverse_elements(
                 }
                 _ => (),
             },
+            kAXImageRole => match target {
+                Target::Image => {
+                    cache.add(element, None, RoleOfInterest::Image);
+                }
+                Target::Clickable if element.is_clickable() => {
+                    cache.add(element, None, RoleOfInterest::Button);
+                }
+                _ => (),
+            },
             kAXStaticTextRole => match target {
                 Target::Clickable if element.is_clickable() => {
                     cache.add(element, None, RoleOfInterest::Button);
@@ -506,15 +525,12 @@ pub fn traverse_elements(
                 }
             }
             kAXGroupRole => match target {
-                // NOTE: Add AXGroup only if it has children and is clickable
-                Target::Clickable
-                    if element
-                        .children()
-                        .ok()
-                        .is_none_or(|children| children.is_empty())
-                        && element.is_clickable() =>
-                {
+                // NOTE: Add AXGroup only if it has no children and is clickable
+                Target::Clickable if !element.has_children() && element.is_clickable() => {
                     cache.add(element, None, RoleOfInterest::Button);
+                }
+                Target::Image if !element.has_children() => {
+                    cache.add(element, None, RoleOfInterest::Image);
                 }
                 _ => (),
             },
@@ -524,7 +540,7 @@ pub fn traverse_elements(
                         cache.add(element, Some(title), RoleOfInterest::MenuItem);
                     }
                 }
-                Target::Clickable => {
+                Target::MenuItem | Target::Clickable => {
                     cache.add(element, None, RoleOfInterest::MenuItem);
                 }
                 _ => (),

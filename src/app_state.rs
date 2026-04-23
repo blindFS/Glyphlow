@@ -176,11 +176,11 @@ impl AppState {
             .draw_menu(msg, self.screen_size, &self.config.theme);
     }
 
-    const ELEMENT_ACTIONS: &str =
-        "Select Target:\n󰦨 Text (T)\n󰳽 Press (P)\n󱕒 ScrollBar (S)\n󰊄 Input (I)";
+    const ELEMENT_CHOOSER: &str =
+        "Select Target:\n󰦨 Text (T)\n󰳽 Press (P)\n󱕒 ScrollBar (S)\n󰊄 Input (I)\n Image (M)";
 
     fn draw_element_action_menu(&self) {
-        self.draw_menu(Self::ELEMENT_ACTIONS);
+        self.draw_menu(Self::ELEMENT_CHOOSER);
     }
 
     fn draw_scroll_bar_menu(&self) {
@@ -188,7 +188,7 @@ impl AppState {
     }
 
     fn draw_dash_board(&self) {
-        let mut msg = format!("{}\n󰙅 Element (E)", Self::ELEMENT_ACTIONS);
+        let mut msg = format!("{}\n󰙅 Element (E)", Self::ELEMENT_CHOOSER);
         if let Some(editor) = self.config.editor.as_ref() {
             msg.push_str(&format!("\n{} ({})", editor.display, editor.key));
         }
@@ -279,7 +279,12 @@ impl AppState {
         if let Err(e) = element.press() {
             eprintln!("Failed to click element: {e}");
         };
-        // let _ = element.show_menu();
+    }
+
+    fn right_click_menu_on_element(element: &AXUIElement) {
+        if let Err(e) = element.show_menu() {
+            eprintln!("Failed to show menu on element: {e}");
+        };
     }
 
     /// Filter the UI elements and redraw hints.
@@ -309,9 +314,16 @@ impl AppState {
         {
             self.clear_drawing();
             match self.target {
-                Target::Clickable => {
+                Target::MenuItem | Target::Clickable => {
                     Self::press_on_element(element);
                     self.deactivate();
+                }
+                // TODO: OCR
+                Target::Image => {
+                    Self::right_click_menu_on_element(element);
+                    // HACK: wait for the right click menu to draw.
+                    std::thread::sleep(Duration::from_millis(100));
+                    self.activate(Target::MenuItem);
                 }
                 Target::Text => {
                     if let Some(text) = context {
@@ -587,6 +599,9 @@ impl AppState {
                     'I' => {
                         self.activate(Target::Editable);
                     }
+                    'M' => {
+                        self.activate(Target::Image);
+                    }
                     _ => {
                         if let Some(editor) = self.config.editor.as_ref()
                             && editor.key.to_ascii_uppercase() == key_char
@@ -658,6 +673,7 @@ impl AppState {
                         true
                     }
                     'D' => {
+                        // TODO: font size adjustment
                         if let Some(def_str) = dictionary_lookup(&text) {
                             self.draw_menu(&def_str);
                         } else {
