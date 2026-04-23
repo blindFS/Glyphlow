@@ -161,9 +161,12 @@ impl ElementCache {
         // Role specific filtering
         match role {
             RoleOfInterest::StaticText | RoleOfInterest::Button | RoleOfInterest::MenuItem => {
-                if let Some(ctx) = context.as_ref()
-                    && (ctx.is_empty() || ctx.chars().all(|c| c.is_ascii_punctuation()))
-                {
+                if context.as_ref().is_none_or(|ctx| {
+                    ctx.is_empty()
+                        || ctx
+                            .chars()
+                            .all(|c| c.is_ascii_punctuation() || c.is_whitespace())
+                }) {
                     return;
                 }
             }
@@ -484,7 +487,7 @@ pub fn traverse_elements(
                 }
                 Target::Text => {
                     if let Some(value) = element.get_attribute_string(kAXValueAttribute) {
-                        cache.add(element, Some(value), RoleOfInterest::TextField);
+                        cache.add(element, Some(value), RoleOfInterest::StaticText);
                     }
                 }
                 // NOTE: Even if not clickable, still could be focused on click

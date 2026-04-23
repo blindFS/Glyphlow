@@ -47,6 +47,8 @@ enum Signal {
 
 static MAX_TEXT_DISPLAY_LEN: usize = 30;
 
+type FsListener = (Debouncer<FsEventWatcher>, Receiver<()>);
+
 /// Global state for Glyphlow,
 /// mainly cached UI elements, and some related drawings
 pub struct AppState {
@@ -67,7 +69,7 @@ pub struct AppState {
     call_listener: Option<Receiver<Signal>>,
     /// For editing element text values
     temp_file: PathBuf,
-    temp_file_listener: Option<(Debouncer<FsEventWatcher>, Receiver<()>)>,
+    temp_file_listener: Option<FsListener>,
     word_picker: Option<WordPicker>,
 }
 
@@ -160,6 +162,9 @@ impl AppState {
         let mut msg = format!(
             "Select Action for Text:\n\n{text}\n\n⮺ Copy (C)\n◫ Dictionary (D)\n󰃻 Split (S)"
         );
+        if let Some(editor) = self.config.editor.as_ref() {
+            msg.push_str(&format!("\n{} ({})", editor.display, editor.key));
+        }
         for action in self.config.text_actions.iter() {
             msg.push_str(&format!("\n{} ({})", action.display, action.key));
         }
@@ -281,7 +286,6 @@ impl AppState {
                 },
             ) = self.element_cache.cache.get(*idx)
         {
-            // eoi.element.inspect();
             self.clear_drawing();
             match self.target {
                 Target::Clickable => {
@@ -329,13 +333,12 @@ impl AppState {
                     // Register file update listener
                     // So the text value on the UI element could be updated
                     // on the next keystroke after file saving.
-                    match self.open_editor(&text) {
-                        Ok(listener) => self.temp_file_listener = Some(listener),
+                    match self.open_editor(&text, true) {
+                        Ok(listener) => self.temp_file_listener = listener,
                         Err(e) => {
                             eprintln!("Failed to spawn editor process: {e}");
                         }
                     }
-                    self.temp_file_listener = self.open_editor(&text).ok();
                     self.mode = Mode::Idle;
                 }
             }
@@ -355,7 +358,8 @@ impl AppState {
     fn open_editor(
         &mut self,
         text: &str,
-    ) -> Result<(Debouncer<FsEventWatcher>, Receiver<()>), Box<dyn std::error::Error>> {
+        listen_to_update: bool,
+    ) -> Result<Option<FsListener>, Box<dyn std::error::Error>> {
         let editor = self
             .config
             .editor
@@ -369,21 +373,6 @@ impl AppState {
             .to_str()
             .unwrap_or_else(|| panic!("Failed to get temp file path for {:?}.", self.temp_file));
 
-        let (ftx, frx) = mpsc::channel();
-
-        // NOTE: listen to file updates with FsEvent
-        let mut debouncer = new_debouncer(Duration::from_millis(200), move |res| match res {
-            Ok(_) => {
-                // Notify: file updated
-                ftx.send(()).expect("Failed to send file update signal.");
-            }
-            Err(e) => eprintln!("Watch error: {:?}", e),
-        })?;
-
-        debouncer
-            .watcher()
-            .watch(self.temp_file.as_path(), RecursiveMode::NonRecursive)?;
-
         let args = editor
             .args
             .iter()
@@ -392,12 +381,29 @@ impl AppState {
             .args(args)
             .spawn()?;
 
-        std::thread::spawn(move || {
-            if let Err(e) = child.wait() {
-                eprintln!("Editor failed to run: {e}");
-            }
-        });
-        Ok((debouncer, frx))
+        if listen_to_update {
+            let (ftx, frx) = mpsc::channel();
+            // NOTE: listen to file updates with FsEvent
+            let mut debouncer = new_debouncer(Duration::from_millis(200), move |res| match res {
+                Ok(_) => {
+                    // Notify: file updated
+                    ftx.send(()).expect("Failed to send file update signal.");
+                }
+                Err(e) => eprintln!("Watch error: {:?}", e),
+            })?;
+
+            debouncer
+                .watcher()
+                .watch(self.temp_file.as_path(), RecursiveMode::NonRecursive)?;
+
+            std::thread::spawn(move || {
+                if let Err(e) = child.wait() {
+                    eprintln!("Editor failed to run: {e}");
+                }
+            });
+            return Ok(Some((debouncer, frx)));
+        }
+        Ok(None)
     }
 
     fn take_external_action(&mut self, key_char: char, selected_text: &str) -> bool {
@@ -656,7 +662,18 @@ impl AppState {
                         self.mode = Mode::WordPicking;
                         true
                     }
-                    _ => self.take_external_action(key_char, &text),
+                    _ => {
+                        if let Some(editor) = self.config.editor.as_ref()
+                            && editor.key.to_ascii_uppercase() == key_char
+                        {
+                            if let Err(e) = self.open_editor(&text, false) {
+                                eprintln!("Failed to open editor: {e}");
+                            };
+                            true
+                        } else {
+                            self.take_external_action(key_char, &text)
+                        }
+                    }
                 };
 
                 if !keep_drawing {
