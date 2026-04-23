@@ -164,24 +164,33 @@ fn multilingual_split(input: &str) -> Vec<String> {
     let segment_re = get_segment_re();
     let mut result = Vec::new();
 
-    // For a single piece without spaces, split by punctuations
-    if !input.contains(' ') {
-        return input
-            .split(|c: char| c.is_ascii_punctuation())
-            .filter(|s| !s.is_empty())
-            .map(String::from)
-            .collect();
-    }
-
     // Split into words, CJK words are separated
     for token in input.split_whitespace() {
         if url_re.is_match(token) {
             result.push(token.to_string());
         } else {
             for mat in segment_re.find_iter(token) {
-                result.push(mat.as_str().to_string());
+                // hello, -> hello
+                let w = mat
+                    .as_str()
+                    .trim_matches(|c: char| c.is_ascii_punctuation())
+                    .to_string();
+                if !w.is_empty() {
+                    result.push(w);
+                }
             }
         }
+    }
+
+    // For a single piece without spaces, split by punctuations
+    if result.len() == 1
+        && let Some(w) = result.first()
+    {
+        return w
+            .split(|c: char| c.is_ascii_punctuation())
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect();
     }
 
     result
@@ -239,7 +248,7 @@ mod tests {
         // Standard punctuation usually falls into the "Non-CJK" category
         // but since they are non-CJK, they cluster with ASCII words.
         let input = "Wait!世界...";
-        let expected = vec!["Wait!", "世界", "..."];
+        let expected = vec!["Wait", "世界"];
         assert_eq!(multilingual_split(input), expected);
     }
 

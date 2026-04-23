@@ -595,6 +595,7 @@ impl AppState {
                     }
                     'I' => {
                         self.activate(Target::Editable);
+                        self.quick_follow();
                     }
                     'M' => {
                         self.activate(Target::Image);
