@@ -30,7 +30,6 @@ use std::{
 #[derive(PartialEq)]
 enum Mode {
     DashBoard,
-    ElementActionMenu,
     Filtering,
     Idle,
     Scrolling,
@@ -97,6 +96,7 @@ impl AppState {
             element_cache: ElementCache::new(
                 config.element_min_width as f64,
                 config.element_min_height as f64,
+                config.image_min_size as f64,
             ),
             key_prefix: String::new(),
             target: Target::default(),
@@ -178,10 +178,6 @@ impl AppState {
 
     const ELEMENT_CHOOSER: &str =
         "Select Target:\n󰦨 Text (T)\n󰳽 Press (P)\n󱕒 ScrollBar (S)\n󰊄 Input (I)\n Image (M)";
-
-    fn draw_element_action_menu(&self) {
-        self.draw_menu(Self::ELEMENT_CHOOSER);
-    }
 
     fn draw_scroll_bar_menu(&self) {
         self.draw_menu("Scroll With Following Keys:\n> Down/Right (J)\n< Up/Left (K)\n+ Distance Increase (I)\n- Distance Decrease (D)");
@@ -343,8 +339,9 @@ impl AppState {
                         // TODO:
                         // 1. Screen shot
                         // 2. Mouse ops
-                        self.draw_element_action_menu();
-                        self.mode = Mode::ElementActionMenu;
+                        self.draw_dash_board();
+                        self.mode = Mode::DashBoard;
+                        self.quick_follow();
                     }
                 }
                 Target::ScrollBar => {
@@ -618,35 +615,14 @@ impl AppState {
             Mode::Filtering => {
                 // NOTE: Act on currently selected parent node
                 if key == Key::Return && self.selected.is_some() {
-                    self.draw_element_action_menu();
-                    self.mode = Mode::ElementActionMenu;
+                    self.draw_dash_board();
+                    self.mode = Mode::DashBoard;
+                    self.quick_follow();
                 } else if key_char == ' ' {
                     self.deactivate();
                 } else {
                     self.filter_by_key(key_char);
                 }
-                true
-            }
-            Mode::ElementActionMenu => {
-                match key_char {
-                    'P' => {
-                        self.activate(Target::Clickable);
-                    }
-                    'T' => {
-                        self.activate(Target::Text);
-                    }
-                    'S' => {
-                        self.activate(Target::ScrollBar);
-                    }
-                    'I' => {
-                        self.activate(Target::Editable);
-                    }
-                    _ => {
-                        self.deactivate();
-                        return false;
-                    }
-                }
-                self.quick_follow();
                 true
             }
             Mode::TextActionMenu => {

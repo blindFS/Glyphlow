@@ -126,15 +126,17 @@ pub struct ElementCache {
     seen_center: HashSet<(u64, u64)>,
     element_min_width: f64,
     element_min_height: f64,
+    image_min_size: f64,
 }
 
 impl ElementCache {
-    pub fn new(min_width: f64, min_height: f64) -> Self {
+    pub fn new(min_width: f64, min_height: f64, image_min_size: f64) -> Self {
         ElementCache {
             cache: vec![],
             seen_center: HashSet::new(),
             element_min_width: min_width,
             element_min_height: min_height,
+            image_min_size,
         }
     }
 
@@ -150,17 +152,19 @@ impl ElementCache {
             return;
         };
 
-        // Size based filtering
         let (w, h) = frame.size();
-        if role != RoleOfInterest::GenericNode
-            && role != RoleOfInterest::ScrollBar
-            && (w < self.element_min_width || h < self.element_min_height)
-        {
-            return;
-        }
-
-        // Role specific filtering
         match role {
+            // NOTE: some roles to keep
+            RoleOfInterest::GenericNode | RoleOfInterest::ScrollBar => (),
+            RoleOfInterest::Image if w.min(h) < self.image_min_size => {
+                return;
+            }
+            // Keep large enough images
+            RoleOfInterest::Image => (),
+            _ if (w < self.element_min_width || h < self.element_min_height) => {
+                return;
+            }
+            // Skip elements with empty/nonsense text
             RoleOfInterest::StaticText | RoleOfInterest::Button | RoleOfInterest::MenuItem => {
                 if context.as_ref().is_some_and(|ctx| {
                     ctx.is_empty()
@@ -171,7 +175,6 @@ impl ElementCache {
                     return;
                 }
             }
-            // NOTE: keep text fields
             _ => (),
         }
 
@@ -442,10 +445,10 @@ pub fn traverse_elements(
         };
 
         // TODO: Fine-grained control
-        // 1. Image
-        // 2. AXCell click
+        // 1. AXCell click
         #[allow(non_upper_case_globals)]
         match role.to_string().as_str() {
+            // TODO: DOM Class List based image searching for icon button
             kAXPopUpButtonRole | kAXButtonRole | "AXRadioButton" => match target {
                 Target::Clickable => {
                     cache.add(element, None, RoleOfInterest::Button);

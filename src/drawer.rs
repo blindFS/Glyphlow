@@ -143,6 +143,8 @@ impl GlyphlowDrawingLayer for CALayer {
             }
 
             // Background Box
+            let (size, _) =
+                estimate_frame_for_text(&attr_string, (screen_size.width, screen_size.height));
             let box_layer = text_box_with_attributed_string(
                 attr_string,
                 true,
@@ -150,7 +152,7 @@ impl GlyphlowDrawingLayer for CALayer {
                 theme.hint_margin_size as f64,
                 Center::Top(hint.x, hint.y - tri_height),
                 screen_size,
-                None,
+                size,
             );
 
             // Create the triangle pointing to the center
@@ -208,7 +210,7 @@ impl GlyphlowDrawingLayer for CALayer {
             theme.menu_margin_size as f64,
             Center::Middle(screen_size.width / 2.0, screen_size.height / 2.0),
             screen_size,
-            Some(text_size),
+            text_size,
         );
         text_box.setBorderWidth(2.0);
         text_box.setBorderColor(Some(&theme.menu_fg_color));
@@ -280,6 +282,22 @@ fn draw_text_box(
         // style.setLineHeightMultiple(1.2);
         attr_string.addAttribute_value_range(NSParagraphStyleAttributeName, &style, full_range);
 
+        let (mut size, visible_len) =
+            estimate_frame_for_text(&attr_string, (screen_size.width, screen_size.height * 2.0));
+
+        // NOTE: if estimated size is too large, reduce font size and retry
+        if size.height + 2.0 * margin > screen_size.height {
+            let font_size = font.pointSize() * visible_len as f64 / ns_string.len() as f64;
+            // Don't make it too small
+            let font_size = font_size.max(10.0);
+            attr_string.addAttribute_value_range(
+                NSFontAttributeName,
+                &NSFont::fontWithName_size(&font.fontName(), font_size).unwrap(),
+                full_range,
+            );
+            size = estimate_frame_for_text(&attr_string, (screen_size.width, screen_size.height)).0;
+        }
+
         text_box_with_attributed_string(
             attr_string,
             center_text,
@@ -287,7 +305,7 @@ fn draw_text_box(
             margin,
             center,
             screen_size,
-            None,
+            size,
         )
     }
 }
@@ -299,11 +317,9 @@ fn text_box_with_attributed_string(
     margin: f64,
     center: Center,
     screen_size: CGSize,
-    frame_size: Option<CGSize>,
+    frame_size: CGSize,
 ) -> Retained<CALayer> {
-    let size @ CGSize { width, height } = frame_size.unwrap_or_else(|| {
-        estimate_frame_for_text(&attr_string, (screen_size.width, screen_size.height))
-    });
+    let CGSize { width, height } = frame_size;
 
     let box_width = width + (margin * 2.0);
     let box_height = height + (margin * 2.0);
@@ -324,7 +340,7 @@ fn text_box_with_attributed_string(
     let text_layer = CATextLayer::new();
     text_layer.setFrame(NSRect::new(
         NSPoint::new(margin, margin), // Positioned exactly at margin
-        size,
+        frame_size,
     ));
     text_layer.setWrapped(true);
 

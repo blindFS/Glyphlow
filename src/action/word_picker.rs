@@ -136,7 +136,7 @@ impl WordPicker {
             }
         }
 
-        let size = estimate_frame_for_text(&attr_string, (ideal_width, screen_size.height));
+        let (size, _) = estimate_frame_for_text(&attr_string, (ideal_width, screen_size.height));
 
         (size, attr_string, matched_words)
     }

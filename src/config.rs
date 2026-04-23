@@ -253,6 +253,8 @@ pub struct GlyphlowConfig {
     pub element_min_width: u16,
     #[serde(default = "default_element_min_height")]
     pub element_min_height: u16,
+    #[serde(default = "default_image_min_size")]
+    pub image_min_size: u16,
     #[serde(default = "default_frame_min_size")]
     pub colored_frame_min_size: u16,
 }
@@ -277,6 +279,9 @@ fn default_element_min_height() -> u16 {
 fn default_frame_min_size() -> u16 {
     200
 }
+fn default_image_min_size() -> u16 {
+    20
+}
 
 impl Default for GlyphlowConfig {
     fn default() -> Self {
@@ -288,6 +293,7 @@ impl Default for GlyphlowConfig {
             scroll_distance: default_scroll_distance(),
             element_min_width: default_element_min_width(),
             element_min_height: default_element_min_height(),
+            image_min_size: default_image_min_size(),
             colored_frame_min_size: default_frame_min_size(),
         }
     }

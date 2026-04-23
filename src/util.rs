@@ -26,10 +26,10 @@ pub fn hint_label_from_index(i: usize, digits: u32) -> String {
 pub fn estimate_frame_for_text(
     attr_string: &Retained<NSMutableAttributedString>,
     size: (f64, f64),
-) -> OCGSize {
+) -> (OCGSize, isize) {
     let cf_attr_string = Retained::as_ptr(attr_string) as CFAttributedStringRef;
     let framesetter = CTFramesetter::new_with_attributed_string(cf_attr_string);
-    let (CGSize { width, height }, _) = framesetter.suggest_frame_size_with_constraints(
+    let (CGSize { width, height }, range) = framesetter.suggest_frame_size_with_constraints(
         CFRange {
             location: 0,
             length: 0,
@@ -37,5 +37,5 @@ pub fn estimate_frame_for_text(
         std::ptr::null(),
         CGSize::new(size.0, size.1),
     );
-    OCGSize::new(width, height)
+    (OCGSize::new(width, height), range.length)
 }
