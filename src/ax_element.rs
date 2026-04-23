@@ -3,11 +3,12 @@ use std::collections::HashSet;
 use crate::util::hint_label_from_index;
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
-    AXValueCreate, AXValueGetValue, AXValueRef, kAXButtonRole, kAXComboBoxRole, kAXGroupRole,
-    kAXHiddenAttribute, kAXImageRole, kAXMenuBarRole, kAXMenuItemRole, kAXPopUpButtonRole,
-    kAXPositionAttribute, kAXPressAction, kAXScrollBarRole, kAXSelectedTextRangeAttribute,
-    kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute,
-    kAXValueAttribute, kAXValueTypeCFRange, kAXValueTypeCGPoint, kAXValueTypeCGSize,
+    AXValueCreate, AXValueGetValue, AXValueRef, kAXButtonRole, kAXComboBoxRole,
+    kAXDescriptionAttribute, kAXGroupRole, kAXHiddenAttribute, kAXImageRole, kAXMenuBarRole,
+    kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction, kAXScrollBarRole,
+    kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
+    kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
+    kAXValueTypeCGPoint, kAXValueTypeCGSize,
 };
 use core_foundation::{
     base::{CFRange, CFType, CFTypeRef, TCFType},
@@ -485,7 +486,10 @@ pub fn traverse_elements(
                     cache.add(element, None, RoleOfInterest::Button);
                 }
                 Target::Text => {
-                    if let Some(value) = element.get_attribute_string(kAXValueAttribute) {
+                    if let Some(value) = element
+                        .get_attribute_string(kAXValueAttribute)
+                        .or_else(|| element.get_attribute_string(kAXDescriptionAttribute))
+                    {
                         cache.add(element, Some(value), RoleOfInterest::StaticText);
                     }
                 }

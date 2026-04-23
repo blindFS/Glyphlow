@@ -342,7 +342,6 @@ impl AppState {
                         // 2. Mouse ops
                         self.draw_dash_board();
                         self.mode = Mode::DashBoard;
-                        self.quick_follow();
                     }
                 }
                 Target::ScrollBar => {
@@ -618,7 +617,6 @@ impl AppState {
                 if key == Key::Return && self.selected.is_some() {
                     self.draw_dash_board();
                     self.mode = Mode::DashBoard;
-                    self.quick_follow();
                 } else if key_char == ' ' {
                     self.deactivate();
                 } else {
