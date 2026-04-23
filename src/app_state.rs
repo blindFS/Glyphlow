@@ -308,6 +308,7 @@ impl AppState {
                 },
             ) = self.element_cache.cache.get(*idx)
         {
+            // element.inspect();
             self.clear_drawing();
             match self.target {
                 Target::MenuItem | Target::Clickable => {

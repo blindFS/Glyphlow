@@ -161,11 +161,9 @@ impl ElementCache {
             }
             // Keep large enough images
             RoleOfInterest::Image => (),
-            _ if (w < self.element_min_width || h < self.element_min_height) => {
-                return;
-            }
-            // Skip elements with empty/nonsense text
-            RoleOfInterest::StaticText | RoleOfInterest::Button | RoleOfInterest::MenuItem => {
+            // Check text before size, keep small texts
+            _ if context.is_some() => {
+                // Skip elements with empty/nonsense text
                 if context.as_ref().is_some_and(|ctx| {
                     ctx.is_empty()
                         || ctx
@@ -174,6 +172,9 @@ impl ElementCache {
                 }) {
                     return;
                 }
+            }
+            _ if (w < self.element_min_width || h < self.element_min_height) => {
+                return;
             }
             _ => (),
         }
@@ -439,7 +440,7 @@ pub fn traverse_elements(
             return;
         }
 
-        // if invisible, return early
+        // If invisible, return early
         let Some(new_frame) = element.visible_frame(parent_frame, &role) else {
             return;
         };
@@ -471,6 +472,7 @@ pub fn traverse_elements(
                             )
                         })
                         .or_else(|| element.title().ok())
+                        .or_else(|| element.description().ok())
                         .map(|cf| cf.to_string())
                     {
                         cache.add(element, Some(ctx), RoleOfInterest::Button);
