@@ -10,7 +10,6 @@ use accessibility_sys::{
     kAXValueAttribute, kAXValueTypeCFRange, kAXValueTypeCGPoint, kAXValueTypeCGSize,
 };
 use core_foundation::{
-    attributed_string::{CFAttributedStringGetString, CFAttributedStringRef},
     base::{CFRange, CFType, CFTypeRef, TCFType},
     boolean::CFBoolean,
     string::CFString,
@@ -155,7 +154,8 @@ impl ElementCache {
         let (w, h) = frame.size();
         match role {
             // NOTE: some roles to keep
-            RoleOfInterest::GenericNode | RoleOfInterest::ScrollBar => (),
+            RoleOfInterest::GenericNode | RoleOfInterest::ScrollBar | RoleOfInterest::TextField => {
+            }
             RoleOfInterest::Image if w.min(h) < self.image_min_size => {
                 return;
             }
@@ -326,7 +326,10 @@ impl GetAttribute for AXUIElement {
 
         // TODO: handle edge cases according to role
         // e.g. popup menu
-        if let Some(this_frame) = self.get_frame() {
+        if let Some(this_frame) = self.get_frame()
+            // HACK: For some apps, like Finder, it may return false empty frames
+            && this_frame.size() != (0.0, 0.0)
+        {
             // TODO: For some fully visible structure of A -> B -> C,
             // somehow the intersection of either A and B or B and C is not empty,
             // but the intersection of all those 3 is empty.
@@ -442,6 +445,7 @@ pub fn traverse_elements(
 
         // If invisible, return early
         let Some(new_frame) = element.visible_frame(parent_frame, &role) else {
+            // element.inspect();
             return;
         };
 
@@ -458,19 +462,6 @@ pub fn traverse_elements(
                     if let Some(ctx) = element
                         .label_value()
                         .ok()
-                        .or_else(|| {
-                            element.get_attribute("AXAttributedDescription").and_then(
-                                |val| unsafe {
-                                    let string_ref = CFAttributedStringGetString(
-                                        val.as_concrete_TypeRef() as CFAttributedStringRef,
-                                    );
-                                    if string_ref.is_null() {
-                                        return None;
-                                    }
-                                    Some(CFString::wrap_under_get_rule(string_ref))
-                                },
-                            )
-                        })
                         .or_else(|| element.title().ok())
                         .or_else(|| element.description().ok())
                         .map(|cf| cf.to_string())
