@@ -329,7 +329,13 @@ impl AppState {
                     // Register file update listener
                     // So the text value on the UI element could be updated
                     // on the next keystroke after file saving.
-                    self.temp_file_listener = self.open_editor(&text);
+                    match self.open_editor(&text) {
+                        Ok(listener) => self.temp_file_listener = Some(listener),
+                        Err(e) => {
+                            eprintln!("Failed to spawn editor process: {e}");
+                        }
+                    }
+                    self.temp_file_listener = self.open_editor(&text).ok();
                     self.mode = Mode::Idle;
                 }
             }
@@ -346,7 +352,10 @@ impl AppState {
         }
     }
 
-    fn open_editor(&mut self, text: &str) -> Option<(Debouncer<FsEventWatcher>, Receiver<()>)> {
+    fn open_editor(
+        &mut self,
+        text: &str,
+    ) -> Result<(Debouncer<FsEventWatcher>, Receiver<()>), Box<dyn std::error::Error>> {
         let editor = self
             .config
             .editor
@@ -369,30 +378,26 @@ impl AppState {
                 ftx.send(()).expect("Failed to send file update signal.");
             }
             Err(e) => eprintln!("Watch error: {:?}", e),
-        })
-        .ok()?;
+        })?;
 
         debouncer
             .watcher()
-            .watch(self.temp_file.as_path(), RecursiveMode::NonRecursive)
-            .ok()?;
+            .watch(self.temp_file.as_path(), RecursiveMode::NonRecursive)?;
 
         let args = editor
             .args
             .iter()
             .map(|arg| arg.replace("{glyphlow_temp_file}", temp_fp));
-        let child = std::process::Command::new(&editor.command)
+        let mut child = std::process::Command::new(&editor.command)
             .args(args)
-            .stdout(std::process::Stdio::piped())
-            .spawn()
-            .ok()?;
+            .spawn()?;
 
-        std::thread::spawn(|| {
-            if let Err(e) = child.wait_with_output() {
-                eprintln!("{e}");
-            };
+        std::thread::spawn(move || {
+            if let Err(e) = child.wait() {
+                eprintln!("Editor failed to run: {e}");
+            }
         });
-        Some((debouncer, frx))
+        Ok((debouncer, frx))
     }
 
     fn take_external_action(&mut self, key_char: char, selected_text: &str) -> bool {
