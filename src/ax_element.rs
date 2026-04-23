@@ -161,7 +161,7 @@ impl ElementCache {
         // Role specific filtering
         match role {
             RoleOfInterest::StaticText | RoleOfInterest::Button | RoleOfInterest::MenuItem => {
-                if context.as_ref().is_none_or(|ctx| {
+                if context.as_ref().is_some_and(|ctx| {
                     ctx.is_empty()
                         || ctx
                             .chars()

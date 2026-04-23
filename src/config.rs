@@ -28,6 +28,8 @@ pub struct GlyphlowTheme {
     pub menu_bg_color: CFRetained<CGColor>,
     #[serde(with = "cgcolor_format", default = "default_menu_fg")]
     pub menu_fg_color: CFRetained<CGColor>,
+    #[serde(with = "cgcolor_format", default = "default_menu_hl")]
+    pub menu_hl_color: CFRetained<CGColor>,
     #[serde(with = "vec_cgcolor_format", default = "default_frame_colors")]
     pub frame_colors: Vec<CFRetained<CGColor>>,
 }
@@ -61,6 +63,9 @@ fn default_menu_bg() -> CFRetained<CGColor> {
 fn default_menu_fg() -> CFRetained<CGColor> {
     color_from_hex("#a3aed2ff")
 }
+fn default_menu_hl() -> CFRetained<CGColor> {
+    color_from_hex("#769ff0d0")
+}
 fn default_frame_colors() -> Vec<CFRetained<CGColor>> {
     vec![
         color_from_hex("#e0af68ff"),
@@ -81,6 +86,7 @@ impl Default for GlyphlowTheme {
             menu_margin_size: default_menu_margin(),
             menu_bg_color: default_menu_bg(),
             menu_fg_color: default_menu_fg(),
+            menu_hl_color: default_hint_hl(),
             frame_colors: default_frame_colors(),
         }
     }

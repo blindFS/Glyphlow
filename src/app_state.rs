@@ -1,5 +1,5 @@
 use crate::{
-    action::{Word, WordPicker, dictionary_lookup, text_to_clipboard},
+    action::{WordPicker, dictionary_lookup, text_to_clipboard},
     ax_element::{
         ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, RoleOfInterest,
         SetAttribute, Target, traverse_elements,
@@ -193,6 +193,27 @@ impl AppState {
             msg.push_str(&format!("\n{} ({})", editor.display, editor.key));
         }
         self.draw_menu(&msg);
+    }
+
+    fn draw_word_picker(&self) -> Vec<String> {
+        let word_picker = self
+            .word_picker
+            .as_ref()
+            .expect("Internal Error: No word picker set.");
+        let (text_size, attr_string, matched_words) = word_picker.get_attributed_string(
+            self.screen_size,
+            &self.config.theme.menu_font,
+            &self.config.theme.menu_hl_color,
+            &self.key_prefix,
+        );
+        self.window.draw_attributed_string(
+            attr_string,
+            self.screen_size,
+            text_size,
+            &self.config.theme,
+        );
+
+        matched_words
     }
 
     /// Activates the app and caches UI elements
@@ -648,17 +669,9 @@ impl AppState {
                     'S' => {
                         let word_picker = WordPicker::new(text);
 
-                        let (text_size, attr_string) = word_picker
-                            .get_attributed_string(self.screen_size, &self.config.theme.menu_font);
-                        self.window.draw_attributed_string(
-                            attr_string,
-                            self.screen_size,
-                            text_size,
-                            &self.config.theme,
-                        );
-
                         self.clear_cache();
                         self.word_picker = Some(word_picker);
+                        self.draw_word_picker();
                         self.mode = Mode::WordPicking;
                         true
                     }
@@ -683,11 +696,6 @@ impl AppState {
                 true
             }
             Mode::WordPicking => {
-                let word_picker = self
-                    .word_picker
-                    .as_ref()
-                    .expect("Internal Error: No word picker in Mode::WordPicking.");
-
                 if key_char == ' ' {
                     self.deactivate();
                     return true;
@@ -697,15 +705,11 @@ impl AppState {
                     self.key_prefix.push(key_char);
                 }
 
-                let filtered_words = word_picker
-                    .words
-                    .iter()
-                    .filter(|w| w.label.starts_with(&self.key_prefix))
-                    .collect::<Vec<_>>();
+                self.clear_drawing();
+                let matched_words = self.draw_word_picker();
 
-                if self.key_prefix.len() == word_picker.digits as usize
-                    && filtered_words.len() == 1
-                    && let Some(Word { text, .. }) = filtered_words.first()
+                if matched_words.len() == 1
+                    && let Some(text) = matched_words.first()
                 {
                     self.update_selected_text_and_show_menu(text.clone())
                 }
