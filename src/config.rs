@@ -120,7 +120,7 @@ fn default_action_kind() -> ActionKind {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct TextAction {
+pub struct CommandAction {
     pub command: String,
     pub args: Vec<String>,
     pub display: String,
@@ -237,9 +237,10 @@ pub struct KeyBinding {
 pub struct GlyphlowConfig {
     #[serde(default = "default_global_keybinding")]
     pub global_trigger_key: KeyBinding,
+    pub editor: Option<CommandAction>,
     pub theme: GlyphlowTheme,
     #[serde(default = "default_text_actions")]
-    pub text_actions: Vec<TextAction>,
+    pub text_actions: Vec<CommandAction>,
     #[serde(default = "default_scroll_distance")]
     pub scroll_distance: f64,
     #[serde(default = "default_element_min_width")]
@@ -255,7 +256,7 @@ fn default_global_keybinding() -> KeyBinding {
         keys: vec![Key::Alt, Key::KeyG],
     }
 }
-fn default_text_actions() -> Vec<TextAction> {
+fn default_text_actions() -> Vec<CommandAction> {
     vec![]
 }
 fn default_scroll_distance() -> f64 {
@@ -275,6 +276,7 @@ impl Default for GlyphlowConfig {
     fn default() -> Self {
         GlyphlowConfig {
             global_trigger_key: default_global_keybinding(),
+            editor: None,
             theme: GlyphlowTheme::default(),
             text_actions: default_text_actions(),
             scroll_distance: default_scroll_distance(),

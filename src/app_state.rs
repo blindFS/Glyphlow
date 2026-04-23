@@ -117,15 +117,15 @@ impl AppState {
         if !cache_dir.exists() {
             std::fs::create_dir_all(&cache_dir).ok()?;
         }
-        let cache_file = cache_dir.join("tempfile");
+        let cache_file = cache_dir.join("tempfile.md");
         Some(cache_file)
     }
 
     fn deactivate(&mut self) {
-        self.mode = Mode::Idle;
         self.clear_cache();
-        self.selected = None;
         self.clear_drawing();
+        self.selected = None;
+        self.mode = Mode::Idle;
     }
 
     fn clear_cache(&mut self) {
@@ -163,21 +163,42 @@ impl AppState {
         for action in self.config.text_actions.iter() {
             msg.push_str(&format!("\n{} ({})", action.display, action.key));
         }
-        self.window
-            .draw_menu(&msg, self.screen_size, &self.config.theme);
+        self.draw_menu(&msg);
     }
 
+    fn draw_menu(&self, msg: &str) {
+        self.window
+            .draw_menu(msg, self.screen_size, &self.config.theme);
+    }
+
+    const ELEMENT_ACTIONS: &str =
+        "Select Target:\n󰦨 Text (T)\n󰳽 Press (P)\n󱕒 ScrollBar (S)\n󰊄 Input (I)";
+
     fn draw_element_action_menu(&self) {
-        self.window.draw_menu(
-            "Select Target:\n\n󰦨 Text (T)\n󰳽 Press (P)\n󱕒 ScrollBar (S)",
-            self.screen_size,
-            &self.config.theme,
-        );
+        self.draw_menu(Self::ELEMENT_ACTIONS);
+    }
+
+    fn draw_scroll_bar_menu(&self) {
+        self.draw_menu("Scroll With Following Keys:\n> Down/Right (J)\n< Up/Left (K)\n+ Distance Increase (I)\n- Distance Decrease (D)");
+    }
+
+    fn draw_dash_board(&self) {
+        let mut msg = format!("{}\n󰙅 Element (E)", Self::ELEMENT_ACTIONS);
+        if let Some(editor) = self.config.editor.as_ref() {
+            msg.push_str(&format!("\n{} ({})", editor.display, editor.key));
+        }
+        self.draw_menu(&msg);
     }
 
     /// Activates the app and caches UI elements
-    fn activate(&mut self, target: &Target) {
+    fn activate(&mut self, target: Target) {
+        // HACK: abuse self.target to mark whether to call external editor
         self.target = target.clone();
+        let target = if target == Target::Edit {
+            Target::Editable
+        } else {
+            target
+        };
 
         if self.selected.is_none() {
             self.selected = get_focused_pid().map(|pid| {
@@ -202,7 +223,7 @@ impl AppState {
                 // Very loose visibility constraint
                 &Frame::from_origion(self.screen_size),
                 &mut self.element_cache,
-                target,
+                &target,
             );
         }
 
@@ -218,6 +239,7 @@ impl AppState {
             self.hint_boxes.extend(new_boxes);
             self.draw_hints(&self.hint_boxes);
         } else {
+            // Don't deactivate yet, backspace to rollback
             self.clear_drawing();
         }
     }
@@ -278,7 +300,7 @@ impl AppState {
                     // TODO: optimize UX for selected element
                     // 1. Parent frame
                     // 2. Action menu for parent
-                    self.activate(&Target::ChildElement);
+                    self.activate(Target::ChildElement);
                     if self.element_cache.cache.is_empty() {
                         // select actions for current selected element
                         // TODO:
@@ -291,12 +313,24 @@ impl AppState {
                 Target::ScrollBar => {
                     self.selected = Some(eoi.clone());
                     self.clear_cache();
-                    self.window.draw_menu(
-                            "Scroll With Following Keys:\n\n> Down/Right (J)\n< Up/Left (K)\n+ Distance Increase (I)\n- Distance Decrease (D)",
-                            self.screen_size,
-                            &self.config.theme,
-                        );
+                    self.draw_scroll_bar_menu();
                     self.mode = Mode::Scrolling;
+                }
+                Target::Editable => {
+                    self.selected = Some(eoi.clone());
+                    Self::focus_on_element(element);
+                    self.deactivate();
+                }
+                Target::Edit => {
+                    self.selected = Some(eoi.clone());
+                    // Focused before editing to increase the success rate
+                    Self::focus_on_element(element);
+                    let text = context.clone().unwrap_or_default();
+                    // Register file update listener
+                    // So the text value on the UI element could be updated
+                    // on the next keystroke after file saving.
+                    self.temp_file_listener = self.open_editor(&text);
+                    self.mode = Mode::Idle;
                 }
             }
         } else if filtered_boxes.is_empty() {
@@ -312,67 +346,65 @@ impl AppState {
         }
     }
 
-    fn take_external_action(
-        &mut self,
-        element: &AXUIElement,
-        key_char: char,
-        selected_text: &str,
-    ) -> bool {
-        let mut read_from_file = false;
+    fn open_editor(&mut self, text: &str) -> Option<(Debouncer<FsEventWatcher>, Receiver<()>)> {
+        let editor = self
+            .config
+            .editor
+            .as_ref()
+            .expect("Internal Error: No editor set.");
 
+        // Write current selected text to temp file
+        let _ = std::fs::write(&self.temp_file, text);
+        let temp_fp = self
+            .temp_file
+            .to_str()
+            .unwrap_or_else(|| panic!("Failed to get temp file path for {:?}.", self.temp_file));
+
+        let (ftx, frx) = mpsc::channel();
+
+        // NOTE: listen to file updates with FsEvent
+        let mut debouncer = new_debouncer(Duration::from_millis(200), move |res| match res {
+            Ok(_) => {
+                // Notify: file updated
+                ftx.send(()).expect("Failed to send file update signal.");
+            }
+            Err(e) => eprintln!("Watch error: {:?}", e),
+        })
+        .ok()?;
+
+        debouncer
+            .watcher()
+            .watch(self.temp_file.as_path(), RecursiveMode::NonRecursive)
+            .ok()?;
+
+        let args = editor
+            .args
+            .iter()
+            .map(|arg| arg.replace("{glyphlow_temp_file}", temp_fp));
+        let child = std::process::Command::new(&editor.command)
+            .args(args)
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .ok()?;
+
+        std::thread::spawn(|| {
+            if let Err(e) = child.wait_with_output() {
+                eprintln!("{e}");
+            };
+        });
+        Some((debouncer, frx))
+    }
+
+    fn take_external_action(&mut self, key_char: char, selected_text: &str) -> bool {
         for action in &self.config.text_actions {
             if action.key.to_ascii_uppercase() != key_char {
                 continue;
             }
 
-            let raw_args = action.args.iter();
-
-            let args: Vec<String> = if action
+            let args = action
                 .args
                 .iter()
-                .any(|arg| arg.contains("{glyphlow_temp_file}"))
-            {
-                // Write current selected text to temp file
-                let _ = std::fs::write(&self.temp_file, selected_text);
-                let temp_fp = self.temp_file.to_str().unwrap_or_else(|| {
-                    panic!("Failed to get temp file path for {:?}.", self.temp_file)
-                });
-
-                let (ftx, frx) = mpsc::channel();
-                read_from_file = true;
-
-                // NOTE: listen to file updates with FsEvent
-                let Ok(mut debouncer) =
-                    new_debouncer(Duration::from_millis(200), move |res| match res {
-                        Ok(_) => {
-                            // Notify: file updated
-                            ftx.send(()).expect("Failed to send file update signal.");
-                        }
-                        Err(e) => eprintln!("Watch error: {:?}", e),
-                    })
-                else {
-                    return false;
-                };
-
-                let _ = debouncer
-                    .watcher()
-                    .watch(self.temp_file.as_path(), RecursiveMode::NonRecursive);
-
-                self.temp_file_listener = Some((debouncer, frx));
-                self.mode = Mode::Idle;
-                // Focus before editing,
-                // which increases the success rate of text updating
-                Self::focus_on_element(element);
-
-                raw_args
-                    .map(|arg| arg.replace("{glyphlow_temp_file}", temp_fp))
-                    .collect()
-            } else {
-                raw_args
-                    .map(|arg| arg.replace("{glyphlow_text}", selected_text))
-                    .collect()
-            };
-
+                .map(|arg| arg.replace("{glyphlow_text}", selected_text));
             let Ok(child) = std::process::Command::new(&action.command)
                 .args(args)
                 .stdout(std::process::Stdio::piped())
@@ -388,12 +420,10 @@ impl AppState {
 
             if action.kind == ActionKind::NonBlocking {
                 let (tx, rx) = mpsc::channel();
-                if !read_from_file {
-                    // Don't react to any key event before the finishing signal
-                    self.call_listener = Some(rx);
-                    self.mode = Mode::Transparent;
-                }
-                external_call(child, tx, read_from_file);
+                // Don't react to any key event before the finishing signal
+                self.call_listener = Some(rx);
+                self.mode = Mode::Transparent;
+                external_call(child, tx);
             } else {
                 // Wait for the stdout as the new text
                 match child.wait_with_output() {
@@ -501,11 +531,7 @@ impl AppState {
                 }) {
                     self.selected = None;
                     self.mode = Mode::DashBoard;
-                    self.window.draw_menu(
-                        "Select Target:\n\n󰦨 Text (T)\n󰳽 Press (P)\n󱕒 ScrollBar (S)\n󰙅 Element (E)",
-                        self.screen_size,
-                        &self.config.theme,
-                    );
+                    self.draw_dash_board();
                     true
                 } else {
                     false
@@ -514,20 +540,30 @@ impl AppState {
             Mode::DashBoard => {
                 match key_char {
                     'P' => {
-                        self.activate(&Target::Clickable);
+                        self.activate(Target::Clickable);
                     }
                     'T' => {
-                        self.activate(&Target::Text);
+                        self.activate(Target::Text);
                     }
                     'E' => {
-                        self.activate(&Target::ChildElement);
+                        self.activate(Target::ChildElement);
                     }
                     'S' => {
-                        self.activate(&Target::ScrollBar);
+                        self.activate(Target::ScrollBar);
                         self.quick_follow();
                     }
+                    'I' => {
+                        self.activate(Target::Editable);
+                    }
                     _ => {
-                        self.deactivate();
+                        if let Some(editor) = self.config.editor.as_ref()
+                            && editor.key.to_ascii_uppercase() == key_char
+                        {
+                            self.activate(Target::Edit);
+                            self.quick_follow();
+                        } else {
+                            self.deactivate();
+                        }
                     }
                 }
                 true
@@ -547,13 +583,16 @@ impl AppState {
             Mode::ElementActionMenu => {
                 match key_char {
                     'P' => {
-                        self.activate(&Target::Clickable);
+                        self.activate(Target::Clickable);
                     }
                     'T' => {
-                        self.activate(&Target::Text);
+                        self.activate(Target::Text);
                     }
                     'S' => {
-                        self.activate(&Target::ScrollBar);
+                        self.activate(Target::ScrollBar);
+                    }
+                    'I' => {
+                        self.activate(Target::Editable);
                     }
                     _ => {
                         self.deactivate();
@@ -565,13 +604,11 @@ impl AppState {
             }
             Mode::TextActionMenu => {
                 let Some(ElementOfInterest {
-                    element,
                     context: Some(text),
                     ..
                 }) = self.selected.as_ref()
                 else {
-                    self.deactivate();
-                    return true;
+                    panic!("Internal Error: No selected element in Mode::TextActionMenu.");
                 };
 
                 let text = text.clone();
@@ -585,24 +622,15 @@ impl AppState {
                     'C' => {
                         text_to_clipboard(&text);
                         // TODO: better notification
-                        self.window.draw_menu(
-                            "Copied to clipboard.",
-                            self.screen_size,
-                            &self.config.theme,
-                        );
+                        self.draw_menu("Copied to clipboard.");
                         true
                     }
                     'D' => {
                         if let Some(def_str) = dictionary_lookup(&text) {
-                            self.window
-                                .draw_menu(&def_str, self.screen_size, &self.config.theme);
+                            self.draw_menu(&def_str);
                         } else {
                             // TODO: better notification
-                            self.window.draw_menu(
-                                "No definition found.",
-                                self.screen_size,
-                                &self.config.theme,
-                            );
+                            self.draw_menu("No definition found.");
                         }
                         true
                     }
@@ -623,7 +651,7 @@ impl AppState {
                         self.mode = Mode::WordPicking;
                         true
                     }
-                    _ => self.take_external_action(&element.clone(), key_char, &text),
+                    _ => self.take_external_action(key_char, &text),
                 };
 
                 if !keep_drawing {
@@ -633,10 +661,10 @@ impl AppState {
                 true
             }
             Mode::WordPicking => {
-                let Some(word_picker) = self.word_picker.as_ref() else {
-                    self.deactivate();
-                    return false;
-                };
+                let word_picker = self
+                    .word_picker
+                    .as_ref()
+                    .expect("Internal Error: No word picker in Mode::WordPicking.");
 
                 if key_char == ' ' {
                     self.deactivate();
@@ -705,13 +733,9 @@ impl AppState {
     }
 }
 
-fn external_call(child: Child, tx: Sender<Signal>, read_from_file: bool) {
+fn external_call(child: Child, tx: Sender<Signal>) {
     std::thread::spawn(move || {
         let output = child.wait_with_output();
-        // Ignore the output, message passed via file listener
-        if read_from_file {
-            return;
-        }
         match output {
             Ok(o) => {
                 if !o.stdout.is_empty() {

@@ -388,6 +388,8 @@ fn rust_type_to_cftype<T>(value: T, value_type: u32) -> Option<CFType> {
 pub enum Target {
     #[default]
     Clickable,
+    Editable,
+    Edit,
     Text,
     ChildElement,
     ScrollBar,
@@ -473,6 +475,13 @@ pub fn traverse_elements(
             },
             // TODO: select only the visible part, `kAXVisibleCharacterRangeAttribute`
             kAXComboBoxRole | kAXTextFieldRole | kAXTextAreaRole => match target {
+                Target::Editable => {
+                    cache.add(
+                        element,
+                        element.get_attribute_string(kAXValueAttribute),
+                        RoleOfInterest::TextField,
+                    );
+                }
                 Target::Text => {
                     if let Some(value) = element.get_attribute_string(kAXValueAttribute) {
                         cache.add(element, Some(value), RoleOfInterest::TextField);
