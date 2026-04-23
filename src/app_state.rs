@@ -674,7 +674,7 @@ impl AppState {
                             if let Err(e) = self.open_editor(&text, false) {
                                 eprintln!("Failed to open editor: {e}");
                             };
-                            true
+                            false
                         } else {
                             self.take_external_action(key_char, &text)
                         }
