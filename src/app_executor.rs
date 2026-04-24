@@ -115,14 +115,15 @@ impl AppExecutor {
         } else {
             text
         };
-        let mut msg = Self::menu_string(&TEXT_ACTION_MENU_ITEMS);
+        let mut msg = "Pick an Action for Text".to_string();
+        msg.push_str(&format!("\n\n{}\n", text));
+        msg.push_str(&Self::menu_string(&TEXT_ACTION_MENU_ITEMS));
         if let Some(editor) = self.config.editor.as_ref() {
             msg.push_str(&format!("\n{} ({})", editor.display, editor.key));
         }
         for action in self.config.text_actions.iter() {
             msg.push_str(&format!("\n{} ({})", action.display, action.key));
         }
-        msg.push_str(&format!("\n\n{}", text));
         self.draw_menu(&msg);
     }
 
@@ -132,11 +133,13 @@ impl AppExecutor {
     }
 
     fn draw_scroll_bar_menu(&self) {
-        self.draw_menu(&Self::menu_string(&SCROLLBAR_MENU_ITEMS));
+        let mut msg = "Pick a Scrolling Action:".to_string();
+        msg.push_str(&Self::menu_string(&SCROLLBAR_MENU_ITEMS));
+        self.draw_menu(&msg);
     }
 
     fn menu_string(items: &[StaticMenuItem]) -> String {
-        let mut res = "Pick Action:".to_string();
+        let mut res = String::new();
         for item in items {
             res.push('\n');
             res.push_str(&item.to_string());
@@ -145,7 +148,8 @@ impl AppExecutor {
     }
 
     fn draw_dash_board(&self) {
-        let mut msg = Self::menu_string(&DASH_BOARD_MENU_ITEMS);
+        let mut msg = "Pick a Target:".to_string();
+        msg.push_str(&Self::menu_string(&DASH_BOARD_MENU_ITEMS));
         if let Some(editor) = self.config.editor.as_ref() {
             msg.push_str(&format!("\n{} ({})", editor.display, editor.key));
         }
@@ -422,6 +426,7 @@ impl AppExecutor {
     }
 
     fn update_selected_text(&mut self, new_text: String, replace: bool) {
+        // TODO: Cache specific editing element so other glyphlow actions won't disable text updating?
         if let Some(ElementOfInterest {
             element,
             context,
