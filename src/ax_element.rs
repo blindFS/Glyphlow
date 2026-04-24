@@ -403,7 +403,7 @@ fn rust_type_to_cftype<T>(value: T, value_type: u32) -> Option<CFType> {
 }
 
 // TODO: image
-#[derive(Default, PartialEq, Clone)]
+#[derive(Debug, Default, PartialEq, Clone)]
 pub enum Target {
     #[default]
     Clickable,

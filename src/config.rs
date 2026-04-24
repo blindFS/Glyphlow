@@ -113,24 +113,12 @@ fn color_from_hex(hex: &str) -> CFRetained<CGColor> {
     color_try_from_hex(hex).expect("Invalid color")
 }
 
-#[derive(Deserialize, Serialize, Debug, PartialEq)]
-pub enum ActionKind {
-    Blocking,
-    NonBlocking,
-}
-
-fn default_action_kind() -> ActionKind {
-    ActionKind::Blocking
-}
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CommandAction {
     pub command: String,
     pub args: Vec<String>,
     pub display: String,
     pub key: char,
-    #[serde(default = "default_action_kind")]
-    pub kind: ActionKind,
 }
 
 pub trait AlphabeticKey {
@@ -231,7 +219,7 @@ impl AlphabeticKey for Key {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct KeyBinding {
     #[serde(with = "key_combo_format")]
     pub keys: Vec<Key>,
