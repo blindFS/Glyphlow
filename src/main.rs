@@ -1,6 +1,7 @@
 use std::{rc::Rc, sync::Mutex};
 
 use glyphlow::{AppState, os_util::check_accessibility_permissions};
+use objc2::rc::autoreleasepool;
 use rdev::{EventType, grab};
 
 fn main() {
@@ -29,7 +30,9 @@ fn main() {
                 cst.pressed_keys.insert(key);
 
                 // TODO: don't block system events
-                should_swallow = cst.act_on_key(key);
+                autoreleasepool(|_| {
+                    should_swallow = cst.act_on_key(key);
+                })
             }
             EventType::KeyRelease(key) => {
                 cst.pressed_keys.remove(&key);

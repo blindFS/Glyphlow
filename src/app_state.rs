@@ -1,5 +1,5 @@
 use crate::{
-    action::{WordPicker, dictionary_lookup, text_to_clipboard},
+    action::{WordPicker, dictionary_lookup, screen_shot, text_to_clipboard},
     ax_element::{
         ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, RoleOfInterest,
         SetAttribute, Target, traverse_elements,
@@ -176,8 +176,7 @@ impl AppState {
             .draw_menu(msg, self.screen_size, &self.config.theme);
     }
 
-    const ELEMENT_CHOOSER: &str =
-        "Select Target:\n󰦨 Text (T)\n󰳽 Press (P)\n󱕒 ScrollBar (S)\n󰊄 Input (I)\n Image (M)";
+    const ELEMENT_CHOOSER: &str = "Select Target:\n󰦨 Text (T)\n󰳽 Press (P)\n󱕒 ScrollBar (S)\n󰊄 Input (I)\n Image (M)\n󰆟 ScreenShot (R)";
 
     fn draw_scroll_bar_menu(&self) {
         self.draw_menu("Scroll With Following Keys:\n> Down/Right (J)\n< Up/Left (K)\n+ Distance Increase (I)\n- Distance Decrease (D)");
@@ -212,6 +211,22 @@ impl AppState {
         matched_words
     }
 
+    fn select_app_window(&mut self) -> Option<Frame> {
+        let pid = get_focused_pid()?;
+        let focused_window = AXUIElement::application(pid);
+        let window_frame = focused_window
+            .get_frame()
+            .unwrap_or_else(|| Frame::from_origion(self.screen_size));
+
+        self.selected = Some(ElementOfInterest::new(
+            focused_window,
+            None,
+            RoleOfInterest::GenericNode,
+            window_frame.clone(),
+        ));
+        Some(window_frame)
+    }
+
     /// Activates the app and caches UI elements
     fn activate(&mut self, target: Target) {
         // HACK: abuse self.target to mark whether to call external editor
@@ -223,19 +238,7 @@ impl AppState {
         };
 
         if self.selected.is_none() {
-            self.selected = get_focused_pid().map(|pid| {
-                let focused_window = AXUIElement::application(pid);
-                let window_frame = focused_window
-                    .get_frame()
-                    .unwrap_or_else(|| Frame::from_origion(self.screen_size));
-
-                ElementOfInterest::new(
-                    focused_window,
-                    None,
-                    RoleOfInterest::GenericNode,
-                    window_frame.clone(),
-                )
-            });
+            self.select_app_window();
         }
 
         self.clear_cache();
@@ -338,8 +341,7 @@ impl AppState {
                     if self.element_cache.cache.is_empty() {
                         // select actions for current selected element
                         // TODO:
-                        // 1. Screen shot
-                        // 2. Mouse ops
+                        // 1. Mouse ops
                         self.draw_dash_board();
                         self.mode = Mode::DashBoard;
                     }
@@ -580,6 +582,18 @@ impl AppState {
             }
             Mode::DashBoard => {
                 match key_char {
+                    'R' => {
+                        self.clear_drawing();
+                        let frame = if let Some(eoi) = self.selected.as_ref() {
+                            &eoi.frame
+                        } else {
+                            &self
+                                .select_app_window()
+                                .unwrap_or_else(|| Frame::from_origion(self.screen_size))
+                        };
+                        screen_shot(frame);
+                        self.deactivate();
+                    }
                     'P' => {
                         self.activate(Target::Clickable);
                     }
