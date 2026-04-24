@@ -58,7 +58,10 @@ pub fn dictionary_lookup(text: &str) -> Option<String> {
             return None;
         }
 
-        let raw_string = CFString::wrap_under_create_rule(raw_ptr).to_string();
+        let cf_string = CFString::wrap_under_create_rule(raw_ptr);
+        let raw_string = cf_string.to_string();
+
+        // Format into a paragraph
         let mut formated = String::new();
         let mut char_iter = raw_string.chars().peekable();
         while let Some(char) = char_iter.next() {

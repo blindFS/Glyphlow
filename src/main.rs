@@ -1,46 +1,119 @@
-use std::{rc::Rc, sync::Mutex};
-
-use glyphlow::{AppState, os_util::check_accessibility_permissions};
+use core_foundation::{
+    base::Boolean,
+    runloop::{CFRunLoopRunInMode, kCFRunLoopDefaultMode},
+};
+use glyphlow::{
+    AppExecutor, AppSignal, KeyListener, Mode,
+    config::GlyphlowConfig,
+    drawer::{GlyphlowDrawingLayer, create_overlay_window, get_main_screen_size},
+    os_util::check_accessibility_permissions,
+};
+use notify::RecursiveMode;
+use notify_debouncer_mini::new_debouncer;
+use objc2::MainThreadMarker;
+use objc2_quartz_core::CALayer;
 use rdev::{EventType, grab};
+use std::{
+    collections::HashSet,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    thread,
+};
+use tokio::sync::mpsc;
 
-fn main() {
-    // Check for Accessibility Permissions
-    // Note: The app must be granted permission in System Settings > Privacy > Accessibility
+#[tokio::main]
+async fn main() {
     if !check_accessibility_permissions() {
-        println!("❌ Error: This app is not trusted. Please grant Accessibility permissions.");
+        println!("❌ Error: Accessibility permissions not granted.");
         return;
     }
 
-    let app_state = Rc::new(Mutex::new(AppState::new()));
+    let (tx, mut rx) = mpsc::channel::<AppSignal>(100);
 
-    // Hijack key events, if Glyphlow is not active,
-    // pass the event back to the system
-    let _ = grab(move |event| {
-        let mut should_swallow = false;
-        let mut cst = app_state.lock().unwrap();
+    let config = GlyphlowConfig::load_config();
+    let key_listener = KeyListener::new(
+        tx,
+        config.global_trigger_key.clone(),
+        &config.editor,
+        &config.text_actions,
+    );
 
-        if cst.check_external_output() {
-            return Some(event);
-        }
+    let state = Arc::new(Mutex::new(Mode::Idle));
+    let pressed_keys = Arc::new(Mutex::new(HashSet::new()));
 
-        match event.event_type {
-            EventType::KeyPress(key) => {
-                // Update global state for mod keys
-                cst.pressed_keys.insert(key);
+    let mtm = MainThreadMarker::new().expect("Not on main thread");
+    let screen_size = get_main_screen_size(mtm);
+    let window = create_overlay_window(mtm, screen_size);
+    window.makeKeyAndOrderFront(None);
+    let window = CALayer::from_window(&window).expect("Failed to get root layer of window.");
 
-                // TODO: don't block system events
-                should_swallow = cst.act_on_key(key);
-            }
-            EventType::KeyRelease(key) => {
-                cst.pressed_keys.remove(&key);
-                if cst.is_active() {
-                    should_swallow = true;
+    // Listen to temp file updates
+    let temp_file = create_cache_file().expect("Failed to create temp file.");
+    let (ftx, mut frx) = mpsc::channel(100);
+    // NOTE: listen to file updates with FsEvent
+    let Ok(mut debouncer) =
+        new_debouncer(
+            std::time::Duration::from_millis(200),
+            move |res| match res {
+                Ok(_) => {
+                    // Notify: file updated
+                    let _ = ftx.blocking_send(());
+                }
+                Err(e) => eprintln!("Watch error: {:?}", e),
+            },
+        )
+    else {
+        return;
+    };
+
+    debouncer
+        .watcher()
+        .watch(temp_file.as_path(), RecursiveMode::NonRecursive)
+        .expect("Failed to watch file.");
+
+    let mut app_executor = AppExecutor::new(state.clone(), config, window, screen_size, temp_file);
+
+    thread::spawn(move || {
+        let pressed_keys = pressed_keys.clone();
+        let state = state.clone();
+        let _ = grab(move |event| {
+            let mut keys = pressed_keys.lock().unwrap();
+            let swallow = match event.event_type {
+                EventType::KeyPress(key) => {
+                    keys.insert(key);
+                    key_listener.key_down(key, &state, &keys)
+                }
+                EventType::KeyRelease(key) => {
+                    keys.remove(&key);
+                    key_listener.is_active(&state)
+                }
+                _ => false,
+            };
+            (!swallow).then_some(event)
+        });
+    });
+
+    loop {
+        tokio::select! {
+            Some(signal) = rx.recv() => app_executor.handle_signal(signal).await,
+            Some(()) = frx.recv() => app_executor.handle_signal(AppSignal::FileUpdate).await,
+            _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
+                // NOTE: necessary for up-to-date get_focused_pid and UI drawing
+                unsafe {
+                    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, Boolean::from(false));
                 }
             }
-            _ => (),
         }
+    }
+}
 
-        // Return None to swallow the event, Some(event) to pass it to the system
-        if should_swallow { None } else { Some(event) }
-    });
+fn create_cache_file() -> Option<PathBuf> {
+    let cache_dir = std::env::var("HOME")
+        .ok()
+        .map(|dir| PathBuf::from(dir).join(".cache/glyphlow"))?;
+    if !cache_dir.exists() {
+        std::fs::create_dir_all(&cache_dir).ok()?;
+    }
+    let cache_file = cache_dir.join("tempfile.md");
+    Some(cache_file)
 }

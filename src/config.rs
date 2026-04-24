@@ -2,7 +2,7 @@ use objc2::rc::Retained;
 use objc2_app_kit::NSFont;
 use objc2_core_foundation::CFRetained;
 use objc2_core_graphics::CGColor;
-use objc2_foundation::NSString;
+use objc2_foundation::{NSString, ns_string};
 use rdev::Key;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -35,8 +35,7 @@ pub struct GlyphlowTheme {
 }
 
 fn default_hint_font() -> Retained<NSFont> {
-    NSFont::fontWithName_size(&NSString::from_str("Andale Mono"), 12.0)
-        .expect("Default font should exist.")
+    NSFont::fontWithName_size(ns_string!("Andale Mono"), 12.0).expect("Default font should exist.")
 }
 fn default_hint_margin() -> u8 {
     3
@@ -51,8 +50,7 @@ fn default_hint_hl() -> CFRetained<CGColor> {
     color_from_hex("#11172620")
 }
 fn default_menu_font() -> Retained<NSFont> {
-    NSFont::fontWithName_size(&NSString::from_str("Andale Mono"), 12.0)
-        .expect("Default font should exist.")
+    NSFont::fontWithName_size(ns_string!("Andale Mono"), 12.0).expect("Default font should exist.")
 }
 fn default_menu_margin() -> u8 {
     10
@@ -115,24 +113,12 @@ fn color_from_hex(hex: &str) -> CFRetained<CGColor> {
     color_try_from_hex(hex).expect("Invalid color")
 }
 
-#[derive(Deserialize, Serialize, Debug, PartialEq)]
-pub enum ActionKind {
-    Blocking,
-    NonBlocking,
-}
-
-fn default_action_kind() -> ActionKind {
-    ActionKind::Blocking
-}
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CommandAction {
     pub command: String,
     pub args: Vec<String>,
     pub display: String,
     pub key: char,
-    #[serde(default = "default_action_kind")]
-    pub kind: ActionKind,
 }
 
 pub trait AlphabeticKey {
@@ -233,7 +219,7 @@ impl AlphabeticKey for Key {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct KeyBinding {
     #[serde(with = "key_combo_format")]
     pub keys: Vec<Key>,

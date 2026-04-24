@@ -9,7 +9,7 @@ use objc2_app_kit::{
 use objc2_core_foundation::{CFRetained, CGSize};
 use objc2_core_graphics::{CGColor, CGMutablePath};
 use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
-use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer, kCAAlignmentCenter};
+use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer, CATransaction, kCAAlignmentCenter};
 
 use crate::{
     ax_element::{Frame, HintBox},
@@ -80,7 +80,11 @@ pub trait GlyphlowDrawingLayer {
 impl GlyphlowDrawingLayer for CALayer {
     fn clear(&self) {
         unsafe {
+            CATransaction::begin();
             self.setSublayers(None);
+            CATransaction::commit();
+            // Force cleared after calling
+            CATransaction::flush();
         }
     }
 
