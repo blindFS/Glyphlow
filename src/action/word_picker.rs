@@ -21,7 +21,7 @@ struct Word {
 
 pub struct WordPicker {
     words: Vec<Word>,
-    digits: u32,
+    pub digits: u32,
 }
 
 impl WordPicker {

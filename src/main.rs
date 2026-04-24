@@ -31,12 +31,7 @@ async fn main() {
     let (tx, mut rx) = mpsc::channel::<AppSignal>(100);
 
     let config = GlyphlowConfig::load_config();
-    let key_listener = KeyListener::new(
-        tx,
-        config.global_trigger_key.clone(),
-        &config.editor,
-        &config.text_actions,
-    );
+    let key_listener = KeyListener::new(tx, &config);
 
     let state = Arc::new(Mutex::new(Mode::Idle));
     let pressed_keys = Arc::new(Mutex::new(HashSet::new()));

@@ -156,7 +156,8 @@ impl AppExecutor {
         self.draw_menu(&msg);
     }
 
-    fn draw_word_picker(&self) -> Vec<String> {
+    /// Also
+    fn draw_word_picker(&self) -> (Vec<String>, u32) {
         let word_picker = self
             .word_picker
             .as_ref()
@@ -174,7 +175,7 @@ impl AppExecutor {
             &self.config.theme,
         );
 
-        matched_words
+        (matched_words, word_picker.digits)
     }
 
     fn select_app_window(&mut self) -> Option<Frame> {
@@ -484,9 +485,10 @@ impl AppExecutor {
                     }
 
                     self.clear_drawing();
-                    let matched_words = self.draw_word_picker();
+                    let (matched_words, digits) = self.draw_word_picker();
 
-                    if matched_words.len() == 1
+                    if self.key_prefix.len() == digits as usize
+                        && matched_words.len() == 1
                         && let Some(text) = matched_words.first()
                     {
                         self.update_selected_text_and_show_menu(text.clone())

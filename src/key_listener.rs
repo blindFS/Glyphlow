@@ -9,7 +9,7 @@ use tokio::sync::mpsc::Sender;
 
 use crate::{
     ax_element::Target,
-    config::{AlphabeticKey, CommandAction, KeyBinding},
+    config::{AlphabeticKey, GlyphlowConfig, KeyBinding},
 };
 
 #[derive(Debug, PartialEq, Clone)]
@@ -141,25 +141,20 @@ impl KeyListener {
         items.into_iter().map(|it| (it.key, it.action))
     }
 
-    pub fn new(
-        sender: Sender<AppSignal>,
-        global_key_binding: KeyBinding,
-        editor: &Option<CommandAction>,
-        text_actions: &[CommandAction],
-    ) -> KeyListener {
-        let mut text_actions = Self::iter_from(TEXT_ACTION_MENU_ITEMS)
-            .chain(
-                text_actions
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, ca)| (ca.key, AppSignal::TextAction(TextAction::UserDefined(idx)))),
-            )
-            .collect::<HashMap<_, _>>();
+    pub fn new(sender: Sender<AppSignal>, config: &GlyphlowConfig) -> KeyListener {
+        let mut text_actions =
+            Self::iter_from(TEXT_ACTION_MENU_ITEMS)
+                .chain(
+                    config.text_actions.iter().enumerate().map(|(idx, ca)| {
+                        (ca.key, AppSignal::TextAction(TextAction::UserDefined(idx)))
+                    }),
+                )
+                .collect::<HashMap<_, _>>();
         let mut dashboard_actions =
             Self::iter_from(DASH_BOARD_MENU_ITEMS).collect::<HashMap<_, _>>();
         let scroll_actions = Self::iter_from(SCROLLBAR_MENU_ITEMS).collect::<HashMap<_, _>>();
 
-        if let Some(editor_command) = editor {
+        if let Some(editor_command) = config.editor.as_ref() {
             text_actions.insert(
                 editor_command.key,
                 AppSignal::TextAction(TextAction::Editor),
@@ -172,7 +167,7 @@ impl KeyListener {
             dashboard_actions,
             scroll_actions,
             sender,
-            global_key_binding,
+            global_key_binding: config.global_trigger_key.clone(),
         }
     }
 
