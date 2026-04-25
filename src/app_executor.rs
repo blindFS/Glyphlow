@@ -44,6 +44,8 @@ pub struct AppExecutor {
     /// For editing element text values
     temp_file: PathBuf,
     word_picker: Option<WordPicker>,
+    /// Store PID of current focused app
+    pid: Option<i32>,
 }
 
 impl AppExecutor {
@@ -71,6 +73,7 @@ impl AppExecutor {
             selected: None,
             temp_file,
             word_picker: None,
+            pid: None,
         }
     }
 
@@ -84,6 +87,7 @@ impl AppExecutor {
         self.clear_cache();
         self.clear_drawing();
         self.selected = None;
+        self.pid = None;
         self.set_mode(Mode::Idle);
     }
 
@@ -191,6 +195,7 @@ impl AppExecutor {
             RoleOfInterest::GenericNode,
             window_frame.clone(),
         ));
+        self.pid = Some(pid);
         Some(window_frame)
     }
 
@@ -504,7 +509,8 @@ impl AppExecutor {
                         .select_app_window()
                         .unwrap_or_else(|| Frame::from_origion(self.screen_size))
                 };
-                screen_shot(frame);
+                // TODO: save more memory
+                screen_shot(frame, self.pid.unwrap_or(0)).await;
                 self.deactivate();
             }
             AppSignal::ScrollAction(sa) => {

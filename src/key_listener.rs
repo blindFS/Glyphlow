@@ -71,6 +71,9 @@ impl Display for StaticMenuItem {
     }
 }
 
+// TODO: Config sub-menu to
+// 1. Reload config
+// 2. Toggle aggressive visibility check
 pub const DASH_BOARD_MENU_ITEMS: [StaticMenuItem; 7] = [
     StaticMenuItem::new("󰦨 Text", 'T', AppSignal::Activate(Target::Text)),
     StaticMenuItem::new("󰳽 Press", 'P', AppSignal::Activate(Target::Clickable)),
