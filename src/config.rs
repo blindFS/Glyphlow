@@ -69,6 +69,7 @@ fn default_frame_colors() -> Vec<CFRetained<CGColor>> {
         color_from_hex("#e0af68ff"),
         color_from_hex("#9ece6aff"),
         color_from_hex("#bb9af7ff"),
+        color_from_hex("#f7768eff"),
     ]
 }
 

@@ -330,7 +330,11 @@ impl AppExecutor {
                     self.activate(Target::MenuItem);
                 }
                 Target::ImageOCR => {
-                    match perform_ocr(frame, &self.config.ocr_languages).await {
+                    // NOTE: for images with parts out of sight
+                    let frame = frame
+                        .intersect(&Frame::from_origion(self.screen_size))
+                        .unwrap_or(frame.clone());
+                    match perform_ocr(&frame, &self.config.ocr_languages).await {
                         Ok(ocr_res) if !ocr_res.is_empty() => {
                             self.ocr_cache = Some(ocr_res);
                             self.key_prefix.clear();

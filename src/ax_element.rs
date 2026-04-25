@@ -118,7 +118,7 @@ impl Frame {
     }
 
     /// Calculate the boundaries of the potential intersection
-    fn intersect(&self, other: &Frame) -> Option<Self> {
+    pub fn intersect(&self, other: &Frame) -> Option<Self> {
         let inter_x1 = self.top_left.x.max(other.top_left.x);
         let inter_y1 = self.top_left.y.max(other.top_left.y);
         let inter_x2 = self.bottom_right.x.min(other.bottom_right.x);
