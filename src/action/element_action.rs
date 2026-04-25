@@ -9,7 +9,7 @@ use objc2::{
 use objc2_app_kit::{NSImage, NSPasteboard};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGImage;
-use objc2_foundation::{NSArray, NSError};
+use objc2_foundation::{NSArray, NSError, NSString};
 use objc2_screen_capture_kit::SCScreenshotManager;
 use objc2_vision::{
     VNImageRequestHandler, VNRecognizeTextRequest, VNRecognizedTextObservation, VNRequest,
@@ -30,7 +30,7 @@ async fn capture_focused_window(frame_rect: CGRect) -> Result<Retained<CGImage>,
             let description = unsafe { (*error).localizedDescription() };
             let _ = s.send(Err(format!("Capture failed: {description}")));
         } else {
-            let cg_image = unsafe { Retained::from_raw(output) };
+            let cg_image = unsafe { Retained::retain(output) };
             if let Some(retained) = cg_image {
                 let _ = s.send(Ok(retained));
             } else {
@@ -75,16 +75,26 @@ pub async fn screen_shot(frame: &Frame) {
 
 pub type OCRResult = Vec<(String, CGRect)>;
 
-pub async fn perform_ocr(frame: &Frame) -> Result<OCRResult, Box<dyn std::error::Error>> {
+pub async fn perform_ocr(
+    frame: &Frame,
+    languages: &[String],
+) -> Result<OCRResult, Box<dyn std::error::Error>> {
     let rect = frame.to_cgrect();
     let (w, h) = frame.size();
     unsafe {
-        let request = VNRecognizeTextRequest::init(VNRecognizeTextRequest::alloc());
-        request.setRecognitionLevel(objc2_vision::VNRequestTextRecognitionLevel::Accurate);
-
         let cg_image = capture_focused_window(rect).await?;
 
         autoreleasepool(|_| {
+            let request = VNRecognizeTextRequest::init(VNRecognizeTextRequest::alloc());
+            request.setRecognitionLevel(objc2_vision::VNRequestTextRecognitionLevel::Accurate);
+
+            let langs = languages
+                .iter()
+                .map(|l| NSString::from_str(l.as_str()))
+                .collect::<Vec<_>>();
+            let langs_array = NSArray::from_retained_slice(&langs);
+            request.setRecognitionLanguages(&langs_array);
+
             let handler = VNImageRequestHandler::initWithCGImage_options(
                 VNImageRequestHandler::alloc(),
                 &cg_image,

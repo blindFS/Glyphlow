@@ -243,6 +243,7 @@ pub struct GlyphlowConfig {
     pub image_min_size: u16,
     #[serde(default = "default_frame_min_size")]
     pub colored_frame_min_size: u16,
+    pub ocr_languages: Vec<String>,
 }
 
 fn default_global_keybinding() -> KeyBinding {
@@ -281,6 +282,7 @@ impl Default for GlyphlowConfig {
             element_min_height: default_element_min_height(),
             image_min_size: default_image_min_size(),
             colored_frame_min_size: default_frame_min_size(),
+            ocr_languages: vec!["en-US".into()],
         }
     }
 }
