@@ -19,6 +19,7 @@ use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber, strin
 use objc2::rc::Retained;
 use objc2_core_foundation::CGSize;
 use objc2_quartz_core::CALayer;
+use rdev::{Button, EventType, simulate};
 
 use std::{
     path::PathBuf,
@@ -240,13 +241,28 @@ impl AppExecutor {
         }
     }
 
+    fn simulate_event(event_type: &EventType) {
+        match simulate(event_type) {
+            Ok(()) => (),
+            Err(e) => {
+                eprintln!("Failed to simulate event {event_type:?}: {e}");
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
     fn focus_on_element(element: &AXUIElement) {
         element.set_attribute_by_name(kAXFocusedAttribute, CFBoolean::true_value().as_CFType());
     }
 
-    fn press_on_element(element: &AXUIElement) {
+    fn press_on_element(element: &AXUIElement, role: &RoleOfInterest, center: (f64, f64)) {
         Self::focus_on_element(element);
-        if let Err(e) = element.press() {
+        if *role == RoleOfInterest::Cell {
+            let (x, y) = center;
+            Self::simulate_event(&EventType::MouseMove { x, y });
+            Self::simulate_event(&EventType::ButtonPress(Button::Left));
+            Self::simulate_event(&EventType::ButtonRelease(Button::Left));
+        } else if let Err(e) = element.press() {
             eprintln!("Failed to click element: {e}");
         };
     }
@@ -312,6 +328,7 @@ impl AppExecutor {
                     element,
                     context,
                     frame,
+                    role,
                     ..
                 },
             ) = self.element_cache.cache.get(*idx)
@@ -320,7 +337,8 @@ impl AppExecutor {
             self.clear_drawing();
             match self.target {
                 Target::MenuItem | Target::Clickable => {
-                    Self::press_on_element(element);
+                    let center = frame.center();
+                    Self::press_on_element(element, role, center);
                     self.deactivate();
                 }
                 Target::Image => {

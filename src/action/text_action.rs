@@ -44,6 +44,8 @@ pub fn dictionary_popup(text: &str, point: (f64, f64)) {
     }
 }
 
+// TODO: Better format
+// https://github.com/NSHipster/articles/blob/master/2014-03-10-dictionary-services.md
 pub fn dictionary_lookup(text: &str) -> Option<String> {
     let query_str = CFString::new(text);
     println!("Calling DCSCopyTextDefinition with query: {text} ...");

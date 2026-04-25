@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::util::hint_label_from_index;
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
-    AXValueCreate, AXValueGetValue, AXValueRef, kAXButtonRole, kAXComboBoxRole,
+    AXValueCreate, AXValueGetValue, AXValueRef, kAXButtonRole, kAXCellRole, kAXComboBoxRole,
     kAXDescriptionAttribute, kAXGroupRole, kAXHiddenAttribute, kAXImageRole, kAXMenuBarRole,
     kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction, kAXScrollBarRole,
     kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
@@ -29,6 +29,7 @@ pub enum RoleOfInterest {
     ScrollBar,
     StaticText,
     TextField,
+    Cell,
 }
 
 #[derive(Clone, Debug)]
@@ -207,6 +208,7 @@ impl ElementCache {
         let center = (x.to_bits(), y.to_bits());
 
         // NOTE: de-duplication for DOM elements
+        // TODO: avoid collision
         if !self.seen_center.contains(&center) {
             self.seen_center.insert(center);
             self.cache.push(ElementOfInterest::new(
@@ -487,7 +489,6 @@ pub fn traverse_elements(
         };
 
         // TODO: Fine-grained control
-        // 1. AXCell click
         #[allow(non_upper_case_globals)]
         match role.to_string().as_str() {
             // TODO: DOM Class List based image searching for icon button
@@ -508,6 +509,11 @@ pub fn traverse_elements(
                 }
                 _ => (),
             },
+            kAXCellRole => {
+                if *target == Target::Clickable {
+                    cache.add(element, None, RoleOfInterest::Cell);
+                }
+            }
             kAXImageRole => match target {
                 Target::Image | Target::ImageOCR => {
                     cache.add(element, None, RoleOfInterest::Image);
