@@ -27,7 +27,10 @@ async fn capture_focused_window(frame_rect: CGRect) -> Result<Retained<CGImage>,
             return;
         };
         if !error.is_null() || output.is_null() {
-            let description = unsafe { (*error).localizedDescription() };
+            let err = unsafe { Retained::retain(error) };
+            let description = err
+                .map(|re| re.localizedDescription().to_string())
+                .unwrap_or_default();
             let _ = s.send(Err(format!("Capture failed: {description}")));
         } else {
             let cg_image = unsafe { Retained::retain(output) };

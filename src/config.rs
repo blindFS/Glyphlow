@@ -244,7 +244,10 @@ pub struct GlyphlowConfig {
     pub image_min_size: u16,
     #[serde(default = "default_frame_min_size")]
     pub colored_frame_min_size: u16,
+    #[serde(default = "default_ocr_languages")]
     pub ocr_languages: Vec<String>,
+    #[serde(default = "default_dictionaries")]
+    pub dictionaries: Vec<String>,
 }
 
 fn default_global_keybinding() -> KeyBinding {
@@ -270,6 +273,12 @@ fn default_frame_min_size() -> u16 {
 fn default_image_min_size() -> u16 {
     20
 }
+fn default_ocr_languages() -> Vec<String> {
+    vec!["en-US".into()]
+}
+fn default_dictionaries() -> Vec<String> {
+    vec!["New Oxford American Dictionary".into()]
+}
 
 impl Default for GlyphlowConfig {
     fn default() -> Self {
@@ -283,7 +292,8 @@ impl Default for GlyphlowConfig {
             element_min_height: default_element_min_height(),
             image_min_size: default_image_min_size(),
             colored_frame_min_size: default_frame_min_size(),
-            ocr_languages: vec!["en-US".into()],
+            ocr_languages: default_ocr_languages(),
+            dictionaries: default_dictionaries(),
         }
     }
 }

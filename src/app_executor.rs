@@ -2,7 +2,8 @@ use crate::{
     AppSignal, DASH_BOARD_MENU_ITEMS, FilterMode, Mode, SCROLLBAR_MENU_ITEMS, ScrollAction,
     StaticMenuItem, TEXT_ACTION_MENU_ITEMS, TextAction,
     action::{
-        OCRResult, WordPicker, dictionary_lookup, perform_ocr, screen_shot, text_to_clipboard,
+        OCRResult, WordPicker, get_dictionary_attributed_string, perform_ocr, screen_shot,
+        text_to_clipboard,
     },
     ax_element::{
         ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, RoleOfInterest,
@@ -11,6 +12,7 @@ use crate::{
     config::GlyphlowConfig,
     drawer::GlyphlowDrawingLayer,
     os_util::get_focused_pid,
+    util::estimate_frame_for_text,
 };
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
 use accessibility_sys::kAXFocusedAttribute;
@@ -647,9 +649,18 @@ impl AppExecutor {
                         true
                     }
                     TextAction::Dictionary => {
-                        // TODO: font size adjustment
-                        if let Some(def_str) = dictionary_lookup(&text) {
-                            self.draw_menu(&def_str);
+                        if let Some(attr_string) =
+                            get_dictionary_attributed_string(&text, &self.config.dictionaries)
+                        {
+                            let CGSize { width, height } = self.screen_size;
+                            let (text_size, _) =
+                                estimate_frame_for_text(&attr_string, (width, height));
+                            self.window.draw_attributed_string(
+                                attr_string,
+                                self.screen_size,
+                                text_size,
+                                &self.config.theme,
+                            );
                         } else {
                             // TODO: better notification
                             self.draw_menu("No definition found.");
