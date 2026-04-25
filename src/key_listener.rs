@@ -34,6 +34,7 @@ pub enum ScrollAction {
 pub enum FilterMode {
     WordPicking,
     Generic,
+    OCR,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -74,7 +75,7 @@ impl Display for StaticMenuItem {
 // TODO: Config sub-menu to
 // 1. Reload config
 // 2. Toggle aggressive visibility check
-pub const DASH_BOARD_MENU_ITEMS: [StaticMenuItem; 7] = [
+pub const DASH_BOARD_MENU_ITEMS: [StaticMenuItem; 8] = [
     StaticMenuItem::new("󰦨 Text", 'T', AppSignal::Activate(Target::Text)),
     StaticMenuItem::new("󰳽 Press", 'P', AppSignal::Activate(Target::Clickable)),
     StaticMenuItem::new("󱕒 ScrollBar", 'S', AppSignal::Activate(Target::ScrollBar)),
@@ -82,6 +83,7 @@ pub const DASH_BOARD_MENU_ITEMS: [StaticMenuItem; 7] = [
     StaticMenuItem::new(" Image", 'M', AppSignal::Activate(Target::Image)),
     StaticMenuItem::new("󰙅 Element", 'E', AppSignal::Activate(Target::ChildElement)),
     StaticMenuItem::new("󰆟 ScreenShot", 'R', AppSignal::ScreenShot),
+    StaticMenuItem::new("󱄺 Image OCR", 'O', AppSignal::Activate(Target::ImageOCR)),
 ];
 
 pub const SCROLLBAR_MENU_ITEMS: [StaticMenuItem; 4] = [
@@ -126,6 +128,7 @@ pub enum Mode {
     TextActionMenu,
     Transparent,
     WordPicking,
+    OCRResultFiltering,
 }
 
 #[derive(Debug)]
@@ -243,6 +246,7 @@ impl KeyListener {
             }
             Mode::WordPicking => filter_helper(key_char, state, FilterMode::WordPicking),
             Mode::Filtering => filter_helper(key_char, state, FilterMode::Generic),
+            Mode::OCRResultFiltering => filter_helper(key_char, state, FilterMode::OCR),
             Mode::TextActionMenu => helper(&self.text_actions, state),
             Mode::Scrolling => helper(&self.scroll_actions, state),
             _ => false,

@@ -2,7 +2,7 @@ use core_foundation::{
     base::{CFRange, CFTypeRef, TCFType},
     string::{CFString, CFStringRef},
 };
-use objc2::runtime::ProtocolObject;
+use objc2::{rc::autoreleasepool, runtime::ProtocolObject};
 use objc2_app_kit::NSPasteboard;
 use objc2_core_foundation::CGPoint;
 use objc2_foundation::{NSArray, NSString};
@@ -82,10 +82,12 @@ pub fn dictionary_lookup(text: &str) -> Option<String> {
 }
 
 pub fn text_to_clipboard(text: &str) {
-    let pb = NSPasteboard::generalPasteboard();
-    pb.clearContents();
-    let ns_string = NSString::from_str(text);
-    let proto_string = ProtocolObject::from_retained(ns_string);
-    let objects = NSArray::from_retained_slice(&[proto_string]);
-    pb.writeObjects(&objects);
+    autoreleasepool(|_| {
+        let pb = NSPasteboard::generalPasteboard();
+        pb.clearContents();
+        let ns_string = NSString::from_str(text);
+        let proto_string = ProtocolObject::from_retained(ns_string);
+        let objects = NSArray::from_retained_slice(&[proto_string]);
+        pb.writeObjects(&objects);
+    })
 }

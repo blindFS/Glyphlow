@@ -1,10 +1,12 @@
 use crate::{
     AppSignal, DASH_BOARD_MENU_ITEMS, FilterMode, Mode, SCROLLBAR_MENU_ITEMS, ScrollAction,
     StaticMenuItem, TEXT_ACTION_MENU_ITEMS, TextAction,
-    action::{WordPicker, dictionary_lookup, screen_shot, text_to_clipboard},
+    action::{
+        OCRResult, WordPicker, dictionary_lookup, perform_ocr, screen_shot, text_to_clipboard,
+    },
     ax_element::{
         ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, RoleOfInterest,
-        SetAttribute, Target, traverse_elements,
+        SetAttribute, Target, hint_boxes_from_frames, traverse_elements,
     },
     config::GlyphlowConfig,
     drawer::GlyphlowDrawingLayer,
@@ -44,8 +46,7 @@ pub struct AppExecutor {
     /// For editing element text values
     temp_file: PathBuf,
     word_picker: Option<WordPicker>,
-    /// Store PID of current focused app
-    pid: Option<i32>,
+    ocr_cache: Option<OCRResult>,
 }
 
 impl AppExecutor {
@@ -73,7 +74,7 @@ impl AppExecutor {
             selected: None,
             temp_file,
             word_picker: None,
-            pid: None,
+            ocr_cache: None,
         }
     }
 
@@ -87,12 +88,12 @@ impl AppExecutor {
         self.clear_cache();
         self.clear_drawing();
         self.selected = None;
-        self.pid = None;
         self.set_mode(Mode::Idle);
     }
 
     fn clear_cache(&mut self) {
         self.word_picker = None;
+        self.ocr_cache = None;
         self.hint_boxes.clear();
         self.element_cache.clear();
         self.key_prefix.clear();
@@ -195,7 +196,6 @@ impl AppExecutor {
             RoleOfInterest::GenericNode,
             window_frame.clone(),
         ));
-        self.pid = Some(pid);
         Some(window_frame)
     }
 
@@ -203,10 +203,10 @@ impl AppExecutor {
     fn activate(&mut self, target: Target) {
         // HACK: abuse self.target to mark whether to call external editor
         self.target = target.clone();
-        let target = if target == Target::Edit {
-            Target::Editable
-        } else {
-            target
+        let target = match target {
+            Target::Edit => Target::Editable,
+            Target::ImageOCR => Target::Image,
+            _ => target,
         };
 
         if self.selected.is_none() {
@@ -258,14 +258,45 @@ impl AppExecutor {
         };
     }
 
-    /// Filter the UI elements and redraw hints.
-    fn filter_by_key(&mut self, key_char: char) {
-        if key_char == '-' {
-            self.key_prefix.pop();
-        } else {
-            self.key_prefix.push(key_char);
-        }
+    fn ocr_res_filtering(&mut self) {
+        let ocr_res = self
+            .ocr_cache
+            .as_ref()
+            .expect("Internal Error: OCR cache not set.");
+        let len = ocr_res.len();
+        let iter = ocr_res.iter().map(|(_, rect)| Frame::from_cgrect(rect));
+        let (digits, ocr_hints) = hint_boxes_from_frames(
+            len,
+            iter,
+            &Frame::from_origion(self.screen_size),
+            &self.config.theme.frame_colors,
+            self.config.colored_frame_min_size as f64,
+        );
 
+        let filtered = ocr_hints
+            .into_iter()
+            .filter(|b| b.label.starts_with(&self.key_prefix))
+            .collect::<Vec<_>>();
+
+        if self.key_prefix.len() == digits as usize
+            && let Some(hb) = filtered.first()
+        {
+            let (selected_text, _) = ocr_res
+                .get(hb.idx)
+                .expect("Internal Error: wrong ocr hint indexing.");
+            if let Some(ElementOfInterest { context, .. }) = self.selected.as_mut() {
+                *context = Some(selected_text.clone());
+            }
+            self.update_selected_text_and_show_menu(selected_text.clone());
+        } else if !filtered.is_empty() {
+            self.draw_hints(&filtered);
+        } else {
+            self.deactivate();
+        }
+    }
+
+    /// Filter the UI elements and redraw hints.
+    async fn filter_by_key(&mut self) {
         let filtered_boxes = self
             .hint_boxes
             .iter()
@@ -279,7 +310,10 @@ impl AppExecutor {
             && let Some(HintBox { idx, .. }) = filtered_boxes.first()
             && let Some(
                 eoi @ ElementOfInterest {
-                    element, context, ..
+                    element,
+                    context,
+                    frame,
+                    ..
                 },
             ) = self.element_cache.cache.get(*idx)
         {
@@ -290,12 +324,28 @@ impl AppExecutor {
                     Self::press_on_element(element);
                     self.deactivate();
                 }
-                // TODO: OCR
                 Target::Image => {
                     Self::right_click_menu_on_element(element);
                     // HACK: wait for the right click menu to draw.
                     std::thread::sleep(Duration::from_millis(100));
                     self.activate(Target::MenuItem);
+                }
+                Target::ImageOCR => {
+                    match perform_ocr(frame).await {
+                        Ok(ocr_res) if !ocr_res.is_empty() => {
+                            self.ocr_cache = Some(ocr_res);
+                            self.key_prefix.clear();
+                            self.ocr_res_filtering();
+                            self.set_mode(Mode::OCRResultFiltering);
+                        }
+                        Err(e) => {
+                            eprintln!("OCR failed: {e:?}");
+                        }
+                        _ => {
+                            eprintln!("Empty OCR result.");
+                        }
+                    }
+                    // TODO: notify error/empty result
                 }
                 Target::Text => {
                     if let Some(text) = context {
@@ -350,9 +400,10 @@ impl AppExecutor {
         }
     }
 
-    fn quick_follow(&mut self) {
+    async fn quick_follow(&mut self) {
         if self.element_cache.cache.len() == 1 {
-            self.filter_by_key('A');
+            self.key_prefix.push('A');
+            self.filter_by_key().await;
         }
     }
 
@@ -465,7 +516,7 @@ impl AppExecutor {
                     || target == Target::Edit;
                 self.activate(target);
                 if quick_follow {
-                    self.quick_follow();
+                    self.quick_follow().await;
                 }
             }
             AppSignal::FileUpdate => {
@@ -478,28 +529,32 @@ impl AppExecutor {
             AppSignal::DeActivate => {
                 self.deactivate();
             }
-            AppSignal::Filter(key_char, mode) => match mode {
-                FilterMode::Generic => {
-                    self.filter_by_key(key_char);
+            AppSignal::Filter(key_char, mode) => {
+                if key_char == '-' {
+                    self.key_prefix.pop();
+                } else {
+                    self.key_prefix.push(key_char);
                 }
-                FilterMode::WordPicking => {
-                    if key_char == '-' {
-                        self.key_prefix.pop();
-                    } else {
-                        self.key_prefix.push(key_char);
+                match mode {
+                    FilterMode::OCR => {
+                        self.ocr_res_filtering();
                     }
+                    FilterMode::Generic => {
+                        self.filter_by_key().await;
+                    }
+                    FilterMode::WordPicking => {
+                        self.clear_drawing();
+                        let (matched_words, digits) = self.draw_word_picker();
 
-                    self.clear_drawing();
-                    let (matched_words, digits) = self.draw_word_picker();
-
-                    if self.key_prefix.len() == digits as usize
-                        && matched_words.len() == 1
-                        && let Some(text) = matched_words.first()
-                    {
-                        self.update_selected_text_and_show_menu(text.clone())
+                        if self.key_prefix.len() == digits as usize
+                            && matched_words.len() == 1
+                            && let Some(text) = matched_words.first()
+                        {
+                            self.update_selected_text_and_show_menu(text.clone())
+                        }
                     }
                 }
-            },
+            }
             AppSignal::ScreenShot => {
                 self.clear_drawing();
                 let frame = if let Some(eoi) = self.selected.as_ref() {
@@ -509,8 +564,7 @@ impl AppExecutor {
                         .select_app_window()
                         .unwrap_or_else(|| Frame::from_origion(self.screen_size))
                 };
-                // TODO: save more memory
-                screen_shot(frame, self.pid.unwrap_or(0)).await;
+                screen_shot(frame).await;
                 self.deactivate();
             }
             AppSignal::ScrollAction(sa) => {

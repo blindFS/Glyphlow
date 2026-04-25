@@ -15,8 +15,10 @@ use core_foundation::{
     boolean::CFBoolean,
     string::CFString,
 };
-use objc2_core_foundation::{CFRetained, CGPoint, CGSize};
+
+use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGColor;
+use objc2_foundation::NSSize;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum RoleOfInterest {
@@ -82,6 +84,26 @@ impl Frame {
             self.bottom_right.x,
             height - self.bottom_right.y,
         )
+    }
+
+    pub fn to_cgrect(&self) -> CGRect {
+        let (w, h) = self.size();
+        CGRect::new(self.top_left, CGSize::new(w, h))
+    }
+
+    pub fn from_cgrect(rect: &CGRect) -> Self {
+        let CGRect { origin, size } = rect;
+        Self::new(
+            origin.x,
+            origin.y,
+            origin.x + size.width,
+            origin.y + size.height,
+        )
+    }
+
+    pub fn ns_size(&self) -> NSSize {
+        let (w, h) = self.size();
+        NSSize::new(w, h)
     }
 
     pub fn center(&self) -> (f64, f64) {
@@ -202,53 +224,66 @@ impl ElementCache {
         frame_colors: &[CFRetained<CGColor>],
         colored_frame_min_size: f64,
     ) -> (u32, Vec<HintBox>) {
-        if self.cache.is_empty() {
-            return (0, vec![]);
-        }
-
-        let digits = self.cache.len().ilog(26) + 1;
-        let color_num = frame_colors.len();
-        let mut color_idx = 0;
-
-        (
-            digits,
-            self.cache
-                .iter()
-                .enumerate()
-                .map(|(idx, it)| {
-                    let ElementOfInterest { frame, .. } = it;
-                    // NOTE: better positioning
-                    let (_, screen_height) = screen_frame.size();
-                    let frame = frame
-                        .intersect(screen_frame)
-                        .unwrap_or_else(|| screen_frame.clone());
-
-                    let (x, y) = frame.center();
-                    let (w, h) = frame.size();
-
-                    // Draw frames for large enough elements
-                    let frame = if w.max(h) >= colored_frame_min_size {
-                        color_idx += 1;
-                        Some(frame.invert_y(screen_height))
-                    } else {
-                        None
-                    };
-                    let color = frame
-                        .as_ref()
-                        .and_then(|_| frame_colors.get(color_idx % color_num).cloned());
-
-                    HintBox {
-                        label: hint_label_from_index(idx, digits),
-                        x,
-                        y: (screen_height - y),
-                        idx,
-                        frame,
-                        color,
-                    }
-                })
-                .collect(),
+        hint_boxes_from_frames(
+            self.cache.len(),
+            self.cache.iter().map(|it| it.frame.clone()),
+            screen_frame,
+            frame_colors,
+            colored_frame_min_size,
         )
     }
+}
+
+pub fn hint_boxes_from_frames(
+    len: usize,
+    frames: impl Iterator<Item = Frame>,
+    screen_frame: &Frame,
+    frame_colors: &[CFRetained<CGColor>],
+    colored_frame_min_size: f64,
+) -> (u32, Vec<HintBox>) {
+    if len == 0 {
+        return (0, Vec::new());
+    }
+    let digits = len.ilog(26) + 1;
+    let color_num = frame_colors.len();
+    let mut color_idx = 0;
+
+    (
+        digits,
+        frames
+            .enumerate()
+            .map(|(idx, frame)| {
+                // NOTE: better positioning
+                let (_, screen_height) = screen_frame.size();
+                let frame = frame
+                    .intersect(screen_frame)
+                    .unwrap_or_else(|| screen_frame.clone());
+
+                let (x, y) = frame.center();
+                let (w, h) = frame.size();
+
+                // Draw frames for large enough elements
+                let frame = if w.max(h) >= colored_frame_min_size {
+                    color_idx += 1;
+                    Some(frame.invert_y(screen_height))
+                } else {
+                    None
+                };
+                let color = frame
+                    .as_ref()
+                    .and_then(|_| frame_colors.get(color_idx % color_num).cloned());
+
+                HintBox {
+                    label: hint_label_from_index(idx, digits),
+                    x,
+                    y: (screen_height - y),
+                    idx,
+                    frame,
+                    color,
+                }
+            })
+            .collect(),
+    )
 }
 
 pub trait GetAttribute {
@@ -408,6 +443,7 @@ pub enum Target {
     #[default]
     Clickable,
     Image,
+    ImageOCR,
     Editable,
     Edit,
     Text,
