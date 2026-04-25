@@ -509,7 +509,7 @@ pub fn traverse_elements(
                 _ => (),
             },
             kAXImageRole => match target {
-                Target::Image => {
+                Target::Image | Target::ImageOCR => {
                     cache.add(element, None, RoleOfInterest::Image);
                 }
                 Target::Clickable if element.is_clickable() => {
@@ -565,7 +565,8 @@ pub fn traverse_elements(
                 Target::Clickable if !element.has_children() && element.is_clickable() => {
                     cache.add(element, None, RoleOfInterest::Button);
                 }
-                Target::Image if !element.has_children() => {
+                // NOTE: Potential texts in leaf AXGroup
+                Target::ImageOCR if !element.has_children() => {
                     cache.add(element, None, RoleOfInterest::Image);
                 }
                 _ => (),

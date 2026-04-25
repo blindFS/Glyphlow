@@ -202,12 +202,11 @@ impl KeyListener {
             |key_signals: &HashMap<char, AppSignal>, mut state: MutexGuard<'_, Mode>| -> bool {
                 if let Some(signal) = key_signals.get(&key_char) {
                     self.send(signal.clone());
-                    true
                 } else {
                     self.send(AppSignal::DeActivate);
                     *state = Mode::Idle;
-                    false
                 }
+                true
             };
 
         let filter_helper =
@@ -215,11 +214,10 @@ impl KeyListener {
                 if key_char == ' ' {
                     self.send(AppSignal::DeActivate);
                     *state = Mode::Idle;
-                    false
                 } else {
                     self.send(AppSignal::Filter(key_char, mode));
-                    true
                 }
+                true
             };
 
         match *state {
@@ -249,6 +247,7 @@ impl KeyListener {
             Mode::OCRResultFiltering => filter_helper(key_char, state, FilterMode::OCR),
             Mode::TextActionMenu => helper(&self.text_actions, state),
             Mode::Scrolling => helper(&self.scroll_actions, state),
+            // Transparent mode
             _ => false,
         }
     }

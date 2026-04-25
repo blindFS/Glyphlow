@@ -205,7 +205,6 @@ impl AppExecutor {
         self.target = target.clone();
         let target = match target {
             Target::Edit => Target::Editable,
-            Target::ImageOCR => Target::Image,
             _ => target,
         };
 
