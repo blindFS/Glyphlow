@@ -327,6 +327,27 @@ impl AppExecutor {
         }
     }
 
+    async fn perform_ocr_on_frame(&mut self, frame: Frame) {
+        // NOTE: for images with parts out of sight
+        let frame = frame
+            .intersect(&Frame::from_origion(self.screen_size))
+            .unwrap_or(frame);
+        match perform_ocr(&frame, &self.config.ocr_languages).await {
+            Ok(ocr_res) if !ocr_res.is_empty() => {
+                self.ocr_cache = Some(ocr_res);
+                self.key_prefix.clear();
+                self.ocr_res_filtering();
+                self.set_mode(Mode::OCRResultFiltering);
+            }
+            Err(e) => {
+                self.notify(&format!("OCR failed: {e:?}"));
+            }
+            _ => {
+                self.notify("Empty OCR result.");
+            }
+        }
+    }
+
     /// Filter the UI elements and redraw hints.
     async fn filter_by_key(&mut self) {
         let filtered_boxes = self
@@ -364,26 +385,7 @@ impl AppExecutor {
                     std::thread::sleep(Duration::from_millis(100));
                     self.activate(Target::MenuItem);
                 }
-                Target::ImageOCR => {
-                    // NOTE: for images with parts out of sight
-                    let frame = frame
-                        .intersect(&Frame::from_origion(self.screen_size))
-                        .unwrap_or(frame.clone());
-                    match perform_ocr(&frame, &self.config.ocr_languages).await {
-                        Ok(ocr_res) if !ocr_res.is_empty() => {
-                            self.ocr_cache = Some(ocr_res);
-                            self.key_prefix.clear();
-                            self.ocr_res_filtering();
-                            self.set_mode(Mode::OCRResultFiltering);
-                        }
-                        Err(e) => {
-                            self.notify(&format!("OCR failed: {e:?}"));
-                        }
-                        _ => {
-                            self.notify("Empty OCR result.");
-                        }
-                    }
-                }
+                Target::ImageOCR => self.perform_ocr_on_frame(frame.clone()).await,
                 Target::Text => {
                     if let Some(text) = context {
                         self.selected.0 = Some(eoi.clone());
@@ -690,10 +692,29 @@ impl AppExecutor {
                 } else {
                     &self
                         .select_app_window()
+                        .map(|f| {
+                            // NOTE: Some apps, Finder, returns empty frame
+                            if f.size() == (0.0, 0.0) {
+                                Frame::from_origion(self.screen_size)
+                            } else {
+                                f
+                            }
+                        })
                         .unwrap_or_else(|| Frame::from_origion(self.screen_size))
                 };
-                screen_shot(frame).await;
-                self.deactivate();
+                if screen_shot(frame).await {
+                    self.notify("Screenshot copied to clipboard.");
+                } else {
+                    self.notify("Failed to take screenshot.");
+                };
+            }
+            AppSignal::FrameOCR => {
+                self.clear_drawing();
+                if let Some(ElementOfInterest { frame, .. }) = self.selected.0.as_ref() {
+                    self.perform_ocr_on_frame(frame.clone()).await;
+                } else {
+                    self.activate(Target::ImageOCR);
+                }
             }
             AppSignal::FileUpdate => {
                 if self.target == Target::Edit

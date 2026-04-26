@@ -53,14 +53,14 @@ async fn capture_focused_window(frame_rect: CGRect) -> Result<Retained<CGImage>,
 }
 
 // TODO: save more memory
-pub async fn screen_shot(frame: &Frame) {
+pub async fn screen_shot(frame: &Frame) -> bool {
     let rect = frame.to_cgrect();
     let ns_size = frame.ns_size();
     let cg_image = match capture_focused_window(rect).await {
         Ok(img) => img,
         Err(e) => {
-            println!("{e}");
-            return;
+            eprintln!("{e}");
+            return false;
         }
     };
 
@@ -73,6 +73,7 @@ pub async fn screen_shot(frame: &Frame) {
         let proto_image = ProtocolObject::from_retained(ns_image);
         let objects = NSArray::from_retained_slice(&[proto_image]);
         pb.writeObjects(&objects);
+        true
     })
 }
 

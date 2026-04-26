@@ -47,6 +47,7 @@ pub enum AppSignal {
     ScrollAction(ScrollAction),
     ReadClipboard,
     ScreenShot,
+    FrameOCR,
     FileUpdate,
     ClearNotification,
 }
@@ -85,7 +86,7 @@ pub const DASH_BOARD_MENU_ITEMS: [StaticMenuItem; 9] = [
     StaticMenuItem::new(" Image", 'M', AppSignal::Activate(Target::Image)),
     StaticMenuItem::new("󰙅 Element", 'E', AppSignal::Activate(Target::ChildElement)),
     StaticMenuItem::new("󰆟 ScreenShot", 'R', AppSignal::ScreenShot),
-    StaticMenuItem::new("󱄺 Image OCR", 'O', AppSignal::Activate(Target::ImageOCR)),
+    StaticMenuItem::new("󱄺 Image OCR", 'O', AppSignal::FrameOCR),
     StaticMenuItem::new(" Read Clipboard", 'C', AppSignal::ReadClipboard),
 ];
 

@@ -19,7 +19,7 @@ body {
     color: {fg_color};
 }
 .line { display: block; }
-.m, .h { color: {hl_color} }
+.h { color: {hl_color} }
 .d { color: {dim_color} }
 </style>"#;
 
