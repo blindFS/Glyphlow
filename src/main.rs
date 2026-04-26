@@ -72,7 +72,9 @@ async fn main() {
         let pressed_keys = pressed_keys.clone();
         let state = state.clone();
         let _ = grab(move |event| {
-            let mut keys = pressed_keys.lock().unwrap();
+            let Ok(mut keys) = pressed_keys.lock() else {
+                return Some(event);
+            };
             let swallow = match event.event_type {
                 EventType::KeyPress(key) => {
                     keys.insert(key);

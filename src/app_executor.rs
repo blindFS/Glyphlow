@@ -135,24 +135,10 @@ impl AppExecutor {
         self.draw_menu(&msg);
     }
 
-    fn draw_menu(&self, msg: &str) {
-        self.window
-            .draw_menu(msg, self.screen_size, &self.config.theme);
-    }
-
     fn draw_scroll_bar_menu(&self) {
         let mut msg = "Pick a Scrolling Action:".to_string();
         msg.push_str(&Self::menu_string(&SCROLLBAR_MENU_ITEMS));
         self.draw_menu(&msg);
-    }
-
-    fn menu_string(items: &[StaticMenuItem]) -> String {
-        let mut res = String::new();
-        for item in items {
-            res.push('\n');
-            res.push_str(&item.to_string());
-        }
-        res
     }
 
     fn draw_dash_board(&self) {
@@ -164,7 +150,20 @@ impl AppExecutor {
         self.draw_menu(&msg);
     }
 
-    /// Also
+    fn draw_menu(&self, msg: &str) {
+        self.window
+            .draw_menu(msg, self.screen_size, &self.config.theme);
+    }
+
+    fn menu_string(items: &[StaticMenuItem]) -> String {
+        let mut res = String::new();
+        for item in items {
+            res.push('\n');
+            res.push_str(&item.to_string());
+        }
+        res
+    }
+
     fn draw_word_picker(&self) -> (Vec<String>, u32) {
         let word_picker = self
             .word_picker
@@ -253,6 +252,12 @@ impl AppExecutor {
         std::thread::sleep(Duration::from_millis(20));
     }
 
+    fn simulate_click(x: f64, y: f64) {
+        Self::simulate_event(&EventType::MouseMove { x, y });
+        Self::simulate_event(&EventType::ButtonPress(Button::Left));
+        Self::simulate_event(&EventType::ButtonRelease(Button::Left));
+    }
+
     fn focus_on_element(element: &AXUIElement) {
         element.set_attribute_by_name(kAXFocusedAttribute, CFBoolean::true_value().as_CFType());
     }
@@ -261,9 +266,7 @@ impl AppExecutor {
         Self::focus_on_element(element);
         if *role == RoleOfInterest::Cell {
             let (x, y) = center;
-            Self::simulate_event(&EventType::MouseMove { x, y });
-            Self::simulate_event(&EventType::ButtonPress(Button::Left));
-            Self::simulate_event(&EventType::ButtonRelease(Button::Left));
+            Self::simulate_click(x, y);
         } else if let Err(e) = element.press() {
             eprintln!("Failed to click element: {e}");
         };
@@ -513,11 +516,9 @@ impl AppExecutor {
             ..
         }) = self.selected.0.as_mut()
         {
-            // if *role == RoleOfInterest::TextField {
             if replace && let Err(e) = element.set_value(CFString::new(&new_text).as_CFType()) {
                 eprintln!("Failed to set the text of focused element: {element:?}\n Error: {e}");
             }
-            // }
             *context = Some(new_text.clone());
         }
         self.selected.1 = Some(new_text)
