@@ -640,9 +640,11 @@ impl AppExecutor {
                         true
                     }
                     TextAction::Dictionary => {
-                        if let Some(attr_string) =
-                            get_dictionary_attributed_string(&text, &self.config.dictionaries)
-                        {
+                        if let Some(attr_string) = get_dictionary_attributed_string(
+                            &text,
+                            &self.config.dictionaries,
+                            &self.config.theme,
+                        ) {
                             let CGSize { width, height } = self.screen_size;
                             let (text_size, _) =
                                 estimate_frame_for_text(&attr_string, (width, height));

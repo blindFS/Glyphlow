@@ -1,6 +1,6 @@
 use crate::{
-    action::html_to_attributed_string,
-    config::{GlyphlowTheme, cgcolor_to_rgba},
+    action::{html_to_attributed_string, replace_color_in_css},
+    config::GlyphlowTheme,
     util::{estimate_frame_for_text, hint_label_from_index},
 };
 use objc2::rc::Retained;
@@ -22,11 +22,6 @@ body {
 .m, .h { color: {hl_color} }
 .d { color: {dim_color} }
 </style>"#;
-
-fn rgba_to_css_color(rgba: (u8, u8, u8, u8)) -> String {
-    let (r, g, b, a) = rgba;
-    format!("rgba({}, {}, {}, {:.2})", r, g, b, a as f64 / 255.0)
-}
 
 #[derive(Debug, Clone)]
 struct Word {
@@ -129,18 +124,10 @@ impl WordPicker {
         let html_str = self.to_string(prefix, width / (height + 0.01));
 
         // CSS colors
-        let default_rgba = (255, 255, 255, 255);
-        let fg_rgba = cgcolor_to_rgba(&theme.menu_fg_color).unwrap_or(default_rgba);
-        let mut dim_rgba = fg_rgba;
-        dim_rgba.3 /= 2;
-        let css = WORD_PICKER_STYLE
-            .replace("{fg_color}", &rgba_to_css_color(fg_rgba))
-            .replace(
-                "{hl_color}",
-                &rgba_to_css_color(cgcolor_to_rgba(&theme.menu_hl_color).unwrap_or(default_rgba)),
-            )
-            .replace("{dim_color}", &rgba_to_css_color(dim_rgba));
-        let attr_string = html_to_attributed_string(&html_str, &css)?;
+        let attr_string = html_to_attributed_string(
+            &html_str,
+            &replace_color_in_css(WORD_PICKER_STYLE, theme, 3),
+        )?;
 
         unsafe {
             attr_string.addAttribute_value_range(

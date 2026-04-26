@@ -17,43 +17,44 @@ use objc2_foundation::{
 };
 use std::{collections::HashMap, ffi::c_void};
 
+use crate::config::{GlyphlowTheme, cgcolor_to_rgba};
+
+// TODO: Dynamic font-size?
+// TODO: Indentation, might require regex replacing
 const DICTIONARY_STYLE: &str = r#"
 <style>
 body {
     font-size: 15px;
-    line-height: 1.5;
+    color: {fg_color}
 }
-
 /* These classes represent major sections that should start on a new line */
-.hwg, .hg,          /* Headword groups */
-.semb, .gramb, .se1,       /* Grammar/Sense groups */
-.msDict,            /* Main dictionary definitions */
-.exg, .eg,          /* Example groups */
-.subEntryBlock,     /* Derivatives section */
-.etym,              /* Etymology section */
-d\:entry {          /* The root entry tag */
+.hwg, .hg,           /* Headword groups */
+.semb, .gramb, .se1, /* Grammar/Sense groups */
+.msDict,             /* Main dictionary definitions */
+.exg, .eg,           /* Example groups */
+.subEntryBlock,      /* Derivatives section */
+.etym,               /* Etymology section */
+d\:entry {           /* The root entry tag */
     display: block;
 }
-
 /* --- Headword Styling --- */
 .hw {
     font-family: sans-serif;
     font-weight: bold;
     font-size: 2.0em;
 }
-
 /* Phonetics */
 .ph {
     font-family: monospace;
+    color: {dim_color};
 }
-
 /* --- Definitions & Part of Speech --- */
 .ps, .pos {
     font-style: italic;
 }
-
 .df, .trans {
     font-family: sans-serif;
+    color: {hl_color};
 }
 </style>"#;
 
@@ -77,6 +78,7 @@ unsafe extern "C" {
 pub fn get_dictionary_attributed_string(
     word: &str,
     dict_names: &[String],
+    theme: &GlyphlowTheme,
 ) -> Option<Retained<NSMutableAttributedString>> {
     autoreleasepool(|_| {
         unsafe {
@@ -144,12 +146,33 @@ pub fn get_dictionary_attributed_string(
                 if !html_ptr.is_null() {
                     let html = CFString::wrap_under_create_rule(html_ptr);
                     // println!("{html:?}");
-                    return html_to_attributed_string(&html.to_string(), DICTIONARY_STYLE);
+                    return html_to_attributed_string(
+                        &html.to_string(),
+                        &replace_color_in_css(DICTIONARY_STYLE, theme, 2),
+                    );
                 }
             }
         }
         None
     })
+}
+
+pub fn rgba_to_css_color(rgba: (u8, u8, u8, u8)) -> String {
+    let (r, g, b, a) = rgba;
+    format!("rgba({}, {}, {}, {:.2})", r, g, b, a as f64 / 255.0)
+}
+
+pub fn replace_color_in_css(css: &str, theme: &GlyphlowTheme, dim_level: u8) -> String {
+    let default_rgba = (255, 255, 255, 255);
+    let fg_rgba = cgcolor_to_rgba(&theme.menu_fg_color).unwrap_or(default_rgba);
+    let mut dim_rgba = fg_rgba;
+    dim_rgba.3 /= dim_level;
+    css.replace("{fg_color}", &rgba_to_css_color(fg_rgba))
+        .replace(
+            "{hl_color}",
+            &rgba_to_css_color(cgcolor_to_rgba(&theme.menu_hl_color).unwrap_or(default_rgba)),
+        )
+        .replace("{dim_color}", &rgba_to_css_color(dim_rgba))
 }
 
 /// Converts an HTML string into an NSMutableAttributedString, applying bold/italic
@@ -158,7 +181,6 @@ pub fn html_to_attributed_string(
     html: &str,
     css: &str,
 ) -> Option<Retained<NSMutableAttributedString>> {
-    // TODO: Indentation, might require regex replacing
     // HACK: for malformed html, cleanup the <head>
     let clean_html = html.replace("<head/>", "").replace("</head>", "");
     let processed_html = if clean_html.contains("<body>") {
