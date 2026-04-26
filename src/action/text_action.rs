@@ -17,6 +17,46 @@ use objc2_foundation::{
 };
 use std::{collections::HashMap, ffi::c_void};
 
+const DICTIONARY_STYLE: &str = r#"
+<style>
+body {
+    font-size: 15px;
+    line-height: 1.5;
+}
+
+/* These classes represent major sections that should start on a new line */
+.hwg, .hg,          /* Headword groups */
+.semb, .gramb, .se1,       /* Grammar/Sense groups */
+.msDict,            /* Main dictionary definitions */
+.exg, .eg,          /* Example groups */
+.subEntryBlock,     /* Derivatives section */
+.etym,              /* Etymology section */
+d\:entry {          /* The root entry tag */
+    display: block;
+}
+
+/* --- Headword Styling --- */
+.hw {
+    font-family: sans-serif;
+    font-weight: bold;
+    font-size: 2.0em;
+}
+
+/* Phonetics */
+.ph {
+    font-family: monospace;
+}
+
+/* --- Definitions & Part of Speech --- */
+.ps, .pos {
+    font-style: italic;
+}
+
+.df, .trans {
+    font-family: sans-serif;
+}
+</style>"#;
+
 #[repr(C)]
 pub struct __DCSDictionary(c_void);
 pub type DCSDictionaryRef = *const __DCSDictionary;
@@ -104,7 +144,7 @@ pub fn get_dictionary_attributed_string(
                 if !html_ptr.is_null() {
                     let html = CFString::wrap_under_create_rule(html_ptr);
                     // println!("{html:?}");
-                    return html_to_attributed_string(&html.to_string());
+                    return html_to_attributed_string(&html.to_string(), DICTIONARY_STYLE);
                 }
             }
         }
@@ -114,57 +154,17 @@ pub fn get_dictionary_attributed_string(
 
 /// Converts an HTML string into an NSMutableAttributedString, applying bold/italic
 /// styles to specific classes via CSS injection.
-pub fn html_to_attributed_string(html: &str) -> Option<Retained<NSMutableAttributedString>> {
-    // NOTE: Define the CSS style block mapping your classes to font styles.
+pub fn html_to_attributed_string(
+    html: &str,
+    css: &str,
+) -> Option<Retained<NSMutableAttributedString>> {
     // TODO: Indentation, might require regex replacing
-    let style = r#"
-<style>
-/* --- Global Reset & Typography --- */
-body {
-    font-size: 15px;
-    line-height: 1.5;
-}
-
-/* --- Block Layout (The "Newline" Logic) --- */
-/* These classes represent major sections that should start on a new line */
-.hwg, .hg,          /* Headword groups */
-.semb, .gramb, .se1,       /* Grammar/Sense groups */
-.msDict,            /* Main dictionary definitions */
-.exg, .eg,          /* Example groups */
-.subEntryBlock,     /* Derivatives section */
-.etym,              /* Etymology section */
-d\:entry {          /* The root entry tag */
-    display: block;
-}
-
-/* --- Headword Styling --- */
-.hw {
-    font-family: sans-serif;
-    font-weight: bold;
-    font-size: 2.0em;
-}
-
-/* Phonetics */
-.ph {
-    font-family: monospace;
-}
-
-/* --- Definitions & Part of Speech --- */
-.ps, .pos {
-    font-style: italic;
-}
-
-.df, .trans {
-    font-family: sans-serif;
-}
-</style>"#;
-
     // HACK: for malformed html, cleanup the <head>
     let clean_html = html.replace("<head/>", "").replace("</head>", "");
     let processed_html = if clean_html.contains("<body>") {
-        clean_html.replace("<body>", &format!("<body>{}", style))
+        clean_html.replace("<body>", &format!("<body>{}", css))
     } else {
-        format!("<html><body>{}{}</body></html>", style, clean_html)
+        format!("<html><body>{}{}</body></html>", css, clean_html)
     };
 
     let ns_html = NSString::from_str(&processed_html);
@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn test_html_parsing_and_styling() {
-        let attr_string = html_to_attributed_string(DICTIONARY_HTML)
+        let attr_string = html_to_attributed_string(DICTIONARY_HTML, DICTIONARY_STYLE)
             .expect("Function should successfully return an NSMutableAttributedString");
 
         let ns_string: Retained<NSString> = attr_string.string();

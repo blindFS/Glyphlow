@@ -1,17 +1,32 @@
-use crate::util::{estimate_frame_for_text, hint_label_from_index};
-use objc2::{
-    AnyThread,
-    rc::{DefaultRetained, Retained},
+use crate::{
+    action::html_to_attributed_string,
+    config::{GlyphlowTheme, cgcolor_to_rgba},
+    util::{estimate_frame_for_text, hint_label_from_index},
 };
-use objc2_app_kit::{
-    NSBackgroundColorAttributeName, NSColor, NSFont, NSFontAttributeName, NSMutableParagraphStyle,
-    NSParagraphStyleAttributeName,
-};
-use objc2_core_foundation::{CFRetained, CGSize};
-use objc2_core_graphics::CGColor;
-use objc2_foundation::{NSMutableAttributedString, NSRange, NSString};
+use objc2::rc::Retained;
+use objc2_app_kit::{NSFont, NSFontAttributeName};
+use objc2_core_foundation::CGSize;
+use objc2_foundation::{NSMutableAttributedString, NSRange};
 use regex::Regex;
 use std::sync::OnceLock;
+use unicode_width::UnicodeWidthStr;
+
+const WORD_PICKER_STYLE: &str = r#"
+<style>
+body {
+    font-size: 25px;
+    line-height: 1.5;
+    color: {fg_color};
+}
+.line { display: block; }
+.m, .h { color: {hl_color} }
+.d { color: {dim_color} }
+</style>"#;
+
+fn rgba_to_css_color(rgba: (u8, u8, u8, u8)) -> String {
+    let (r, g, b, a) = rgba;
+    format!("rgba({}, {}, {}, {:.2})", r, g, b, a as f64 / 255.0)
+}
 
 #[derive(Debug, Clone)]
 struct Word {
@@ -39,107 +54,126 @@ impl WordPicker {
         }
     }
 
-    // TODO: Markdown Styling `NSMutableAttributedString::initWithMarkdownString_options_baseURL_error`
-    fn to_string(&self, prefix: &str) -> (String, Vec<(usize, usize)>, Vec<String>) {
+    /// Returns HTML string
+    fn to_string(&self, prefix: &str, width_height_ratio: f64) -> String {
+        let total_unicode_width = self.words.iter().map(|w| w.text.width()).sum::<usize>()
+            + self.words.len() * (2 + self.digits as usize);
+        // ideal_width / (total_unicode_width / ideal_width) 󰾞 ratio * 3
+        let ideal_width = (total_unicode_width as f64 * width_height_ratio * 3.0)
+            .sqrt()
+            .round() as usize;
+
+        let line_span_head = "<span class=\"line\">";
         let mut buffer = String::new();
-        let mut hl_ranges = Vec::new();
-        let mut offset = 0;
-        let mut matched_words = Vec::new();
+        let mut line_width = 0;
 
         for w in self.words.iter() {
-            let word_seg = format!("{}【{}】", w.text, w.label);
-            let word_seg_utf16_len = word_seg.encode_utf16().count();
-            if !prefix.is_empty() && w.label.starts_with(prefix) {
-                hl_ranges.push((offset, word_seg_utf16_len - self.digits as usize - 2));
-                matched_words.push(w.text.clone());
+            if line_width == 0 {
+                buffer.push_str(line_span_head);
             }
-            buffer.push_str(&word_seg);
-            buffer.push(' ');
-            offset += word_seg_utf16_len + 1;
+
+            let this_width = w.text.width() + self.digits as usize + 2;
+            let (this_class, label_html) = if !prefix.is_empty() && w.label.starts_with(prefix) {
+                // For matched, highlight the label suffix
+                (
+                    "m",
+                    format!(
+                        "<span class=\"d\">{}</span><span class=\"h\">{}</span>",
+                        prefix,
+                        w.label.get(prefix.len()..).unwrap_or_default()
+                    ),
+                )
+            } else if prefix.is_empty() {
+                // No prefix, highlight the all labels
+                ("n", format!("<span class=\"h\">{}</span>", w.label))
+            } else {
+                // Unmatched choices, dim whole span
+                ("d", w.label.clone())
+            };
+            let this_span = format!(
+                "<span class=\"{}\">{} {} </span>",
+                this_class, w.text, label_html
+            );
+
+            if line_width + this_width <= ideal_width {
+                line_width += this_width;
+            } else {
+                buffer.push_str("</span>");
+                buffer.push_str(line_span_head);
+                line_width = this_width;
+            }
+            buffer.push_str(&this_span);
         }
-        (buffer, hl_ranges, matched_words)
+        if !buffer.is_empty() {
+            buffer.push_str("</span>");
+        }
+
+        buffer
+    }
+
+    pub fn matched_words(&self, prefix: &str) -> Vec<String> {
+        self.words
+            .iter()
+            .filter(|w| !prefix.is_empty() && w.label.starts_with(prefix))
+            .map(|w| w.text.clone())
+            .collect()
     }
 
     pub fn get_attributed_string(
         &self,
         screen_size: CGSize,
-        default_font: &Retained<NSFont>,
-        hl_color: &CFRetained<CGColor>,
+        theme: &GlyphlowTheme,
         prefix: &str,
-    ) -> (CGSize, Retained<NSMutableAttributedString>, Vec<String>) {
-        let (raw_str, highlight_ranges, matched_words) = self.to_string(prefix);
-        let ns_string = NSString::from_str(&raw_str);
-        let attr_string = NSMutableAttributedString::initWithString(
-            NSMutableAttributedString::alloc(),
-            &ns_string,
-        );
-        let str_len = attr_string.length();
-        if str_len == 0 {
-            return (screen_size, attr_string, matched_words);
-        }
-        // Approximate font area as 1.5 * 0.7 font_size ^ 2
-        let CGSize {
-            width: w,
-            height: h,
-        } = screen_size;
-        let max_font_size = (w * h / str_len as f64 / 1.5 / 0.7).sqrt().round();
-        let font_size = max_font_size.min(default_font.pointSize()).max(1.0);
-        let font = NSFont::fontWithName_size(&default_font.fontName(), font_size)
-            .unwrap_or_else(|| default_font.clone());
+    ) -> Option<(CGSize, Retained<NSMutableAttributedString>)> {
+        let CGSize { width, height } = screen_size;
+        let html_str = self.to_string(prefix, width / (height + 0.01));
 
-        // Estimate ideal frame width to keep close width-height ratio as screen_size
-        let ideal_width = (str_len as f64 * font_size * font_size * 1.3 * 0.6 * w / (h + 0.1))
-            .sqrt()
-            .round()
-            * 1.5;
-        let ideal_width = ideal_width.min(screen_size.width - 20.0);
+        // CSS colors
+        let default_rgba = (255, 255, 255, 255);
+        let fg_rgba = cgcolor_to_rgba(&theme.menu_fg_color).unwrap_or(default_rgba);
+        let mut dim_rgba = fg_rgba;
+        dim_rgba.3 /= 2;
+        let css = WORD_PICKER_STYLE
+            .replace("{fg_color}", &rgba_to_css_color(fg_rgba))
+            .replace(
+                "{hl_color}",
+                &rgba_to_css_color(cgcolor_to_rgba(&theme.menu_hl_color).unwrap_or(default_rgba)),
+            )
+            .replace("{dim_color}", &rgba_to_css_color(dim_rgba));
+        let attr_string = html_to_attributed_string(&html_str, &css)?;
 
         unsafe {
-            let full_range = NSRange::new(0, str_len);
-            attr_string.addAttribute_value_range(NSFontAttributeName, &font, full_range);
-
-            // HACK: For multilingual text, height is underestimated due to fallback fonts.
-            // This ensures more vertical spacing.
-            let style = NSMutableParagraphStyle::default_retained();
-            style.setLineSpacing(1.0);
-            // style.setLineHeightMultiple(1.2);
-            attr_string.addAttribute_value_range(NSParagraphStyleAttributeName, &style, full_range);
-
-            let ptr = CGColor::components(Some(hl_color));
-            let nscolor = if !ptr.is_null() {
-                let r = *ptr.offset(0);
-                let g = *ptr.offset(1);
-                let b = *ptr.offset(2);
-                let a = *ptr.offset(3);
-                NSColor::colorWithRed_green_blue_alpha(r, g, b, a)
-            } else {
-                NSColor::blueColor()
-            };
-
-            // Background highlighting
-            for (start, length) in highlight_ranges {
-                // The matching word
-                attr_string.addAttribute_value_range(
-                    NSBackgroundColorAttributeName,
-                    &nscolor,
-                    NSRange::new(start, length),
-                );
-
-                // The remaining piece of hint label
-                attr_string.addAttribute_value_range(
-                    NSBackgroundColorAttributeName,
-                    &nscolor,
-                    NSRange::new(
-                        start + length + 1 + prefix.len(),
-                        self.digits as usize - prefix.len(),
-                    ),
-                );
-            }
+            attr_string.addAttribute_value_range(
+                NSFontAttributeName,
+                &theme.menu_font,
+                NSRange::new(0, attr_string.length()),
+            );
         }
 
-        let (size, _) = estimate_frame_for_text(&attr_string, (ideal_width, screen_size.height));
+        let (size, _) = estimate_frame_for_text(&attr_string, (width * 3.0, height * 3.0));
 
-        (size, attr_string, matched_words)
+        // In case the default font size is too large
+        let shrinkage = (width / size.width).min(height / size.height);
+        if shrinkage < 1.0 {
+            // Don't shrink too much
+            let font_size = shrinkage * theme.menu_font.pointSize().max(10.0);
+            if let Some(new_font) =
+                NSFont::fontWithName_size(&theme.menu_font.fontName(), font_size)
+            {
+                unsafe {
+                    attr_string.addAttribute_value_range(
+                        NSFontAttributeName,
+                        &new_font,
+                        NSRange::new(0, attr_string.length()),
+                    );
+                }
+
+                let (size, _) = estimate_frame_for_text(&attr_string, (width, height));
+                return Some((size, attr_string));
+            };
+        }
+
+        Some((size, attr_string))
     }
 }
 

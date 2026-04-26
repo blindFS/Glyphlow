@@ -180,20 +180,23 @@ impl AppExecutor {
             .word_picker
             .as_ref()
             .expect("Internal Error: No word picker set.");
-        let (text_size, attr_string, matched_words) = word_picker.get_attributed_string(
+        if let Some((text_size, attr_string)) = word_picker.get_attributed_string(
             self.screen_size,
-            &self.config.theme.menu_font,
-            &self.config.theme.menu_hl_color,
-            &self.key_prefix,
-        );
-        self.window.draw_attributed_string(
-            attr_string,
-            self.screen_size,
-            text_size,
             &self.config.theme,
-        );
+            &self.key_prefix,
+        ) {
+            self.window.draw_attributed_string(
+                attr_string,
+                self.screen_size,
+                text_size,
+                &self.config.theme,
+            );
+        };
 
-        (matched_words, word_picker.digits)
+        (
+            word_picker.matched_words(&self.key_prefix),
+            word_picker.digits,
+        )
     }
 
     fn select_app_window(&mut self) -> Option<Frame> {

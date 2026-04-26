@@ -114,6 +114,21 @@ fn color_from_hex(hex: &str) -> CFRetained<CGColor> {
     color_try_from_hex(hex).expect("Invalid color")
 }
 
+pub fn cgcolor_to_rgba(cgcolor: &CFRetained<CGColor>) -> Option<(u8, u8, u8, u8)> {
+    unsafe {
+        let ptr = CGColor::components(Some(cgcolor));
+        if !ptr.is_null() {
+            let r = *ptr.offset(0) * 255.0;
+            let g = *ptr.offset(1) * 255.0;
+            let b = *ptr.offset(2) * 255.0;
+            let a = *ptr.offset(3) * 255.0;
+            Some((r as u8, g as u8, b as u8, a as u8))
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CommandAction {
     pub command: String,
@@ -382,21 +397,13 @@ mod cgcolor_format {
     where
         S: Serializer,
     {
-        unsafe {
-            let ptr = CGColor::components(Some(color));
-            if !ptr.is_null() {
-                let r = (*ptr.offset(0) * 255.0) as u8;
-                let g = (*ptr.offset(1) * 255.0) as u8;
-                let b = (*ptr.offset(2) * 255.0) as u8;
-                let a = (*ptr.offset(3) * 255.0) as u8;
-                let s = format!("#{:02x}{:02x}{:02x}{:02x}", r, g, b, a);
-                serializer.serialize_str(&s)
-            } else {
-                Err(serde::ser::Error::custom(
-                    "Failed to convert color {color:?} to hex string.",
-                ))
-            }
-        }
+        let Some((r, g, b, a)) = cgcolor_to_rgba(color) else {
+            return Err(serde::ser::Error::custom(
+                "Failed to convert color {color:?} to hex string.",
+            ));
+        };
+        let s = format!("#{:02x}{:02x}{:02x}{:02x}", r, g, b, a);
+        serializer.serialize_str(&s)
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<CFRetained<CGColor>, D::Error>

@@ -197,16 +197,6 @@ impl GlyphlowDrawingLayer for CALayer {
         text_size: CGSize,
         theme: &GlyphlowTheme,
     ) {
-        let full_range = NSRange::new(0, attr_string.length());
-
-        unsafe {
-            attr_string.addAttribute_value_range(
-                NSForegroundColorAttributeName,
-                theme.menu_fg_color.as_ref(),
-                full_range,
-            );
-        }
-
         let text_box = text_box_with_attributed_string(
             attr_string,
             false,
