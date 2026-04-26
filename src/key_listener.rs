@@ -39,15 +39,16 @@ pub enum FilterMode {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum AppSignal {
-    FileUpdate,
     DashBoard,
     Activate(Target),
-    ReadClipboard,
     DeActivate,
     Filter(char, FilterMode),
-    ScreenShot,
     TextAction(TextAction),
     ScrollAction(ScrollAction),
+    ReadClipboard,
+    ScreenShot,
+    FileUpdate,
+    ClearNotification,
 }
 
 #[derive(Debug, PartialEq)]
@@ -131,6 +132,7 @@ pub enum Mode {
     Transparent,
     WordPicking,
     OCRResultFiltering,
+    Notification,
 }
 
 #[derive(Debug)]
@@ -249,6 +251,11 @@ impl KeyListener {
             Mode::OCRResultFiltering => filter_helper(key_char, state, FilterMode::OCR),
             Mode::TextActionMenu => helper(&self.text_actions, state),
             Mode::Scrolling => helper(&self.scroll_actions, state),
+            Mode::Notification => {
+                self.send(AppSignal::DeActivate);
+                *state = Mode::Idle;
+                true
+            }
             // Transparent mode
             _ => false,
         }

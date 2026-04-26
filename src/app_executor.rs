@@ -22,6 +22,7 @@ use objc2::rc::Retained;
 use objc2_core_foundation::CGSize;
 use objc2_quartz_core::CALayer;
 use rdev::{Button, EventType, simulate};
+use tokio::sync::mpsc::Sender;
 
 use std::{
     path::PathBuf,
@@ -50,6 +51,7 @@ pub struct AppExecutor {
     temp_file: PathBuf,
     word_picker: Option<WordPicker>,
     ocr_cache: Option<OCRResult>,
+    timeout_sender: Sender<()>,
 }
 
 impl AppExecutor {
@@ -59,6 +61,7 @@ impl AppExecutor {
         window: Retained<CALayer>,
         screen_size: CGSize,
         temp_file: PathBuf,
+        timeout_sender: Sender<()>,
     ) -> Self {
         Self {
             state,
@@ -74,6 +77,7 @@ impl AppExecutor {
             screen_size,
             window,
             config,
+            timeout_sender,
             selected: (None, None),
             temp_file,
             word_picker: None,
@@ -153,6 +157,13 @@ impl AppExecutor {
     fn draw_menu(&self, msg: &str) {
         self.window
             .draw_menu(msg, self.screen_size, &self.config.theme);
+    }
+
+    fn notify(&self, msg: &str) {
+        self.draw_menu(msg);
+        let sender = self.timeout_sender.clone();
+        tokio::spawn(async { delay_and_deactivate(sender).await });
+        self.set_mode(Mode::Notification);
     }
 
     fn menu_string(items: &[StaticMenuItem]) -> String {
@@ -363,13 +374,12 @@ impl AppExecutor {
                             self.set_mode(Mode::OCRResultFiltering);
                         }
                         Err(e) => {
-                            eprintln!("OCR failed: {e:?}");
+                            self.notify(&format!("OCR failed: {e:?}"));
                         }
                         _ => {
-                            eprintln!("Empty OCR result.");
+                            self.notify("Empty OCR result.");
                         }
                     }
-                    // TODO: notify error/empty result
                 }
                 Target::Text => {
                     if let Some(text) = context {
@@ -410,12 +420,13 @@ impl AppExecutor {
                     Self::focus_on_element(element);
                     let text = context.clone().unwrap_or_default();
                     match self.open_editor(&text) {
-                        Ok(_) => (),
+                        Ok(_) => {
+                            self.set_mode(Mode::Idle);
+                        }
                         Err(e) => {
-                            eprintln!("Failed to spawn editor process: {e}");
+                            self.notify(&format!("Failed to open editor: {e}"));
                         }
                     }
-                    self.set_mode(Mode::Idle);
                 }
             }
         } else if filtered_boxes.is_empty() {
@@ -477,12 +488,12 @@ impl AppExecutor {
             .stdout(std::process::Stdio::piped())
             .spawn()
         else {
-            eprintln!(
+            self.notify(&format!(
                 "Failed to spawn command: {} {}",
                 action.command,
                 action.args.join(" ")
-            );
-            return false;
+            ));
+            return true;
         };
 
         // Wait for the stdout as the new text
@@ -494,13 +505,14 @@ impl AppExecutor {
                         .to_string();
                     self.update_selected_text_and_show_menu(new_text);
                 } else if !o.stderr.is_empty() {
-                    eprintln!("External stderr: {}", String::from_utf8_lossy(&o.stderr));
-                    return false;
+                    self.notify(&format!(
+                        "External stderr: {}",
+                        String::from_utf8_lossy(&o.stderr)
+                    ));
                 }
             }
             Err(e) => {
-                eprintln!("Failed to run command: {e}");
-                return false;
+                self.notify(&format!("Failed to run command: {e}"));
             }
         }
 
@@ -508,7 +520,6 @@ impl AppExecutor {
     }
 
     fn update_selected_text(&mut self, new_text: String, replace: bool) {
-        // TODO: Cache specific editing element so other glyphlow actions won't disable text updating?
         if let Some(ElementOfInterest {
             element,
             context,
@@ -543,13 +554,6 @@ impl AppExecutor {
                     self.quick_follow().await;
                 }
             }
-            AppSignal::FileUpdate => {
-                if self.target == Target::Edit
-                    && let Ok(new_text) = std::fs::read_to_string(&self.temp_file)
-                {
-                    self.update_selected_text(new_text, true);
-                }
-            }
             AppSignal::DeActivate => {
                 self.deactivate();
             }
@@ -578,18 +582,6 @@ impl AppExecutor {
                         }
                     }
                 }
-            }
-            AppSignal::ScreenShot => {
-                self.clear_drawing();
-                let frame = if let Some(eoi) = self.selected.0.as_ref() {
-                    &eoi.frame
-                } else {
-                    &self
-                        .select_app_window()
-                        .unwrap_or_else(|| Frame::from_origion(self.screen_size))
-                };
-                screen_shot(frame).await;
-                self.deactivate();
             }
             AppSignal::ScrollAction(sa) => {
                 let ElementOfInterest { element, .. } = self.selected.0.as_ref().expect(
@@ -641,8 +633,7 @@ impl AppExecutor {
                 let keep_drawing = match ta {
                     TextAction::Copy => {
                         text_to_clipboard(&text);
-                        // TODO: better notification
-                        self.draw_menu("Copied to clipboard.");
+                        self.notify("Copied to clipboard.");
                         true
                     }
                     TextAction::Dictionary => {
@@ -659,8 +650,7 @@ impl AppExecutor {
                                 &self.config.theme,
                             );
                         } else {
-                            // TODO: better notification
-                            self.draw_menu("No definition found.");
+                            self.notify("No definition found.");
                         }
                         true
                     }
@@ -675,9 +665,11 @@ impl AppExecutor {
                     }
                     TextAction::Editor => {
                         if let Err(e) = self.open_editor(&text) {
-                            eprintln!("Failed to open editor: {e}");
-                        };
-                        false
+                            self.notify(&format!("Failed to open editor: {e}"));
+                            true
+                        } else {
+                            false
+                        }
                     }
                     TextAction::UserDefined(idx) => self.take_external_action(idx, &text),
                 };
@@ -686,14 +678,48 @@ impl AppExecutor {
                     self.deactivate();
                 }
             }
+            AppSignal::ScreenShot => {
+                self.clear_drawing();
+                let frame = if let Some(eoi) = self.selected.0.as_ref() {
+                    &eoi.frame
+                } else {
+                    &self
+                        .select_app_window()
+                        .unwrap_or_else(|| Frame::from_origion(self.screen_size))
+                };
+                screen_shot(frame).await;
+                self.deactivate();
+            }
+            AppSignal::FileUpdate => {
+                if self.target == Target::Edit
+                    && let Ok(new_text) = std::fs::read_to_string(&self.temp_file)
+                {
+                    self.update_selected_text(new_text, true);
+                }
+            }
             AppSignal::ReadClipboard => {
-                // TODO: notify failure
                 if let Some(text) = text_from_clipboard() {
                     self.selected.1 = Some(text.clone());
                     self.draw_text_action_menu(&text);
                     self.set_mode(Mode::TextActionMenu);
+                } else {
+                    self.notify("No text found in clipboard.");
+                }
+            }
+            AppSignal::ClearNotification => {
+                if self
+                    .state
+                    .try_lock()
+                    .is_ok_and(|state| *state == Mode::Notification)
+                {
+                    self.deactivate();
                 }
             }
         }
     }
+}
+
+async fn delay_and_deactivate(sender: Sender<()>) {
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let _ = sender.send(()).await;
 }

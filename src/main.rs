@@ -66,7 +66,10 @@ async fn main() {
         .watch(temp_file.as_path(), RecursiveMode::NonRecursive)
         .expect("Failed to watch file.");
 
-    let mut app_executor = AppExecutor::new(state.clone(), config, window, screen_size, temp_file);
+    // Listen to notification timeout
+    let (ttx, mut trx) = mpsc::channel::<()>(100);
+    let mut app_executor =
+        AppExecutor::new(state.clone(), config, window, screen_size, temp_file, ttx);
 
     thread::spawn(move || {
         let pressed_keys = pressed_keys.clone();
@@ -94,6 +97,7 @@ async fn main() {
         tokio::select! {
             Some(signal) = rx.recv() => app_executor.handle_signal(signal).await,
             Some(()) = frx.recv() => app_executor.handle_signal(AppSignal::FileUpdate).await,
+            Some(()) = trx.recv() => app_executor.handle_signal(AppSignal::ClearNotification).await,
             _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
                 // NOTE: necessary for up-to-date get_focused_pid and UI drawing
                 unsafe {
