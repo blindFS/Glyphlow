@@ -467,6 +467,10 @@ pub fn traverse_elements(
             cache.clear();
             if let Ok(children) = element.visible_children().or_else(|_| element.children()) {
                 for child in &children {
+                    // NOTE: Some apps, like App Store, have circular referencing
+                    if *child == *element {
+                        continue;
+                    }
                     if child.visible_frame(parent_frame, &role).is_some() {
                         cache.add(&child, None, RoleOfInterest::GenericNode);
                     }
@@ -602,6 +606,10 @@ pub fn traverse_elements(
 
         if let Ok(children) = element.visible_children().or_else(|_| element.children()) {
             for child in &children {
+                // NOTE: Some apps, like App Store, have circular referencing
+                if *child == *element {
+                    continue;
+                }
                 traverse_elements(&child, &new_frame, cache, target);
             }
         }

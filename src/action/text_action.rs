@@ -134,7 +134,10 @@ pub fn html_to_attributed_string(
     css: Option<&str>,
 ) -> Option<Retained<NSMutableAttributedString>> {
     let processed_html = if let Some(css) = css {
-        &format!("<html><body>{}{}</body></html>", css, html)
+        &format!(
+            "<html><meta charset=\"utf-8\" /><body>{}{}</body></html>",
+            css, html
+        )
     } else {
         html
     };
