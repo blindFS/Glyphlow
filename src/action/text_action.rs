@@ -1,3 +1,4 @@
+use crate::config::GlyphlowTheme;
 use core_foundation::{
     array::{CFArray, CFArrayGetCount, CFArrayGetValueAtIndex, CFArrayRef},
     base::{CFTypeRef, TCFType},
@@ -9,54 +10,16 @@ use objc2::{
     runtime::{AnyObject, ProtocolObject},
 };
 use objc2_app_kit::{
-    NSDocumentTypeDocumentAttribute, NSHTMLTextDocumentType,
+    NSDocumentTypeDocumentAttribute, NSForegroundColorAttributeName, NSHTMLTextDocumentType,
     NSMutableAttributedStringDocumentFormats, NSPasteboard, NSPasteboardTypeString,
 };
 use objc2_foundation::{
-    NSArray, NSDictionary, NSMutableAttributedString, NSString, NSUTF8StringEncoding,
+    NSArray, NSDictionary, NSMutableAttributedString, NSRange, NSString, NSUTF8StringEncoding,
 };
 use std::{collections::HashMap, ffi::c_void};
 
-use crate::config::{GlyphlowTheme, cgcolor_to_rgba};
-
 // TODO: Dynamic font-size?
 // TODO: Indentation, might require regex replacing
-const DICTIONARY_STYLE: &str = r#"
-<style>
-body {
-    font-size: 15px;
-    color: {fg_color}
-}
-/* These classes represent major sections that should start on a new line */
-.hwg, .hg,           /* Headword groups */
-.semb, .gramb, .se1, /* Grammar/Sense groups */
-.msDict,             /* Main dictionary definitions */
-.exg, .eg,           /* Example groups */
-.subEntryBlock,      /* Derivatives section */
-.etym,               /* Etymology section */
-d\:entry {           /* The root entry tag */
-    display: block;
-}
-/* --- Headword Styling --- */
-.hw {
-    font-family: sans-serif;
-    font-weight: bold;
-    font-size: 2.0em;
-}
-/* Phonetics */
-.ph {
-    font-family: monospace;
-    color: {dim_color};
-}
-/* --- Definitions & Part of Speech --- */
-.ps, .pos {
-    font-style: italic;
-}
-.df, .trans {
-    font-family: sans-serif;
-    color: {hl_color};
-}
-</style>"#;
 
 #[repr(C)]
 pub struct __DCSDictionary(c_void);
@@ -72,7 +35,7 @@ unsafe extern "C" {
         u2: *mut c_void, // Usually NULL
     ) -> CFArrayRef;
     pub fn DCSDictionaryGetName(dict: DCSDictionaryRef) -> CFStringRef;
-    pub fn DCSRecordCopyData(record: CFTypeRef) -> CFStringRef;
+    pub fn DCSRecordCopyData(record: CFTypeRef, version: u8) -> CFStringRef;
 }
 
 pub fn get_dictionary_attributed_string(
@@ -142,14 +105,21 @@ pub fn get_dictionary_attributed_string(
                 }
                 let first_record = CFTypeRef::from(first);
 
-                let html_ptr = DCSRecordCopyData(first_record);
+                // NOTE: version = 2 means HTML + CSS
+                let html_ptr = DCSRecordCopyData(first_record, 2);
                 if !html_ptr.is_null() {
                     let html = CFString::wrap_under_create_rule(html_ptr);
                     // println!("{html:?}");
-                    return html_to_attributed_string(
-                        &html.to_string(),
-                        &replace_color_in_css(DICTIONARY_STYLE, theme, 2),
-                    );
+
+                    if let Some(attr_string) = html_to_attributed_string(&html.to_string(), None) {
+                        let full_range = NSRange::new(0, attr_string.length());
+                        attr_string.addAttribute_value_range(
+                            NSForegroundColorAttributeName,
+                            theme.menu_fg_color.as_ref(),
+                            full_range,
+                        );
+                        return Some(attr_string);
+                    }
                 }
             }
         }
@@ -157,39 +127,19 @@ pub fn get_dictionary_attributed_string(
     })
 }
 
-pub fn rgba_to_css_color(rgba: (u8, u8, u8, u8)) -> String {
-    let (r, g, b, a) = rgba;
-    format!("rgba({}, {}, {}, {:.2})", r, g, b, a as f64 / 255.0)
-}
-
-pub fn replace_color_in_css(css: &str, theme: &GlyphlowTheme, dim_level: u8) -> String {
-    let default_rgba = (255, 255, 255, 255);
-    let fg_rgba = cgcolor_to_rgba(&theme.menu_fg_color).unwrap_or(default_rgba);
-    let mut dim_rgba = fg_rgba;
-    dim_rgba.3 /= dim_level;
-    css.replace("{fg_color}", &rgba_to_css_color(fg_rgba))
-        .replace(
-            "{hl_color}",
-            &rgba_to_css_color(cgcolor_to_rgba(&theme.menu_hl_color).unwrap_or(default_rgba)),
-        )
-        .replace("{dim_color}", &rgba_to_css_color(dim_rgba))
-}
-
 /// Converts an HTML string into an NSMutableAttributedString, applying bold/italic
 /// styles to specific classes via CSS injection.
 pub fn html_to_attributed_string(
     html: &str,
-    css: &str,
+    css: Option<&str>,
 ) -> Option<Retained<NSMutableAttributedString>> {
-    // HACK: for malformed html, cleanup the <head>
-    let clean_html = html.replace("<head/>", "").replace("</head>", "");
-    let processed_html = if clean_html.contains("<body>") {
-        clean_html.replace("<body>", &format!("<body>{}", css))
+    let processed_html = if let Some(css) = css {
+        &format!("<html><body>{}{}</body></html>", css, html)
     } else {
-        format!("<html><body>{}{}</body></html>", css, clean_html)
+        html
     };
 
-    let ns_html = NSString::from_str(&processed_html);
+    let ns_html = NSString::from_str(processed_html);
     let data = ns_html.dataUsingEncoding(NSUTF8StringEncoding)?;
 
     unsafe {
@@ -257,7 +207,7 @@ mod tests {
 
     #[test]
     fn test_html_parsing_and_styling() {
-        let attr_string = html_to_attributed_string(DICTIONARY_HTML, DICTIONARY_STYLE)
+        let attr_string = html_to_attributed_string(DICTIONARY_HTML, None)
             .expect("Function should successfully return an NSMutableAttributedString");
 
         let ns_string: Retained<NSString> = attr_string.string();

@@ -1,6 +1,6 @@
 use crate::{
-    action::{html_to_attributed_string, replace_color_in_css},
-    config::GlyphlowTheme,
+    action::html_to_attributed_string,
+    config::{GlyphlowTheme, cgcolor_to_rgba},
     util::{estimate_frame_for_text, hint_label_from_index},
 };
 use objc2::rc::Retained;
@@ -124,7 +124,7 @@ impl WordPicker {
         // CSS colors
         let attr_string = html_to_attributed_string(
             &html_str,
-            &replace_color_in_css(WORD_PICKER_STYLE, theme, 3),
+            Some(&replace_color_in_css(WORD_PICKER_STYLE, theme, 3)),
         )?;
 
         unsafe {
@@ -176,6 +176,24 @@ fn get_url_re() -> &'static Regex {
 fn get_segment_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(SCRIPT_SEGMENT_PATTERN).unwrap())
+}
+
+fn rgba_to_css_color(rgba: (u8, u8, u8, u8)) -> String {
+    let (r, g, b, a) = rgba;
+    format!("rgba({}, {}, {}, {:.2})", r, g, b, a as f64 / 255.0)
+}
+
+fn replace_color_in_css(css: &str, theme: &GlyphlowTheme, dim_level: u8) -> String {
+    let default_rgba = (255, 255, 255, 255);
+    let fg_rgba = cgcolor_to_rgba(&theme.menu_fg_color).unwrap_or(default_rgba);
+    let mut dim_rgba = fg_rgba;
+    dim_rgba.3 /= dim_level;
+    css.replace("{fg_color}", &rgba_to_css_color(fg_rgba))
+        .replace(
+            "{hl_color}",
+            &rgba_to_css_color(cgcolor_to_rgba(&theme.menu_hl_color).unwrap_or(default_rgba)),
+        )
+        .replace("{dim_color}", &rgba_to_css_color(dim_rgba))
 }
 
 // TODO: smarter split
