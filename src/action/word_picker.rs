@@ -61,12 +61,9 @@ impl WordPicker {
         let line_span_head = "<span class=\"line\">";
         let mut buffer = String::new();
         let mut line_width = 0;
+        buffer.push_str(line_span_head);
 
         for w in self.words.iter() {
-            if line_width == 0 {
-                buffer.push_str(line_span_head);
-            }
-
             let this_width = w.text.width() + self.digits as usize + 2;
             let (this_class, label_html) = if !prefix.is_empty() && w.label.starts_with(prefix) {
                 // For matched, highlight the label suffix
@@ -93,15 +90,16 @@ impl WordPicker {
             if line_width + this_width <= ideal_width {
                 line_width += this_width;
             } else {
-                buffer.push_str("</span>");
-                buffer.push_str(line_span_head);
+                // If the line is empty, don't add an empty span
+                if line_width > 0 {
+                    buffer.push_str("</span>");
+                    buffer.push_str(line_span_head);
+                }
                 line_width = this_width;
             }
             buffer.push_str(&this_span);
         }
-        if !buffer.is_empty() {
-            buffer.push_str("</span>");
-        }
+        buffer.push_str("</span>");
 
         buffer
     }
