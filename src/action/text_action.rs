@@ -10,7 +10,7 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSDocumentTypeDocumentAttribute, NSHTMLTextDocumentType,
-    NSMutableAttributedStringDocumentFormats, NSPasteboard,
+    NSMutableAttributedStringDocumentFormats, NSPasteboard, NSPasteboardTypeString,
 };
 use objc2_foundation::{
     NSArray, NSDictionary, NSMutableAttributedString, NSString, NSUTF8StringEncoding,
@@ -123,25 +123,18 @@ pub fn html_to_attributed_string(html: &str) -> Option<Retained<NSMutableAttribu
 body {
     font-size: 15px;
     line-height: 1.5;
-    margin: 10px;
 }
 
 /* --- Block Layout (The "Newline" Logic) --- */
 /* These classes represent major sections that should start on a new line */
 .hwg, .hg,          /* Headword groups */
-.gramb, .se1,       /* Grammar/Sense groups */
+.semb, .gramb, .se1,       /* Grammar/Sense groups */
 .msDict,            /* Main dictionary definitions */
 .exg, .eg,          /* Example groups */
 .subEntryBlock,     /* Derivatives section */
 .etym,              /* Etymology section */
-.semb,
 d\:entry {          /* The root entry tag */
     display: block;
-}
-
-/* Vertical spacing between major sections */
-.gramb, .se1, .subEntryBlock, .etym d\:entry {
-    margin-top: 18px;
 }
 
 /* --- Headword Styling --- */
@@ -159,7 +152,6 @@ d\:entry {          /* The root entry tag */
 /* --- Definitions & Part of Speech --- */
 .ps, .pos {
     font-style: italic;
-    margin-right: 8px;
 }
 
 .df, .trans {
@@ -201,6 +193,14 @@ pub fn text_to_clipboard(text: &str) {
         let proto_string = ProtocolObject::from_retained(ns_string);
         let objects = NSArray::from_retained_slice(&[proto_string]);
         pb.writeObjects(&objects);
+    })
+}
+
+pub fn text_from_clipboard() -> Option<String> {
+    autoreleasepool(|_| {
+        let pb = NSPasteboard::generalPasteboard();
+        pb.stringForType(unsafe { NSPasteboardTypeString })
+            .map(|rnss| rnss.to_string())
     })
 }
 

@@ -42,6 +42,7 @@ pub enum AppSignal {
     FileUpdate,
     DashBoard,
     Activate(Target),
+    ReadClipboard,
     DeActivate,
     Filter(char, FilterMode),
     ScreenShot,
@@ -75,7 +76,7 @@ impl Display for StaticMenuItem {
 // TODO: Config sub-menu to
 // 1. Reload config
 // 2. Toggle aggressive visibility check
-pub const DASH_BOARD_MENU_ITEMS: [StaticMenuItem; 8] = [
+pub const DASH_BOARD_MENU_ITEMS: [StaticMenuItem; 9] = [
     StaticMenuItem::new("󰦨 Text", 'T', AppSignal::Activate(Target::Text)),
     StaticMenuItem::new("󰳽 Press", 'P', AppSignal::Activate(Target::Clickable)),
     StaticMenuItem::new("󱕒 ScrollBar", 'S', AppSignal::Activate(Target::ScrollBar)),
@@ -84,6 +85,7 @@ pub const DASH_BOARD_MENU_ITEMS: [StaticMenuItem; 8] = [
     StaticMenuItem::new("󰙅 Element", 'E', AppSignal::Activate(Target::ChildElement)),
     StaticMenuItem::new("󰆟 ScreenShot", 'R', AppSignal::ScreenShot),
     StaticMenuItem::new("󱄺 Image OCR", 'O', AppSignal::Activate(Target::ImageOCR)),
+    StaticMenuItem::new(" Read Clipboard", 'C', AppSignal::ReadClipboard),
 ];
 
 pub const SCROLLBAR_MENU_ITEMS: [StaticMenuItem; 4] = [

@@ -3,7 +3,7 @@ use crate::{
     StaticMenuItem, TEXT_ACTION_MENU_ITEMS, TextAction,
     action::{
         OCRResult, WordPicker, get_dictionary_attributed_string, perform_ocr, screen_shot,
-        text_to_clipboard,
+        text_from_clipboard, text_to_clipboard,
     },
     ax_element::{
         ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, RoleOfInterest,
@@ -45,7 +45,7 @@ pub struct AppExecutor {
     target: Target,
     config: GlyphlowConfig,
     hint_width: u32,
-    selected: Option<ElementOfInterest>,
+    selected: (Option<ElementOfInterest>, Option<String>),
     /// For editing element text values
     temp_file: PathBuf,
     word_picker: Option<WordPicker>,
@@ -74,7 +74,7 @@ impl AppExecutor {
             screen_size,
             window,
             config,
-            selected: None,
+            selected: (None, None),
             temp_file,
             word_picker: None,
             ocr_cache: None,
@@ -90,7 +90,7 @@ impl AppExecutor {
     fn deactivate(&mut self) {
         self.clear_cache();
         self.clear_drawing();
-        self.selected = None;
+        self.selected = (None, None);
         self.set_mode(Mode::Idle);
     }
 
@@ -193,7 +193,7 @@ impl AppExecutor {
             .get_frame()
             .unwrap_or_else(|| Frame::from_origion(self.screen_size));
 
-        self.selected = Some(ElementOfInterest::new(
+        self.selected.0 = Some(ElementOfInterest::new(
             focused_window,
             None,
             RoleOfInterest::GenericNode,
@@ -211,12 +211,12 @@ impl AppExecutor {
             _ => target,
         };
 
-        if self.selected.is_none() {
+        if self.selected.0.is_none() {
             self.select_app_window();
         }
 
         self.clear_cache();
-        if let Some(ElementOfInterest { element, .. }) = self.selected.as_ref() {
+        if let Some(ElementOfInterest { element, .. }) = self.selected.0.as_ref() {
             traverse_elements(
                 element,
                 // Very loose visibility constraint
@@ -301,9 +301,7 @@ impl AppExecutor {
             let (selected_text, _) = ocr_res
                 .get(hb.idx)
                 .expect("Internal Error: wrong ocr hint indexing.");
-            if let Some(ElementOfInterest { context, .. }) = self.selected.as_mut() {
-                *context = Some(selected_text.clone());
-            }
+            self.selected.1 = Some(selected_text.clone());
             self.update_selected_text_and_show_menu(selected_text.clone());
         } else if !filtered.is_empty() {
             self.draw_hints(&filtered);
@@ -372,13 +370,14 @@ impl AppExecutor {
                 }
                 Target::Text => {
                     if let Some(text) = context {
-                        self.selected = Some(eoi.clone());
+                        self.selected.0 = Some(eoi.clone());
+                        self.selected.1 = Some(text.clone());
                         self.draw_text_action_menu(text);
                         self.set_mode(Mode::TextActionMenu);
                     }
                 }
                 Target::ChildElement => {
-                    self.selected = Some(eoi.clone());
+                    self.selected.0 = Some(eoi.clone());
                     // TODO: optimize UX for selected element
                     // 1. Parent frame
                     // 2. Action menu for parent
@@ -392,18 +391,18 @@ impl AppExecutor {
                     }
                 }
                 Target::ScrollBar => {
-                    self.selected = Some(eoi.clone());
+                    self.selected.0 = Some(eoi.clone());
                     self.clear_cache();
                     self.draw_scroll_bar_menu();
                     self.set_mode(Mode::Scrolling);
                 }
                 Target::Editable => {
-                    self.selected = Some(eoi.clone());
+                    self.selected.0 = Some(eoi.clone());
                     Self::focus_on_element(element);
                     self.deactivate();
                 }
                 Target::Edit => {
-                    self.selected = Some(eoi.clone());
+                    self.selected.0 = Some(eoi.clone());
                     // Focused before editing to increase the success rate
                     Self::focus_on_element(element);
                     let text = context.clone().unwrap_or_default();
@@ -512,15 +511,16 @@ impl AppExecutor {
             context,
             // role,
             ..
-        }) = self.selected.as_mut()
+        }) = self.selected.0.as_mut()
         {
             // if *role == RoleOfInterest::TextField {
             if replace && let Err(e) = element.set_value(CFString::new(&new_text).as_CFType()) {
                 eprintln!("Failed to set the text of focused element: {element:?}\n Error: {e}");
             }
             // }
-            *context = Some(new_text);
+            *context = Some(new_text.clone());
         }
+        self.selected.1 = Some(new_text)
     }
 
     fn update_selected_text_and_show_menu(&mut self, new_text: String) {
@@ -580,7 +580,7 @@ impl AppExecutor {
             }
             AppSignal::ScreenShot => {
                 self.clear_drawing();
-                let frame = if let Some(eoi) = self.selected.as_ref() {
+                let frame = if let Some(eoi) = self.selected.0.as_ref() {
                     &eoi.frame
                 } else {
                     &self
@@ -591,7 +591,7 @@ impl AppExecutor {
                 self.deactivate();
             }
             AppSignal::ScrollAction(sa) => {
-                let ElementOfInterest { element, .. } = self.selected.as_ref().expect(
+                let ElementOfInterest { element, .. } = self.selected.0.as_ref().expect(
                     "A scrollbar is supposed to be selected before entering Mode::Scrolling!",
                 );
 
@@ -626,12 +626,8 @@ impl AppExecutor {
                 }
             }
             AppSignal::TextAction(ta) => {
-                let Some(ElementOfInterest {
-                    context: Some(text),
-                    ..
-                }) = self.selected.as_ref()
-                else {
-                    panic!("Internal Error: No selected element in Mode::TextActionMenu.");
+                let Some(text) = self.selected.1.as_ref() else {
+                    panic!("Internal Error: No selected text in Mode::TextActionMenu.");
                 };
 
                 let text = text.clone();
@@ -687,6 +683,14 @@ impl AppExecutor {
 
                 if !keep_drawing {
                     self.deactivate();
+                }
+            }
+            AppSignal::ReadClipboard => {
+                // TODO: notify failure
+                if let Some(text) = text_from_clipboard() {
+                    self.selected.1 = Some(text.clone());
+                    self.draw_text_action_menu(&text);
+                    self.set_mode(Mode::TextActionMenu);
                 }
             }
         }

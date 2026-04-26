@@ -39,6 +39,7 @@ impl WordPicker {
         }
     }
 
+    // TODO: Markdown Styling `NSMutableAttributedString::initWithMarkdownString_options_baseURL_error`
     fn to_string(&self, prefix: &str) -> (String, Vec<(usize, usize)>, Vec<String>) {
         let mut buffer = String::new();
         let mut hl_ranges = Vec::new();
