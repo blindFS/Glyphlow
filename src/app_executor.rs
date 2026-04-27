@@ -118,6 +118,12 @@ impl AppExecutor {
             self.key_prefix.len(),
             self.screen_size,
         );
+        if let Some(ElementOfInterest { frame, .. }) = self.selected.0.as_ref() {
+            self.window.draw_frame_box(
+                &frame.invert_y(self.screen_size.height),
+                &self.config.theme.hint_bg_color,
+            );
+        }
     }
 
     fn draw_text_action_menu(&self, text: &str) {
@@ -251,8 +257,8 @@ impl AppExecutor {
             self.hint_boxes.extend(new_boxes);
             self.draw_hints(&self.hint_boxes);
         } else {
-            // Don't deactivate yet, backspace to rollback
             self.clear_drawing();
+            self.notify("No relevant UI elements found.");
         }
     }
 
@@ -434,8 +440,6 @@ impl AppExecutor {
                     }
                 }
             }
-        } else if filtered_boxes.is_empty() {
-            self.deactivate();
         } else {
             self.draw_hints(&filtered_boxes);
         }
