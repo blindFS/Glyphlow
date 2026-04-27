@@ -34,7 +34,7 @@ pub enum RoleOfInterest {
 
 #[derive(Clone, Debug)]
 pub struct ElementOfInterest {
-    pub element: AXUIElement,
+    pub element: Option<AXUIElement>,
     pub context: Option<String>,
     // TODO: role based drawing?
     pub role: RoleOfInterest,
@@ -43,7 +43,7 @@ pub struct ElementOfInterest {
 
 impl ElementOfInterest {
     pub fn new(
-        element: AXUIElement,
+        element: Option<AXUIElement>,
         context: Option<String>,
         role: RoleOfInterest,
         frame: Frame,
@@ -212,7 +212,7 @@ impl ElementCache {
         if !self.seen_center.contains(&center) {
             self.seen_center.insert(center);
             self.cache.push(ElementOfInterest::new(
-                element.clone(),
+                Some(element.clone()),
                 context,
                 role,
                 frame,
@@ -475,7 +475,11 @@ pub fn traverse_elements(
             }
             // Skip element levels where only 1 item available
             if cache.cache.len() == 1
-                && let Some(ElementOfInterest { element, frame, .. }) = cache.cache.first()
+                && let Some(ElementOfInterest {
+                    element: Some(element),
+                    frame,
+                    ..
+                }) = cache.cache.first()
             {
                 traverse_elements(&element.clone(), &frame.clone(), cache, target);
             }

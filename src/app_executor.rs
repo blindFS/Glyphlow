@@ -46,7 +46,7 @@ pub struct AppExecutor {
     target: Target,
     config: GlyphlowConfig,
     hint_width: u32,
-    selected: (Option<ElementOfInterest>, Option<String>),
+    selected: Option<ElementOfInterest>,
     /// For editing element text values
     temp_file: PathBuf,
     word_picker: Option<WordPicker>,
@@ -78,7 +78,7 @@ impl AppExecutor {
             window,
             config,
             timeout_sender,
-            selected: (None, None),
+            selected: None,
             temp_file,
             word_picker: None,
             ocr_cache: None,
@@ -94,7 +94,7 @@ impl AppExecutor {
     fn deactivate(&mut self) {
         self.clear_cache();
         self.clear_drawing();
-        self.selected = (None, None);
+        self.selected = None;
         self.set_mode(Mode::Idle);
     }
 
@@ -111,7 +111,7 @@ impl AppExecutor {
     }
 
     fn draw_selected_frame(&self) {
-        if let Some(ElementOfInterest { frame, .. }) = self.selected.0.as_ref() {
+        if let Some(ElementOfInterest { frame, .. }) = self.selected.as_ref() {
             self.window.draw_frame_box(
                 &frame.invert_y(self.screen_size.height),
                 &self.config.theme.hint_bg_color,
@@ -219,8 +219,8 @@ impl AppExecutor {
             .get_frame()
             .unwrap_or_else(|| Frame::from_origion(self.screen_size));
 
-        self.selected.0 = Some(ElementOfInterest::new(
-            focused_window,
+        self.selected = Some(ElementOfInterest::new(
+            Some(focused_window),
             None,
             RoleOfInterest::GenericNode,
             window_frame.clone(),
@@ -236,12 +236,16 @@ impl AppExecutor {
             _ => target,
         };
 
-        if self.selected.0.is_none() {
+        if self.selected.is_none() {
             self.select_app_window();
         }
 
         self.clear_cache();
-        if let Some(ElementOfInterest { element, .. }) = self.selected.0.as_ref() {
+        if let Some(ElementOfInterest {
+            element: Some(element),
+            ..
+        }) = self.selected.as_ref()
+        {
             traverse_elements(
                 element,
                 // Very loose visibility constraint
@@ -292,17 +296,28 @@ impl AppExecutor {
         Self::simulate_event(&EventType::ButtonRelease(Button::Left));
     }
 
+    fn click_on_selected(&self) {
+        if let Some(ElementOfInterest { frame, .. }) = self.selected.as_ref() {
+            let (x, y) = frame.center();
+            Self::simulate_click(x, y);
+        }
+    }
+
     fn focus_on_element(element: &AXUIElement) {
         element.set_attribute_by_name(kAXFocusedAttribute, CFBoolean::true_value().as_CFType());
     }
 
     fn press_on_element(element: &AXUIElement, role: &RoleOfInterest, center: (f64, f64)) {
+        let (x, y) = center;
         Self::focus_on_element(element);
+
+        // FIXME: Sometimes `element.press()` won't return with err but nothing happens,
+        // need smarter way to tell if `press()` is successful or simply simulate mouse click?
         if *role == RoleOfInterest::Cell {
-            let (x, y) = center;
             Self::simulate_click(x, y);
         } else if let Err(e) = element.press() {
-            log::warn!("Failed to click element: {e}");
+            log::warn!("Failed to do UI press on element: {e}, simulating mouse click instead...");
+            Self::simulate_click(x, y);
         };
     }
 
@@ -336,10 +351,15 @@ impl AppExecutor {
         if self.key_prefix.len() == digits as usize
             && let Some(hb) = filtered.first()
         {
-            let (selected_text, _) = ocr_res
+            let (selected_text, cg_rect) = ocr_res
                 .get(hb.idx)
                 .expect("Internal Error: wrong ocr hint indexing.");
-            self.selected.1 = Some(selected_text.clone());
+            self.selected = Some(ElementOfInterest::new(
+                None,
+                Some(selected_text.clone()),
+                RoleOfInterest::GenericNode,
+                Frame::from_cgrect(cg_rect),
+            ));
             self.update_selected_text_and_show_menu(selected_text.clone());
         } else if !filtered.is_empty() {
             self.draw_hints(&filtered);
@@ -384,7 +404,7 @@ impl AppExecutor {
             && let Some(HintBox { idx, .. }) = filtered_boxes.first()
             && let Some(
                 eoi @ ElementOfInterest {
-                    element,
+                    element: Some(element),
                     context,
                     frame,
                     role,
@@ -409,14 +429,13 @@ impl AppExecutor {
                 Target::ImageOCR => self.perform_ocr_on_frame(frame.clone()).await,
                 Target::Text => {
                     if let Some(text) = context {
-                        self.selected.0 = Some(eoi.clone());
-                        self.selected.1 = Some(text.clone());
+                        self.selected = Some(eoi.clone());
                         self.draw_text_action_menu(text);
                         self.set_mode(Mode::TextActionMenu);
                     }
                 }
                 Target::ChildElement => {
-                    self.selected.0 = Some(eoi.clone());
+                    self.selected = Some(eoi.clone());
                     self.ui_element_traverse_on_activation(Target::ChildElement);
                     // Actions for current selected element
                     // TODO:
@@ -429,18 +448,18 @@ impl AppExecutor {
                     }
                 }
                 Target::ScrollBar => {
-                    self.selected.0 = Some(eoi.clone());
+                    self.selected = Some(eoi.clone());
                     self.clear_cache();
                     self.draw_scroll_bar_menu();
                     self.set_mode(Mode::Scrolling);
                 }
                 Target::Editable => {
-                    self.selected.0 = Some(eoi.clone());
+                    self.selected = Some(eoi.clone());
                     Self::focus_on_element(element);
                     self.deactivate();
                 }
                 Target::Edit => {
-                    self.selected.0 = Some(eoi.clone());
+                    self.selected = Some(eoi.clone());
                     // Focused before editing to increase the success rate
                     Self::focus_on_element(element);
                     let text = context.clone().unwrap_or_default();
@@ -548,14 +567,16 @@ impl AppExecutor {
             context,
             // role,
             ..
-        }) = self.selected.0.as_mut()
+        }) = self.selected.as_mut()
         {
-            if replace && let Err(e) = element.set_value(CFString::new(&new_text).as_CFType()) {
+            if replace
+                && let Some(ele) = element
+                && let Err(e) = ele.set_value(CFString::new(&new_text).as_CFType())
+            {
                 log::warn!("Failed to set the text of focused element: {element:?}\n Error: {e}");
             }
-            *context = Some(new_text.clone());
+            *context = Some(new_text);
         }
-        self.selected.1 = Some(new_text)
     }
 
     fn update_selected_text_and_show_menu(&mut self, new_text: String) {
@@ -608,9 +629,15 @@ impl AppExecutor {
                 }
             }
             AppSignal::ScrollAction(sa) => {
-                let ElementOfInterest { element, .. } = self.selected.0.as_ref().expect(
-                    "A scrollbar is supposed to be selected before entering Mode::Scrolling!",
-                );
+                let Some(ElementOfInterest {
+                    element: Some(element),
+                    ..
+                }) = self.selected.as_ref()
+                else {
+                    panic!(
+                        "A scrollbar is supposed to be selected before entering Mode::Scrolling!"
+                    )
+                };
 
                 let Some(old_val) = element
                     .value()
@@ -643,7 +670,11 @@ impl AppExecutor {
                 }
             }
             AppSignal::TextAction(ta) => {
-                let Some(text) = self.selected.1.as_ref() else {
+                let Some(ElementOfInterest {
+                    context: Some(text),
+                    ..
+                }) = self.selected.as_ref()
+                else {
                     panic!("Internal Error: No selected text in Mode::TextActionMenu.");
                 };
 
@@ -655,6 +686,10 @@ impl AppExecutor {
                 // TODO:
                 // 1. URL handling
                 let keep_drawing = match ta {
+                    TextAction::Press => {
+                        self.click_on_selected();
+                        false
+                    }
                     TextAction::Copy => {
                         text_to_clipboard(&text);
                         self.notify("Copied to clipboard.");
@@ -707,7 +742,7 @@ impl AppExecutor {
             }
             AppSignal::ScreenShot => {
                 self.clear_drawing();
-                let frame = if let Some(eoi) = self.selected.0.as_ref() {
+                let frame = if let Some(eoi) = self.selected.as_ref() {
                     &eoi.frame
                 } else {
                     &self
@@ -730,7 +765,7 @@ impl AppExecutor {
             }
             AppSignal::FrameOCR => {
                 self.clear_drawing();
-                if let Some(ElementOfInterest { frame, .. }) = self.selected.0.as_ref() {
+                if let Some(ElementOfInterest { frame, .. }) = self.selected.as_ref() {
                     self.perform_ocr_on_frame(frame.clone()).await;
                 } else {
                     self.activate(Target::ImageOCR);
@@ -745,8 +780,13 @@ impl AppExecutor {
             }
             AppSignal::ReadClipboard => {
                 if let Some(text) = text_from_clipboard() {
-                    self.selected.1 = Some(text.clone());
                     self.draw_text_action_menu(&text);
+                    self.selected = Some(ElementOfInterest::new(
+                        None,
+                        Some(text),
+                        RoleOfInterest::GenericNode,
+                        Frame::from_origion(self.screen_size),
+                    ));
                     self.set_mode(Mode::TextActionMenu);
                 } else {
                     self.notify("No text found in clipboard.");

@@ -87,7 +87,7 @@ async fn main() {
                 }
                 EventType::KeyRelease(key) => {
                     keys.remove(&key);
-                    key_listener.is_active(&state)
+                    false
                 }
                 _ => false,
             };

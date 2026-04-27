@@ -17,6 +17,7 @@ pub enum TextAction {
     Copy,
     Dictionary,
     Split,
+    Press,
     Editor,
     /// index of the action in the config
     UserDefined(usize),
@@ -113,7 +114,7 @@ pub const SCROLLBAR_MENU_ITEMS: [StaticMenuItem; 4] = [
     ),
 ];
 
-pub const TEXT_ACTION_MENU_ITEMS: [StaticMenuItem; 3] = [
+pub const TEXT_ACTION_MENU_ITEMS: [StaticMenuItem; 4] = [
     StaticMenuItem::new("⮺ Copy", 'C', AppSignal::TextAction(TextAction::Copy)),
     StaticMenuItem::new(
         "◫ Dictionary",
@@ -121,6 +122,7 @@ pub const TEXT_ACTION_MENU_ITEMS: [StaticMenuItem; 3] = [
         AppSignal::TextAction(TextAction::Dictionary),
     ),
     StaticMenuItem::new("󰃻 Split", 'S', AppSignal::TextAction(TextAction::Split)),
+    StaticMenuItem::new("󰳽 Press", 'P', AppSignal::TextAction(TextAction::Press)),
 ];
 
 #[derive(Debug, PartialEq)]
@@ -179,14 +181,6 @@ impl KeyListener {
             scroll_actions,
             sender,
             global_key_binding: config.global_trigger_key.clone(),
-        }
-    }
-
-    pub fn is_active(&self, state: &Mutex<Mode>) -> bool {
-        if let Ok(state) = state.try_lock() {
-            *state != Mode::Idle && *state != Mode::Transparent
-        } else {
-            false
         }
     }
 
