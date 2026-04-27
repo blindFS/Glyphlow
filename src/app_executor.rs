@@ -52,6 +52,9 @@ pub struct AppExecutor {
     word_picker: Option<WordPicker>,
     ocr_cache: Option<OCRResult>,
     timeout_sender: Sender<()>,
+    /// Special treatment for Electron based apps.
+    /// Like simulate mouse clicking instead of `element.press()`
+    is_electron: bool,
 }
 
 impl AppExecutor {
@@ -82,6 +85,7 @@ impl AppExecutor {
             temp_file,
             word_picker: None,
             ocr_cache: None,
+            is_electron: false,
         }
     }
 
@@ -89,6 +93,10 @@ impl AppExecutor {
         if let Ok(mut state) = self.state.lock() {
             *state = mode;
         }
+    }
+
+    fn check_mode(&self, mode: Mode) -> bool {
+        self.state.try_lock().is_ok_and(|s| *s == mode)
     }
 
     fn deactivate(&mut self) {
@@ -213,7 +221,9 @@ impl AppExecutor {
     }
 
     fn select_app_window(&mut self) -> Option<Frame> {
-        let pid = get_focused_pid()?;
+        let (pid, is_electron) = get_focused_pid()?;
+        self.is_electron = is_electron;
+
         let focused_window = AXUIElement::application(pid);
         let window_frame = focused_window
             .get_frame()
@@ -307,13 +317,11 @@ impl AppExecutor {
         element.set_attribute_by_name(kAXFocusedAttribute, CFBoolean::true_value().as_CFType());
     }
 
-    fn press_on_element(element: &AXUIElement, role: &RoleOfInterest, center: (f64, f64)) {
+    fn press_on_element(&self, element: &AXUIElement, role: &RoleOfInterest, center: (f64, f64)) {
         let (x, y) = center;
         Self::focus_on_element(element);
 
-        // FIXME: Sometimes `element.press()` won't return with err but nothing happens,
-        // need smarter way to tell if `press()` is successful or simply simulate mouse click?
-        if *role == RoleOfInterest::Cell {
+        if self.is_electron || *role == RoleOfInterest::Cell {
             Self::simulate_click(x, y);
         } else if let Err(e) = element.press() {
             log::warn!("Failed to do UI press on element: {e}, simulating mouse click instead...");
@@ -417,7 +425,7 @@ impl AppExecutor {
             match self.target {
                 Target::MenuItem | Target::Clickable => {
                     let center = frame.center();
-                    Self::press_on_element(element, role, center);
+                    self.press_on_element(element, role, center);
                     self.deactivate();
                 }
                 Target::Image => {
@@ -465,7 +473,7 @@ impl AppExecutor {
                     let text = context.clone().unwrap_or_default();
                     match self.open_editor(&text) {
                         Ok(_) => {
-                            self.set_mode(Mode::Idle);
+                            self.set_mode(Mode::Editing);
                         }
                         Err(e) => {
                             self.notify(&format!("Failed to open editor: {e}"));
@@ -588,7 +596,15 @@ impl AppExecutor {
 
     pub async fn handle_signal(&mut self, signal: AppSignal) {
         match signal {
-            AppSignal::DashBoard => self.draw_dash_board(),
+            AppSignal::DashBoard => {
+                if self.check_mode(Mode::Editing) {
+                    // Stops editing
+                    self.clear_cache();
+                    self.selected = None;
+                }
+                self.draw_dash_board();
+                self.set_mode(Mode::DashBoard);
+            }
             AppSignal::Activate(target) => {
                 let quick_follow = target == Target::ScrollBar
                     || target == Target::Editable
@@ -771,8 +787,9 @@ impl AppExecutor {
                     self.activate(Target::ImageOCR);
                 }
             }
+            // TODO: Keep a `self.editing_element` for using other glyphlow features during the editing?
             AppSignal::FileUpdate => {
-                if self.target == Target::Edit
+                if self.check_mode(Mode::Editing)
                     && let Ok(new_text) = std::fs::read_to_string(&self.temp_file)
                 {
                     self.update_selected_text(new_text, true);
@@ -793,11 +810,7 @@ impl AppExecutor {
                 }
             }
             AppSignal::ClearNotification => {
-                if self
-                    .state
-                    .try_lock()
-                    .is_ok_and(|state| *state == Mode::Notification)
-                {
+                if self.check_mode(Mode::Notification) {
                     self.deactivate();
                 }
             }

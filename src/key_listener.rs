@@ -132,7 +132,7 @@ pub enum Mode {
     Idle,
     Scrolling,
     TextActionMenu,
-    Transparent,
+    Editing,
     WordPicking,
     OCRResultFiltering,
     Notification,
@@ -220,7 +220,7 @@ impl KeyListener {
             };
 
         match *state {
-            Mode::Idle => {
+            Mode::Editing | Mode::Idle => {
                 if self.global_key_binding.keys.iter().all(|k| {
                     k == &key
                         || pressed_keys.contains(k)
@@ -228,7 +228,6 @@ impl KeyListener {
                             .is_some_and(|r| *k == r || pressed_keys.contains(&r))
                 }) {
                     self.send(AppSignal::DashBoard);
-                    *state = Mode::DashBoard;
                     true
                 } else {
                     false
@@ -251,8 +250,6 @@ impl KeyListener {
                 *state = Mode::Idle;
                 true
             }
-            // Transparent mode
-            _ => false,
         }
     }
 }
