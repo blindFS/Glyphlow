@@ -329,6 +329,12 @@ impl AppExecutor {
         };
     }
 
+    fn scroll_to_value(element: &AXUIElement, val: f64) {
+        if let Err(e) = element.set_value(CFNumber::from(val.clamp(0.0, 1.0)).as_CFType()) {
+            log::warn!("Failed to set value to the selected scroll bar: {e}.");
+        };
+    }
+
     fn right_click_menu_on_element(element: &AXUIElement) {
         if let Err(e) = element.show_menu() {
             log::warn!("Failed to show menu on element: {e}");
@@ -617,6 +623,7 @@ impl AppExecutor {
             AppSignal::DeActivate => {
                 self.deactivate();
             }
+            // TODO: Multiple selection
             AppSignal::Filter(key_char, mode) => {
                 if key_char == '-' {
                     self.key_prefix.pop();
@@ -668,14 +675,10 @@ impl AppExecutor {
                 let scroll_unit = self.config.scroll_distance;
                 match sa {
                     ScrollAction::DownRight => {
-                        let _ = element.set_value(
-                            CFNumber::from((old_val + scroll_unit).min(1.0)).as_CFType(),
-                        );
+                        Self::scroll_to_value(element, old_val + scroll_unit);
                     }
                     ScrollAction::UpLeft => {
-                        let _ = element.set_value(
-                            CFNumber::from((old_val - scroll_unit).max(0.0)).as_CFType(),
-                        );
+                        Self::scroll_to_value(element, old_val - scroll_unit);
                     }
                     ScrollAction::IncreaseDistance => {
                         self.config.scroll_distance *= 1.5;
