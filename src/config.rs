@@ -319,7 +319,7 @@ impl GlyphlowConfig {
             return Self::default();
         };
 
-        if let Ok(content) = fs::read_to_string(&path) {
+        let config = if let Ok(content) = fs::read_to_string(&path) {
             log::info!("Loading config from {path:?}");
             match toml::from_str::<Self>(&content) {
                 Ok(existing_config) => existing_config,
@@ -337,7 +337,13 @@ impl GlyphlowConfig {
                 log::error!("Failed to save config file. Error: {e}");
             }
             default_config
-        }
+        };
+
+        log::info!(
+            "Press key combination {:?} to start",
+            config.global_trigger_key.keys
+        );
+        config
     }
 
     fn save_config(&self, path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
