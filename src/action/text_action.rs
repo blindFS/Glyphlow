@@ -6,20 +6,18 @@ use core_foundation::{
     string::{CFString, CFStringRef},
 };
 use objc2::{
-    rc::{Retained, autoreleasepool},
+    rc::{DefaultRetained, Retained, autoreleasepool},
     runtime::{AnyObject, ProtocolObject},
 };
 use objc2_app_kit::{
     NSDocumentTypeDocumentAttribute, NSForegroundColorAttributeName, NSHTMLTextDocumentType,
-    NSMutableAttributedStringDocumentFormats, NSPasteboard, NSPasteboardTypeString,
+    NSMutableAttributedStringDocumentFormats, NSMutableParagraphStyle,
+    NSParagraphStyleAttributeName, NSPasteboard, NSPasteboardTypeString,
 };
 use objc2_foundation::{
     NSArray, NSDictionary, NSMutableAttributedString, NSRange, NSString, NSUTF8StringEncoding,
 };
 use std::{collections::HashMap, ffi::c_void};
-
-// TODO: Dynamic font-size?
-// TODO: Indentation, might require regex replacing
 
 #[repr(C)]
 pub struct __DCSDictionary(c_void);
@@ -38,6 +36,8 @@ unsafe extern "C" {
     pub fn DCSRecordCopyData(record: CFTypeRef, version: u8) -> CFStringRef;
 }
 
+// TODO: Dynamic font-size?
+// TODO: Indentation, might require regex replacing
 pub fn get_dictionary_attributed_string(
     word: &str,
     dict_names: &[String],
@@ -155,6 +155,17 @@ pub fn html_to_attributed_string(
         attr_str
             .readFromData_options_documentAttributes_error(&data, &options, None)
             .ok()?;
+
+        // HACK: For multilingual text, height is underestimated due to fallback fonts.
+        // This ensures more vertical spacing.
+        let style = NSMutableParagraphStyle::default_retained();
+        style.setLineSpacing(1.0);
+        // style.setLineHeightMultiple(1.2);
+        attr_str.addAttribute_value_range(
+            NSParagraphStyleAttributeName,
+            &style,
+            NSRange::new(0, attr_str.length()),
+        );
 
         Some(attr_str)
     }

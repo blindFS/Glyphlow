@@ -23,8 +23,10 @@ use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() {
+    simple_logger::init_with_level(log::Level::Info).expect("Failed to init logger");
+
     if !check_accessibility_permissions() {
-        println!("❌ Error: Accessibility permissions not granted.");
+        log::error!("Accessibility permissions not granted.");
         return;
     }
 
@@ -54,7 +56,7 @@ async fn main() {
                     // Notify: file updated
                     let _ = ftx.blocking_send(());
                 }
-                Err(e) => eprintln!("Watch error: {:?}", e),
+                Err(e) => log::error!("Watch error: {:?}", e),
             },
         )
     else {

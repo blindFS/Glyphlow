@@ -300,7 +300,6 @@ pub trait GetAttribute {
     fn has_children(&self) -> bool;
 }
 
-// TODO: logging
 impl GetAttribute for AXUIElement {
     fn get_attribute(&self, attribute_name: &str) -> Option<CFType> {
         self.attribute(&AXAttribute::new(&CFString::new(attribute_name)))
@@ -399,12 +398,11 @@ pub trait SetAttribute {
     fn set_selected_range(&self, location: isize, length: isize);
 }
 
-// TODO: logging
 impl SetAttribute for AXUIElement {
     fn set_attribute_by_name(&self, attribute_name: &str, value: CFType) {
         let attr = AXAttribute::new(&CFString::new(attribute_name));
         if let Err(e) = self.set_attribute(&attr, value) {
-            eprintln!("Failed to set attribute: {e}");
+            log::warn!("Failed to set attribute: {e}");
         };
     }
 
@@ -431,7 +429,7 @@ fn rust_type_to_cftype<T>(value: T, value_type: u32) -> Option<CFType> {
     unsafe {
         let raw_value = AXValueCreate(value_type, &value as *const _ as *const std::ffi::c_void);
         if raw_value.is_null() {
-            eprintln!("Failed to create AXValue");
+            log::error!("Failed to create AXValue");
             return None;
         }
 
@@ -439,7 +437,6 @@ fn rust_type_to_cftype<T>(value: T, value_type: u32) -> Option<CFType> {
     }
 }
 
-// TODO: image
 #[derive(Debug, Default, PartialEq, Clone)]
 pub enum Target {
     #[default]

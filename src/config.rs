@@ -320,21 +320,21 @@ impl GlyphlowConfig {
         };
 
         if let Ok(content) = fs::read_to_string(&path) {
-            println!("------------- Loading config from {path:?} -------------");
+            log::info!("Loading config from {path:?}");
             match toml::from_str::<Self>(&content) {
                 Ok(existing_config) => existing_config,
                 Err(e) => {
-                    eprintln!(
+                    log::error!(
                         "Failed to parse config file, using default config instead. Error: {e}"
                     );
                     Self::default()
                 }
             }
         } else {
-            println!("------------- Saving config to {path:?} -------------");
+            log::info!("Saving config to {path:?}");
             let default_config = Self::default();
             if let Err(e) = default_config.save_config(&path) {
-                eprintln!("Failed to save config file. Error: {e}");
+                log::error!("Failed to save config file. Error: {e}");
             }
             default_config
         }

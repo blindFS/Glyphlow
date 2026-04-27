@@ -192,7 +192,7 @@ impl KeyListener {
 
     fn send(&self, signal: AppSignal) {
         if let Err(e) = self.sender.blocking_send(signal) {
-            eprintln!("Error sending signal: {}", e);
+            log::error!("Error sending signal: {}", e);
         }
     }
 

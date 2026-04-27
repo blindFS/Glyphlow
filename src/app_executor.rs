@@ -172,6 +172,7 @@ impl AppExecutor {
     }
 
     fn notify(&self, msg: &str) {
+        log::info!("{msg}");
         self.draw_menu(msg);
         let sender = self.timeout_sender.clone();
         tokio::spawn(async { delay_and_deactivate(sender).await });
@@ -279,7 +280,7 @@ impl AppExecutor {
         match simulate(event_type) {
             Ok(()) => (),
             Err(e) => {
-                eprintln!("Failed to simulate event {event_type:?}: {e}");
+                log::error!("Failed to simulate event {event_type:?}: {e}");
             }
         }
         std::thread::sleep(Duration::from_millis(20));
@@ -301,13 +302,13 @@ impl AppExecutor {
             let (x, y) = center;
             Self::simulate_click(x, y);
         } else if let Err(e) = element.press() {
-            eprintln!("Failed to click element: {e}");
+            log::warn!("Failed to click element: {e}");
         };
     }
 
     fn right_click_menu_on_element(element: &AXUIElement) {
         if let Err(e) = element.show_menu() {
-            eprintln!("Failed to show menu on element: {e}");
+            log::warn!("Failed to show menu on element: {e}");
         };
     }
 
@@ -325,6 +326,7 @@ impl AppExecutor {
             &self.config.theme.frame_colors,
             self.config.colored_frame_min_size as f64,
         );
+        self.hint_width = digits;
 
         let filtered = ocr_hints
             .into_iter()
@@ -488,7 +490,7 @@ impl AppExecutor {
 
         std::thread::spawn(move || {
             if let Err(e) = child.wait() {
-                eprintln!("Editor failed to run: {e}");
+                log::error!("Editor failed to run: {e}");
             }
         });
         Ok(())
@@ -549,7 +551,7 @@ impl AppExecutor {
         }) = self.selected.0.as_mut()
         {
             if replace && let Err(e) = element.set_value(CFString::new(&new_text).as_CFType()) {
-                eprintln!("Failed to set the text of focused element: {element:?}\n Error: {e}");
+                log::warn!("Failed to set the text of focused element: {element:?}\n Error: {e}");
             }
             *context = Some(new_text.clone());
         }
@@ -594,6 +596,7 @@ impl AppExecutor {
                     FilterMode::WordPicking => {
                         self.clear_drawing();
                         let (matched_words, digits) = self.draw_word_picker();
+                        self.hint_width = digits;
 
                         if self.key_prefix.len() == digits as usize
                             && matched_words.len() == 1
@@ -658,6 +661,7 @@ impl AppExecutor {
                         true
                     }
                     TextAction::Dictionary => {
+                        log::info!("Looking up `{text}` in Apple Dictionary.");
                         if let Some(attr_string) = get_dictionary_attributed_string(
                             &text,
                             &self.config.dictionaries,

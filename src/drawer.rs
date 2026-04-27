@@ -54,7 +54,6 @@ pub fn create_overlay_window(mtm: MainThreadMarker, screen_size: CGSize) -> Reta
     }
 }
 
-// TODO: notification
 pub trait GlyphlowDrawingLayer {
     fn from_window(window: &Retained<NSWindow>) -> Option<Retained<CALayer>>;
     fn clear(&self);
@@ -76,7 +75,6 @@ pub trait GlyphlowDrawingLayer {
     );
 }
 
-// TODO: notification
 impl GlyphlowDrawingLayer for CALayer {
     fn clear(&self) {
         unsafe {

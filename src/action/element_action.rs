@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use block2::RcBlock;
 use objc2::{
     AnyThread,
-    rc::{Retained, autoreleasepool},
+    rc::{DefaultRetained, Retained, autoreleasepool},
     runtime::ProtocolObject,
 };
 use objc2_app_kit::{NSImage, NSPasteboard};
@@ -59,7 +59,7 @@ pub async fn screen_shot(frame: &Frame) -> bool {
     let cg_image = match capture_focused_window(rect).await {
         Ok(img) => img,
         Err(e) => {
-            eprintln!("{e}");
+            log::error!("{e}");
             return false;
         }
     };
@@ -89,7 +89,7 @@ pub async fn perform_ocr(
         let cg_image = capture_focused_window(rect).await?;
 
         autoreleasepool(|_| {
-            let request = VNRecognizeTextRequest::init(VNRecognizeTextRequest::alloc());
+            let request = VNRecognizeTextRequest::default_retained();
             request.setRecognitionLevel(objc2_vision::VNRequestTextRecognitionLevel::Accurate);
 
             let langs = languages
