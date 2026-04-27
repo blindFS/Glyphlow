@@ -110,6 +110,15 @@ impl AppExecutor {
         self.window.clear();
     }
 
+    fn draw_selected_frame(&self) {
+        if let Some(ElementOfInterest { frame, .. }) = self.selected.0.as_ref() {
+            self.window.draw_frame_box(
+                &frame.invert_y(self.screen_size.height),
+                &self.config.theme.hint_bg_color,
+            );
+        }
+    }
+
     fn draw_hints(&self, boxes: &[HintBox]) {
         self.clear_drawing();
         self.window.draw_hints(
@@ -118,12 +127,7 @@ impl AppExecutor {
             self.key_prefix.len(),
             self.screen_size,
         );
-        if let Some(ElementOfInterest { frame, .. }) = self.selected.0.as_ref() {
-            self.window.draw_frame_box(
-                &frame.invert_y(self.screen_size.height),
-                &self.config.theme.hint_bg_color,
-            );
-        }
+        self.draw_selected_frame();
     }
 
     fn draw_text_action_menu(&self, text: &str) {
@@ -157,6 +161,8 @@ impl AppExecutor {
         if let Some(editor) = self.config.editor.as_ref() {
             msg.push_str(&format!("\n{} ({})", editor.display, editor.key));
         }
+        self.clear_drawing();
+        self.draw_selected_frame();
         self.draw_menu(&msg);
     }
 
@@ -221,8 +227,7 @@ impl AppExecutor {
         Some(window_frame)
     }
 
-    /// Activates the app and caches UI elements
-    fn activate(&mut self, target: Target) {
+    fn ui_element_traverse_on_activation(&mut self, target: Target) {
         // HACK: abuse self.target to mark whether to call external editor
         self.target = target.clone();
         let target = match target {
@@ -244,18 +249,26 @@ impl AppExecutor {
                 &target,
             );
         }
+    }
+
+    fn draw_hints_from_cache(&mut self) {
+        let (hint_width, new_boxes) = self.element_cache.hint_boxes(
+            &Frame::from_origion(self.screen_size),
+            &self.config.theme.frame_colors,
+            self.config.colored_frame_min_size as f64,
+        );
+        self.hint_width = hint_width;
+        self.hint_boxes = new_boxes;
+        self.draw_hints(&self.hint_boxes);
+    }
+
+    /// Activates the app and caches UI elements
+    fn activate(&mut self, target: Target) {
+        self.ui_element_traverse_on_activation(target);
 
         if !self.element_cache.cache.is_empty() {
+            self.draw_hints_from_cache();
             self.set_mode(Mode::Filtering);
-
-            let (hint_width, new_boxes) = self.element_cache.hint_boxes(
-                &Frame::from_origion(self.screen_size),
-                &self.config.theme.frame_colors,
-                self.config.colored_frame_min_size as f64,
-            );
-            self.hint_width = hint_width;
-            self.hint_boxes.extend(new_boxes);
-            self.draw_hints(&self.hint_boxes);
         } else {
             self.clear_drawing();
             self.notify("No relevant UI elements found.");
@@ -402,16 +415,15 @@ impl AppExecutor {
                 }
                 Target::ChildElement => {
                     self.selected.0 = Some(eoi.clone());
-                    // TODO: optimize UX for selected element
-                    // 1. Parent frame
-                    // 2. Action menu for parent
-                    self.activate(Target::ChildElement);
+                    self.ui_element_traverse_on_activation(Target::ChildElement);
+                    // Actions for current selected element
+                    // TODO:
+                    // 1. Mouse ops
                     if self.element_cache.cache.is_empty() {
-                        // select actions for current selected element
-                        // TODO:
-                        // 1. Mouse ops
                         self.draw_dash_board();
                         self.set_mode(Mode::DashBoard);
+                    } else {
+                        self.draw_hints_from_cache();
                     }
                 }
                 Target::ScrollBar => {
@@ -569,7 +581,7 @@ impl AppExecutor {
             AppSignal::Filter(key_char, mode) => {
                 if key_char == '-' {
                     self.key_prefix.pop();
-                } else {
+                } else if self.key_prefix.len() < self.hint_width as usize {
                     self.key_prefix.push(key_char);
                 }
                 match mode {
