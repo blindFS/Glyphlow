@@ -26,9 +26,15 @@ jobs:
       - name: Build for Release
         run: cargo build --release
 
+      - name: Package Binary
+        run: |
+          cd target/release
+          chmod +x glyphlow
+          tar -czf glyphlow.tar.gz glyphlow
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
-          files: target/release/glyphlow
+          files: target/release/glyphlow.tar.gz
           generate_release_notes: true
