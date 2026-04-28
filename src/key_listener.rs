@@ -55,15 +55,15 @@ pub enum AppSignal {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct StaticMenuItem {
+pub struct MenuItem {
     pub description: &'static str,
     pub key: char,
     pub action: AppSignal,
 }
 
-impl StaticMenuItem {
-    pub const fn new(description: &'static str, key: char, action: AppSignal) -> StaticMenuItem {
-        StaticMenuItem {
+impl MenuItem {
+    pub const fn new(description: &'static str, key: char, action: AppSignal) -> MenuItem {
+        MenuItem {
             description,
             key,
             action,
@@ -71,59 +71,59 @@ impl StaticMenuItem {
     }
 }
 
-impl Display for StaticMenuItem {
+impl Display for MenuItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} ({})", self.description, self.key)
+        write!(f, "({}) {}", self.key, self.description)
     }
 }
 
 // TODO: Config sub-menu to
 // 1. Reload config
 // 2. Toggle aggressive visibility check
-pub const DASH_BOARD_MENU_ITEMS: [StaticMenuItem; 9] = [
-    StaticMenuItem::new("󰦨 Text", 'T', AppSignal::Activate(Target::Text)),
-    StaticMenuItem::new("󰳽 Press", 'P', AppSignal::Activate(Target::Clickable)),
-    StaticMenuItem::new("󱕒 ScrollBar", 'S', AppSignal::Activate(Target::ScrollBar)),
-    StaticMenuItem::new("󰊄 Input", 'I', AppSignal::Activate(Target::Editable)),
-    StaticMenuItem::new(" Image", 'M', AppSignal::Activate(Target::Image)),
-    StaticMenuItem::new("󰙅 Element", 'E', AppSignal::Activate(Target::ChildElement)),
-    StaticMenuItem::new("󰆟 ScreenShot", 'R', AppSignal::ScreenShot),
-    StaticMenuItem::new("󱄺 Image OCR", 'O', AppSignal::FrameOCR),
-    StaticMenuItem::new(" Read Clipboard", 'C', AppSignal::ReadClipboard),
+pub const DASH_BOARD_MENU_ITEMS: [MenuItem; 9] = [
+    MenuItem::new("󰦨 Text", 'T', AppSignal::Activate(Target::Text)),
+    MenuItem::new("󰳽 Press", 'P', AppSignal::Activate(Target::Clickable)),
+    MenuItem::new("󱕒 ScrollBar", 'S', AppSignal::Activate(Target::ScrollBar)),
+    MenuItem::new("󰊄 Input", 'I', AppSignal::Activate(Target::Editable)),
+    MenuItem::new(" Image", 'M', AppSignal::Activate(Target::Image)),
+    MenuItem::new("󰙅 Element", 'E', AppSignal::Activate(Target::ChildElement)),
+    MenuItem::new("󰆟 ScreenShot", 'R', AppSignal::ScreenShot),
+    MenuItem::new("󱄺 Image OCR", 'O', AppSignal::FrameOCR),
+    MenuItem::new(" Read Clipboard", 'C', AppSignal::ReadClipboard),
 ];
 
-pub const SCROLLBAR_MENU_ITEMS: [StaticMenuItem; 4] = [
-    StaticMenuItem::new(
+pub const SCROLLBAR_MENU_ITEMS: [MenuItem; 4] = [
+    MenuItem::new(
         "> Down/Right",
         'J',
         AppSignal::ScrollAction(ScrollAction::DownRight),
     ),
-    StaticMenuItem::new(
+    MenuItem::new(
         "< Up/Left",
         'K',
         AppSignal::ScrollAction(ScrollAction::UpLeft),
     ),
-    StaticMenuItem::new(
+    MenuItem::new(
         "+ Distance Increase",
         'I',
         AppSignal::ScrollAction(ScrollAction::IncreaseDistance),
     ),
-    StaticMenuItem::new(
+    MenuItem::new(
         "- Distance Decrease",
         'D',
         AppSignal::ScrollAction(ScrollAction::DecreaseDistance),
     ),
 ];
 
-pub const TEXT_ACTION_MENU_ITEMS: [StaticMenuItem; 4] = [
-    StaticMenuItem::new("⮺ Copy", 'C', AppSignal::TextAction(TextAction::Copy)),
-    StaticMenuItem::new(
+pub const TEXT_ACTION_MENU_ITEMS: [MenuItem; 4] = [
+    MenuItem::new("⮺ Copy", 'C', AppSignal::TextAction(TextAction::Copy)),
+    MenuItem::new(
         "◫ Dictionary",
         'D',
         AppSignal::TextAction(TextAction::Dictionary),
     ),
-    StaticMenuItem::new("󰃻 Split", 'S', AppSignal::TextAction(TextAction::Split)),
-    StaticMenuItem::new("󰳽 Press", 'P', AppSignal::TextAction(TextAction::Press)),
+    MenuItem::new("󰃻 Split", 'S', AppSignal::TextAction(TextAction::Split)),
+    MenuItem::new("󰳽 Press", 'P', AppSignal::TextAction(TextAction::Press)),
 ];
 
 #[derive(Debug, PartialEq)]
@@ -149,9 +149,7 @@ pub struct KeyListener {
 }
 
 impl KeyListener {
-    fn iter_from<const N: usize>(
-        items: [StaticMenuItem; N],
-    ) -> impl Iterator<Item = (char, AppSignal)> {
+    fn iter_from<const N: usize>(items: [MenuItem; N]) -> impl Iterator<Item = (char, AppSignal)> {
         items.into_iter().map(|it| (it.key, it.action))
     }
 
