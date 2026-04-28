@@ -7,7 +7,7 @@ use crate::{
     },
     ax_element::{
         ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, RoleOfInterest,
-        SetAttribute, Target, hint_boxes_from_frames, traverse_elements,
+        SetAttribute, Target, hint_boxes_from_frames, select_range_helper, traverse_elements,
     },
     config::GlyphlowConfig,
     drawer::GlyphlowDrawingLayer,
@@ -32,6 +32,36 @@ use std::{
 
 static MAX_TEXT_DISPLAY_LEN: usize = 30;
 
+#[derive(Debug, Default)]
+struct MultiSeletionState {
+    is_on: bool,
+    one_side_idex: Option<usize>,
+    role: Option<RoleOfInterest>,
+}
+
+impl MultiSeletionState {
+    fn toggle(&mut self) {
+        self.is_on = !self.is_on;
+        self.one_side_idex = None;
+        self.role = None;
+    }
+
+    fn reset(&mut self) {
+        self.is_on = false;
+        self.one_side_idex = None;
+        self.role = None;
+    }
+
+    fn set_one_side(&mut self, other: usize) -> Option<(usize, usize)> {
+        if let Some(one) = self.one_side_idex {
+            Some((one, other))
+        } else {
+            self.one_side_idex = Some(other);
+            None
+        }
+    }
+}
+
 /// Global state for Glyphlow,
 /// mainly cached UI elements, and some related drawings
 pub struct AppExecutor {
@@ -42,6 +72,8 @@ pub struct AppExecutor {
     key_prefix: String,
     screen_size: CGSize,
     window: Retained<CALayer>,
+    /// Useful for notification clearing
+    notification_layers: Vec<Retained<CALayer>>,
     /// Which elements of interest to look for
     target: Target,
     config: GlyphlowConfig,
@@ -55,6 +87,8 @@ pub struct AppExecutor {
     /// Special treatment for Electron based apps.
     /// Like simulate mouse clicking instead of `element.press()`
     is_electron: bool,
+    /// For multi-selection
+    multi_selection: MultiSeletionState,
 }
 
 impl AppExecutor {
@@ -79,6 +113,7 @@ impl AppExecutor {
             hint_width: 0,
             screen_size,
             window,
+            notification_layers: Vec::new(),
             config,
             timeout_sender,
             selected: None,
@@ -86,6 +121,7 @@ impl AppExecutor {
             word_picker: None,
             ocr_cache: None,
             is_electron: false,
+            multi_selection: MultiSeletionState::default(),
         }
     }
 
@@ -109,9 +145,11 @@ impl AppExecutor {
     fn clear_cache(&mut self) {
         self.word_picker = None;
         self.ocr_cache = None;
+        self.notification_layers.clear();
         self.hint_boxes.clear();
         self.element_cache.clear();
         self.key_prefix.clear();
+        self.multi_selection.reset();
     }
 
     fn clear_drawing(&self) {
@@ -129,12 +167,26 @@ impl AppExecutor {
 
     fn draw_hints(&self, boxes: &[HintBox]) {
         self.clear_drawing();
-        self.window.draw_hints(
-            boxes,
-            &self.config.theme,
-            self.key_prefix.len(),
-            self.screen_size,
-        );
+        // NOTE: only select the other side of the same role,
+        // and excluding the already selected one.
+        if self.multi_selection.is_on
+            && let Some(one_idx) = self.multi_selection.one_side_idex
+        {
+            let iter = boxes.iter().filter(|hb| hb.idx != one_idx);
+            self.window.draw_hints(
+                iter,
+                &self.config.theme,
+                self.key_prefix.len(),
+                self.screen_size,
+            );
+        } else {
+            self.window.draw_hints(
+                boxes.iter(),
+                &self.config.theme,
+                self.key_prefix.len(),
+                self.screen_size,
+            );
+        };
         self.draw_selected_frame();
     }
 
@@ -174,17 +226,21 @@ impl AppExecutor {
         self.draw_menu(&msg);
     }
 
-    fn draw_menu(&self, msg: &str) {
+    fn draw_menu(&self, msg: &str) -> Retained<CALayer> {
         self.window
-            .draw_menu(msg, self.screen_size, &self.config.theme);
+            .draw_menu(msg, self.screen_size, &self.config.theme)
     }
 
-    fn notify(&self, msg: &str) {
+    fn notify_then_deactivate(&mut self, msg: &str) {
+        self.notify(msg);
+        self.set_mode(Mode::WaitAndDeactivate);
+    }
+
+    fn notify(&mut self, msg: &str) {
         log::info!("{msg}");
-        self.draw_menu(msg);
+        self.notification_layers.push(self.draw_menu(msg));
         let sender = self.timeout_sender.clone();
         tokio::spawn(async { delay_and_deactivate(sender).await });
-        self.set_mode(Mode::Notification);
     }
 
     fn menu_string(items: &[StaticMenuItem]) -> String {
@@ -196,7 +252,7 @@ impl AppExecutor {
         res
     }
 
-    fn draw_word_picker(&self) -> (Vec<String>, u32) {
+    fn draw_word_picker(&self) -> (Vec<(usize, String)>, u32) {
         let word_picker = self
             .word_picker
             .as_ref()
@@ -205,6 +261,7 @@ impl AppExecutor {
             self.screen_size,
             &self.config.theme,
             &self.key_prefix,
+            self.multi_selection.one_side_idex,
         ) {
             self.window.draw_attributed_string(
                 attr_string,
@@ -233,7 +290,7 @@ impl AppExecutor {
             Some(focused_window),
             None,
             RoleOfInterest::GenericNode,
-            window_frame.clone(),
+            window_frame,
         ));
         Some(window_frame)
     }
@@ -286,7 +343,7 @@ impl AppExecutor {
             self.set_mode(Mode::Filtering);
         } else {
             self.clear_drawing();
-            self.notify("No relevant UI elements found.");
+            self.notify_then_deactivate("No relevant UI elements found.");
         }
     }
 
@@ -329,6 +386,12 @@ impl AppExecutor {
         };
     }
 
+    fn scroll_to_value(element: &AXUIElement, val: f64) {
+        if let Err(e) = element.set_value(CFNumber::from(val.clamp(0.0, 1.0)).as_CFType()) {
+            log::warn!("Failed to set value to the selected scroll bar: {e}.");
+        };
+    }
+
     fn right_click_menu_on_element(element: &AXUIElement) {
         if let Err(e) = element.show_menu() {
             log::warn!("Failed to show menu on element: {e}");
@@ -352,27 +415,40 @@ impl AppExecutor {
         self.hint_width = digits;
 
         let filtered = ocr_hints
-            .into_iter()
+            .iter()
             .filter(|b| b.label.starts_with(&self.key_prefix))
+            .cloned()
             .collect::<Vec<_>>();
 
         if self.key_prefix.len() == digits as usize
             && let Some(hb) = filtered.first()
         {
-            let (selected_text, cg_rect) = ocr_res
-                .get(hb.idx)
-                .expect("Internal Error: wrong ocr hint indexing.");
-            self.selected = Some(ElementOfInterest::new(
-                None,
-                Some(selected_text.clone()),
-                RoleOfInterest::GenericNode,
-                Frame::from_cgrect(cg_rect),
-            ));
-            self.update_selected_text_and_show_menu(selected_text.clone());
-        } else if !filtered.is_empty() {
-            self.draw_hints(&filtered);
+            if self.multi_selection.is_on {
+                if let Some((idx1, idx2)) = self.multi_selection.set_one_side(hb.idx) {
+                    let choices: Vec<(String, Frame, bool)> = ocr_res
+                        .iter()
+                        .map(|(s, rect)| (s.clone(), Frame::from_cgrect(rect), true))
+                        .collect::<Vec<_>>();
+                    let (text, frame) = select_range_helper(&choices, idx1, idx2)
+                        .expect("Internal Error: wrong ocr hint indexing.");
+                    self.clear_drawing();
+                    self.selected = Some(ElementOfInterest::pseudo(None, frame));
+                    self.update_selected_text_and_show_menu(text.clone());
+                } else {
+                    self.key_prefix.clear();
+                    self.draw_hints(&ocr_hints);
+                }
+            } else {
+                let (selected_text, cg_rect) = ocr_res
+                    .get(hb.idx)
+                    .expect("Internal Error: wrong ocr hint indexing.");
+                self.clear_drawing();
+                // Context initialized as None, but updated right after
+                self.selected = Some(ElementOfInterest::pseudo(None, Frame::from_cgrect(cg_rect)));
+                self.update_selected_text_and_show_menu(selected_text.clone());
+            }
         } else {
-            self.deactivate();
+            self.draw_hints(&filtered);
         }
     }
 
@@ -389,10 +465,10 @@ impl AppExecutor {
                 self.set_mode(Mode::OCRResultFiltering);
             }
             Err(e) => {
-                self.notify(&format!("OCR failed: {e:?}"));
+                self.notify_then_deactivate(&format!("OCR failed: {e:?}"));
             }
             _ => {
-                self.notify("Empty OCR result.");
+                self.notify_then_deactivate("Empty OCR result.");
             }
         }
     }
@@ -434,9 +510,33 @@ impl AppExecutor {
                     std::thread::sleep(Duration::from_millis(100));
                     self.activate(Target::MenuItem);
                 }
-                Target::ImageOCR => self.perform_ocr_on_frame(frame.clone()).await,
+                Target::ImageOCR => self.perform_ocr_on_frame(*frame).await,
                 Target::Text => {
-                    if let Some(text) = context {
+                    if self.multi_selection.is_on {
+                        if let Some((idx1, idx2)) = self.multi_selection.set_one_side(*idx) {
+                            // NOTE: Role based filtering only when the roles on both sides match
+                            let role_ref = if self
+                                .multi_selection
+                                .role
+                                .as_ref()
+                                .is_some_and(|other| *role == *other)
+                            {
+                                Some(role)
+                            } else {
+                                None
+                            };
+                            let (text, frame) = self
+                                .element_cache
+                                .select_range(idx1, idx2, role_ref)
+                                .expect("Internal Error: wrong indexing of hints.");
+                            self.selected = Some(ElementOfInterest::pseudo(None, frame));
+                            self.update_selected_text_and_show_menu(text);
+                        } else {
+                            self.multi_selection.role = Some(role.clone());
+                            self.key_prefix.clear();
+                            self.draw_hints(&self.hint_boxes);
+                        }
+                    } else if let Some(text) = context {
                         self.selected = Some(eoi.clone());
                         self.draw_text_action_menu(text);
                         self.set_mode(Mode::TextActionMenu);
@@ -476,7 +576,7 @@ impl AppExecutor {
                             self.set_mode(Mode::Editing);
                         }
                         Err(e) => {
-                            self.notify(&format!("Failed to open editor: {e}"));
+                            self.notify_then_deactivate(&format!("Failed to open editor: {e}"));
                         }
                     }
                 }
@@ -538,7 +638,7 @@ impl AppExecutor {
             .stdout(std::process::Stdio::piped())
             .spawn()
         else {
-            self.notify(&format!(
+            self.notify_then_deactivate(&format!(
                 "Failed to spawn command: {} {}",
                 action.command,
                 action.args.join(" ")
@@ -553,16 +653,17 @@ impl AppExecutor {
                     let new_text = String::from_utf8_lossy(&o.stdout)
                         .trim_end_matches('\n')
                         .to_string();
+                    self.clear_drawing();
                     self.update_selected_text_and_show_menu(new_text);
                 } else if !o.stderr.is_empty() {
-                    self.notify(&format!(
+                    self.notify_then_deactivate(&format!(
                         "External stderr: {}",
                         String::from_utf8_lossy(&o.stderr)
                     ));
                 }
             }
             Err(e) => {
-                self.notify(&format!("Failed to run command: {e}"));
+                self.notify_then_deactivate(&format!("Failed to run command: {e}"));
             }
         }
 
@@ -588,7 +689,6 @@ impl AppExecutor {
     }
 
     fn update_selected_text_and_show_menu(&mut self, new_text: String) {
-        self.clear_drawing();
         self.draw_text_action_menu(&new_text);
         self.update_selected_text(new_text, false);
         self.set_mode(Mode::TextActionMenu);
@@ -617,6 +717,20 @@ impl AppExecutor {
             AppSignal::DeActivate => {
                 self.deactivate();
             }
+            AppSignal::ToggleMultiSelection => match self.target {
+                Target::Text | Target::ImageOCR => {
+                    self.multi_selection.toggle();
+                    let on_off = if self.multi_selection.is_on {
+                        "on"
+                    } else {
+                        "off"
+                    };
+                    self.notify(&format!("Multi selection is now {on_off}."));
+                }
+                _ => {
+                    self.notify_then_deactivate("Multi selection only works for text.");
+                }
+            },
             AppSignal::Filter(key_char, mode) => {
                 if key_char == '-' {
                     self.key_prefix.pop();
@@ -637,9 +751,27 @@ impl AppExecutor {
 
                         if self.key_prefix.len() == digits as usize
                             && matched_words.len() == 1
-                            && let Some(text) = matched_words.first()
+                            && let Some((idx, text)) = matched_words.first()
                         {
-                            self.update_selected_text_and_show_menu(text.clone())
+                            if self.multi_selection.is_on {
+                                if let Some((idx1, idx2)) = self.multi_selection.set_one_side(*idx)
+                                {
+                                    let text = self
+                                        .word_picker
+                                        .as_ref()
+                                        .expect("Internal Error: no word picker set yet.")
+                                        .select_range(idx1, idx2)
+                                        .expect("Internal Error: wrong word picker indexing.");
+                                    self.clear_drawing();
+                                    self.update_selected_text_and_show_menu(text.clone())
+                                } else {
+                                    self.key_prefix.clear();
+                                    self.draw_word_picker();
+                                }
+                            } else {
+                                self.clear_drawing();
+                                self.update_selected_text_and_show_menu(text.clone())
+                            }
                         }
                     }
                 }
@@ -668,14 +800,10 @@ impl AppExecutor {
                 let scroll_unit = self.config.scroll_distance;
                 match sa {
                     ScrollAction::DownRight => {
-                        let _ = element.set_value(
-                            CFNumber::from((old_val + scroll_unit).min(1.0)).as_CFType(),
-                        );
+                        Self::scroll_to_value(element, old_val + scroll_unit);
                     }
                     ScrollAction::UpLeft => {
-                        let _ = element.set_value(
-                            CFNumber::from((old_val - scroll_unit).max(0.0)).as_CFType(),
-                        );
+                        Self::scroll_to_value(element, old_val - scroll_unit);
                     }
                     ScrollAction::IncreaseDistance => {
                         self.config.scroll_distance *= 1.5;
@@ -708,7 +836,7 @@ impl AppExecutor {
                     }
                     TextAction::Copy => {
                         text_to_clipboard(&text);
-                        self.notify("Copied to clipboard.");
+                        self.notify_then_deactivate("Copied to clipboard.");
                         true
                     }
                     TextAction::Dictionary => {
@@ -728,7 +856,7 @@ impl AppExecutor {
                                 &self.config.theme,
                             );
                         } else {
-                            self.notify("No definition found.");
+                            self.notify_then_deactivate("No definition found.");
                         }
                         true
                     }
@@ -743,7 +871,7 @@ impl AppExecutor {
                     }
                     TextAction::Editor => {
                         if let Err(e) = self.open_editor(&text) {
-                            self.notify(&format!("Failed to open editor: {e}"));
+                            self.notify_then_deactivate(&format!("Failed to open editor: {e}"));
                             true
                         } else {
                             false
@@ -774,15 +902,16 @@ impl AppExecutor {
                         .unwrap_or_else(|| Frame::from_origion(self.screen_size))
                 };
                 if screen_shot(frame).await {
-                    self.notify("Screenshot copied to clipboard.");
+                    self.notify_then_deactivate("Screenshot copied to clipboard.");
                 } else {
-                    self.notify("Failed to take screenshot.");
+                    self.notify_then_deactivate("Failed to take screenshot.");
                 };
             }
             AppSignal::FrameOCR => {
                 self.clear_drawing();
                 if let Some(ElementOfInterest { frame, .. }) = self.selected.as_ref() {
-                    self.perform_ocr_on_frame(frame.clone()).await;
+                    self.target = Target::ImageOCR;
+                    self.perform_ocr_on_frame(*frame).await;
                 } else {
                     self.activate(Target::ImageOCR);
                 }
@@ -797,22 +926,25 @@ impl AppExecutor {
             }
             AppSignal::ReadClipboard => {
                 if let Some(text) = text_from_clipboard() {
-                    self.draw_text_action_menu(&text);
-                    self.selected = Some(ElementOfInterest::new(
+                    self.clear_drawing();
+                    self.selected = Some(ElementOfInterest::pseudo(
                         None,
-                        Some(text),
-                        RoleOfInterest::GenericNode,
                         Frame::from_origion(self.screen_size),
                     ));
-                    self.set_mode(Mode::TextActionMenu);
+                    self.update_selected_text_and_show_menu(text);
                 } else {
-                    self.notify("No text found in clipboard.");
+                    self.notify_then_deactivate("No text found in clipboard.");
                 }
             }
             AppSignal::ClearNotification => {
-                if self.check_mode(Mode::Notification) {
+                if self.check_mode(Mode::WaitAndDeactivate) {
                     self.deactivate();
+                } else {
+                    for nl in &self.notification_layers {
+                        nl.removeFromSuperlayer();
+                    }
                 }
+                self.notification_layers.clear();
             }
         }
     }

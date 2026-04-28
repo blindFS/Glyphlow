@@ -44,6 +44,7 @@ pub enum AppSignal {
     Activate(Target),
     DeActivate,
     Filter(char, FilterMode),
+    ToggleMultiSelection,
     TextAction(TextAction),
     ScrollAction(ScrollAction),
     ReadClipboard,
@@ -135,7 +136,7 @@ pub enum Mode {
     Editing,
     WordPicking,
     OCRResultFiltering,
-    Notification,
+    WaitAndDeactivate,
 }
 
 #[derive(Debug)]
@@ -240,12 +241,18 @@ impl KeyListener {
                 *state = Mode::DashBoard;
                 true
             }
+            Mode::WordPicking | Mode::Filtering | Mode::OCRResultFiltering
+                if key == Key::ShiftLeft || key == Key::ShiftRight =>
+            {
+                self.send(AppSignal::ToggleMultiSelection);
+                true
+            }
             Mode::WordPicking => filter_helper(key_char, state, FilterMode::WordPicking),
             Mode::Filtering => filter_helper(key_char, state, FilterMode::Generic),
             Mode::OCRResultFiltering => filter_helper(key_char, state, FilterMode::OCR),
             Mode::TextActionMenu => helper(&self.text_actions, state),
             Mode::Scrolling => helper(&self.scroll_actions, state),
-            Mode::Notification => {
+            Mode::WaitAndDeactivate => {
                 self.send(AppSignal::DeActivate);
                 *state = Mode::Idle;
                 true

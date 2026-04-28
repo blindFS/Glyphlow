@@ -20,6 +20,7 @@ body {
 }
 .line { display: block; }
 .h { color: {hl_color} }
+.rh { color: {dim_color}; background-color: {hl_color}; }
 .d { color: {dim_color} }
 </style>"#;
 
@@ -50,7 +51,12 @@ impl WordPicker {
     }
 
     /// Returns HTML string
-    fn to_string(&self, prefix: &str, width_height_ratio: f64) -> String {
+    fn to_string(
+        &self,
+        prefix: &str,
+        width_height_ratio: f64,
+        multi_selection_idx: Option<usize>,
+    ) -> String {
         let total_unicode_width = self.words.iter().map(|w| w.text.width()).sum::<usize>()
             + self.words.len() * (2 + self.digits as usize);
         // ideal_width / (total_unicode_width / ideal_width) 󰾞 ratio * 3
@@ -63,9 +69,14 @@ impl WordPicker {
         let mut line_width = 0;
         buffer.push_str(line_span_head);
 
-        for w in self.words.iter() {
-            let this_width = w.text.width() + self.digits as usize + 2;
-            let (this_class, label_html) = if !prefix.is_empty() && w.label.starts_with(prefix) {
+        let helper = |label, class| format!("<span class=\"{class}\">{label}</span>");
+
+        for (idx, w) in self.words.iter().enumerate() {
+            let (this_class, label_html) = if multi_selection_idx.is_some_and(|other| other == idx)
+            {
+                // For already selected start/end, dim the label
+                ("rh", helper(&w.label, "d"))
+            } else if !prefix.is_empty() && w.label.starts_with(prefix) {
                 // For matched, highlight the label suffix
                 (
                     "m",
@@ -77,16 +88,17 @@ impl WordPicker {
                 )
             } else if prefix.is_empty() {
                 // No prefix, highlight the all labels
-                ("n", format!("<span class=\"h\">{}</span>", w.label))
+                ("n", helper(&w.label, "h"))
             } else {
                 // Unmatched choices, dim whole span
-                ("d", w.label.clone())
+                ("d", helper(&w.label, "d"))
             };
             let this_span = format!(
-                "<span class=\"{}\">{} {} </span>",
+                "<span class=\"{}\">{}</span> {} ",
                 this_class, w.text, label_html
             );
 
+            let this_width = w.text.width() + self.digits as usize + 2;
             if line_width + this_width <= ideal_width {
                 line_width += this_width;
             } else {
@@ -104,12 +116,26 @@ impl WordPicker {
         buffer
     }
 
-    pub fn matched_words(&self, prefix: &str) -> Vec<String> {
+    pub fn matched_words(&self, prefix: &str) -> Vec<(usize, String)> {
         self.words
             .iter()
-            .filter(|w| !prefix.is_empty() && w.label.starts_with(prefix))
-            .map(|w| w.text.clone())
+            .enumerate()
+            .filter(|(_, w)| !prefix.is_empty() && w.label.starts_with(prefix))
+            .map(|(idx, w)| (idx, w.text.clone()))
             .collect()
+    }
+
+    pub fn select_range(&self, idx1: usize, idx2: usize) -> Option<String> {
+        let (start, end) = if idx1 < idx2 {
+            (idx1, idx2)
+        } else {
+            (idx2, idx1)
+        };
+        let s: Vec<String> = self
+            .words
+            .get(start..=end)
+            .map(|w| w.iter().map(|w| w.text.clone()).collect())?;
+        Some(s.join(" "))
     }
 
     pub fn get_attributed_string(
@@ -117,9 +143,10 @@ impl WordPicker {
         screen_size: CGSize,
         theme: &GlyphlowTheme,
         prefix: &str,
+        multi_selection_idx: Option<usize>,
     ) -> Option<(CGSize, Retained<NSMutableAttributedString>)> {
         let CGSize { width, height } = screen_size;
-        let html_str = self.to_string(prefix, width / (height + 0.01));
+        let html_str = self.to_string(prefix, width / (height + 0.01), multi_selection_idx);
 
         // CSS colors
         let attr_string = html_to_attributed_string(
@@ -209,10 +236,7 @@ fn multilingual_split(input: &str) -> Vec<String> {
         } else {
             for mat in segment_re.find_iter(token) {
                 // hello, -> hello
-                let w = mat
-                    .as_str()
-                    .trim_matches(|c: char| c.is_ascii_punctuation())
-                    .to_string();
+                let w = mat.as_str().to_string();
                 if !w.is_empty() {
                     result.push(w);
                 }
@@ -286,7 +310,7 @@ mod tests {
         // Standard punctuation usually falls into the "Non-CJK" category
         // but since they are non-CJK, they cluster with ASCII words.
         let input = "Wait!世界...";
-        let expected = vec!["Wait", "世界"];
+        let expected = vec!["Wait!", "世界", "..."];
         assert_eq!(multilingual_split(input), expected);
     }
 

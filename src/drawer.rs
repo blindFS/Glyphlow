@@ -57,14 +57,19 @@ pub fn create_overlay_window(mtm: MainThreadMarker, screen_size: CGSize) -> Reta
 pub trait GlyphlowDrawingLayer {
     fn from_window(window: &Retained<NSWindow>) -> Option<Retained<CALayer>>;
     fn clear(&self);
-    fn draw_hints(
+    fn draw_hints<'a>(
         &self,
-        hints: &[HintBox],
+        hints: impl Iterator<Item = &'a HintBox>,
         theme: &GlyphlowTheme,
         key_prefix_len: usize,
         screen_size: CGSize,
     );
-    fn draw_menu(&self, text: &str, screen_size: CGSize, theme: &GlyphlowTheme);
+    fn draw_menu(
+        &self,
+        text: &str,
+        screen_size: CGSize,
+        theme: &GlyphlowTheme,
+    ) -> Retained<CALayer>;
     fn draw_frame_box(&self, frames: &Frame, color: &CFRetained<CGColor>);
     fn draw_attributed_string(
         &self,
@@ -95,9 +100,9 @@ impl GlyphlowDrawingLayer for CALayer {
         Some(root_layer)
     }
 
-    fn draw_hints(
+    fn draw_hints<'a>(
         &self,
-        hints: &[HintBox],
+        hints: impl Iterator<Item = &'a HintBox>,
         theme: &GlyphlowTheme,
         key_prefix_len: usize,
         screen_size: CGSize,
@@ -209,7 +214,12 @@ impl GlyphlowDrawingLayer for CALayer {
         self.addSublayer(&text_box);
     }
 
-    fn draw_menu(&self, text: &str, screen_size: CGSize, theme: &GlyphlowTheme) {
+    fn draw_menu(
+        &self,
+        text: &str,
+        screen_size: CGSize,
+        theme: &GlyphlowTheme,
+    ) -> Retained<CALayer> {
         let text_box = draw_text_box(
             text,
             false,
@@ -223,6 +233,7 @@ impl GlyphlowDrawingLayer for CALayer {
         text_box.setBorderWidth(2.0);
         text_box.setBorderColor(Some(&theme.menu_fg_color));
         self.addSublayer(&text_box);
+        text_box
     }
 
     fn draw_frame_box(&self, frame: &Frame, color: &CFRetained<CGColor>) {

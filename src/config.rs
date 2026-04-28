@@ -487,4 +487,92 @@ mod vec_cgcolor_format {
     }
 }
 
-// TODO: tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_key_combo_formatting() {
+        let binding = KeyBinding {
+            keys: vec![Key::ControlLeft, Key::ShiftLeft, Key::KeyZ],
+        };
+
+        // Test Serialization
+        let toml_str = toml::to_string(&binding).unwrap();
+        assert_eq!(toml_str, "keys = \"CTRL + SHIFT + Z\"\n");
+
+        // Test Deserialization
+        let decoded: KeyBinding = toml::from_str(&toml_str).unwrap();
+        assert_eq!(
+            decoded.keys,
+            vec![Key::ControlLeft, Key::ShiftLeft, Key::KeyZ]
+        );
+    }
+
+    #[test]
+    fn test_hex_color_conversion() {
+        let hex = "#ff000080"; // 50% transparent red
+        let color = color_try_from_hex(hex).expect("Should parse valid hex");
+
+        let (r, g, b, a) = cgcolor_to_rgba(&color).expect("Should extract components");
+
+        assert_eq!(r, 255);
+        assert_eq!(g, 0);
+        assert_eq!(b, 0);
+        assert_eq!(a, 128); // 0.5 * 255
+    }
+
+    #[test]
+    fn test_hex_no_alpha() {
+        let hex_6 = "#FF00FF";
+        let (r, g, b, a) = hex_to_rgba(hex_6).expect("Should parse 6-digit hex");
+
+        assert_eq!(r, 1.0);
+        assert_eq!(g, 0.0);
+        assert_eq!(b, 1.0);
+        assert_eq!(a, 1.0);
+    }
+
+    #[test]
+    fn test_theme_toml_roundtrip() {
+        let mut theme = GlyphlowTheme::default();
+        let custom_color = color_from_hex("#aabbccff");
+        theme.hint_bg_color = custom_color;
+
+        let toml_str = toml::to_string(&theme).expect("Should serialize theme");
+
+        // Ensure our custom color string is present in the TOML
+        assert!(toml_str.contains("#aabbccff"));
+
+        let decoded: GlyphlowTheme = toml::from_str(&toml_str).expect("Should deserialize theme");
+
+        // Verify the font name survived
+        let font_name = NSFont::fontName(&decoded.hint_font).to_string();
+        assert_eq!(font_name, "AndaleMono"); // NSFont often strips spaces in fontName
+    }
+
+    #[test]
+    fn test_config_partial_deserialize() {
+        // Test that missing fields fill in with @serde(default)
+        let toml_input = r#"
+            [theme]
+            hint_margin_size = 5
+
+            [global_trigger_key]
+            keys = "META + P"
+        "#;
+
+        let config: GlyphlowConfig = toml::from_str(toml_input).unwrap();
+
+        // Check explicit values
+        assert_eq!(config.theme.hint_margin_size, 5);
+        assert_eq!(
+            config.global_trigger_key.keys,
+            vec![Key::MetaLeft, Key::KeyP]
+        );
+
+        // Check defaulted values
+        assert_eq!(config.scroll_distance, 0.05);
+        assert_eq!(config.ocr_languages, vec!["en-US".to_string()]);
+    }
+}
