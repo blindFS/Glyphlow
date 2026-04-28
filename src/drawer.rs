@@ -152,7 +152,7 @@ impl GlyphlowDrawingLayer for CALayer {
             // Background Box
             let (size, _) =
                 estimate_frame_for_text(&attr_string, (screen_size.width, screen_size.height));
-            let box_layer = text_box_with_attributed_string(
+            let (x_offset, y_offset, box_layer) = text_box_with_attributed_string(
                 attr_string,
                 true,
                 bg_color,
@@ -174,9 +174,9 @@ impl GlyphlowDrawingLayer for CALayer {
                 CGMutablePath::add_line_to_point(
                     Some(&path),
                     std::ptr::null(),
-                    tri_width / 2.0 - hint.delta.0,
+                    tri_width / 2.0 - hint.delta.0 + x_offset,
                     // y coordinate is inverted
-                    tri_height - hint.delta.1,
+                    tri_height - hint.delta.1 + y_offset,
                 ); // B
                 CGMutablePath::add_line_to_point(Some(&path), std::ptr::null(), tri_width, 0.0); // C
             }
@@ -201,7 +201,7 @@ impl GlyphlowDrawingLayer for CALayer {
         text_size: CGSize,
         theme: &GlyphlowTheme,
     ) {
-        let text_box = text_box_with_attributed_string(
+        let (_, _, text_box) = text_box_with_attributed_string(
             attr_string,
             false,
             &theme.menu_bg_color,
@@ -311,6 +311,7 @@ fn draw_text_box(
             screen_size,
             size,
         )
+        .2
     }
 }
 
@@ -322,7 +323,7 @@ fn text_box_with_attributed_string(
     center: Center,
     screen_size: CGSize,
     frame_size: CGSize,
-) -> Retained<CALayer> {
+) -> (f64, f64, Retained<CALayer>) {
     let CGSize { width, height } = frame_size;
 
     let box_width = width + (margin * 2.0);
@@ -332,10 +333,10 @@ fn text_box_with_attributed_string(
         Center::Top(x, y) => (x - box_width / 2.0, y - box_height),
         Center::Middle(x, y) => (x - box_width / 2.0, y - box_height / 2.0),
     };
-    let origin = NSPoint::new(
-        o_x.min(screen_size.width - box_width).max(0.0),
-        o_y.max(0.0).min(screen_size.height - box_height),
-    );
+
+    let o_x_move = o_x.min(screen_size.width - box_width).max(0.0);
+    let o_y_move = o_y.max(0.0).min(screen_size.height - box_height);
+    let origin = NSPoint::new(o_x_move, o_y_move);
 
     let container = CALayer::new();
     container.setFrame(NSRect::new(origin, NSSize::new(box_width, box_height)));
@@ -358,5 +359,5 @@ fn text_box_with_attributed_string(
     text_layer.setContentsScale(2.0); // Retina crispness
     container.addSublayer(&text_layer);
     container.setCornerRadius(margin);
-    container
+    (o_x - o_x_move, o_y - o_y_move, container)
 }
