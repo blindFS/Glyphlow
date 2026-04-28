@@ -244,7 +244,7 @@ impl AppExecutor {
         res
     }
 
-    fn draw_word_picker(&self) -> (Vec<String>, u32) {
+    fn draw_word_picker(&self) -> (Vec<(usize, String)>, u32) {
         let word_picker = self
             .word_picker
             .as_ref()
@@ -253,6 +253,7 @@ impl AppExecutor {
             self.screen_size,
             &self.config.theme,
             &self.key_prefix,
+            self.multi_selection.one_side_idex,
         ) {
             self.window.draw_attributed_string(
                 attr_string,
@@ -736,9 +737,27 @@ impl AppExecutor {
 
                         if self.key_prefix.len() == digits as usize
                             && matched_words.len() == 1
-                            && let Some(text) = matched_words.first()
+                            && let Some((idx, text)) = matched_words.first()
                         {
-                            self.update_selected_text_and_show_menu(text.clone())
+                            if self.multi_selection.is_on {
+                                if let Some((idx1, idx2)) = self.multi_selection.set_one_side(*idx)
+                                {
+                                    let text = self
+                                        .word_picker
+                                        .as_ref()
+                                        .expect("Internal Error: no word picker set yet.")
+                                        .select_range(idx1, idx2)
+                                        .expect("Internal Error: wrong word picker indexing.");
+                                    self.clear_drawing();
+                                    self.update_selected_text_and_show_menu(text.clone())
+                                } else {
+                                    self.key_prefix.clear();
+                                    self.draw_word_picker();
+                                }
+                            } else {
+                                self.clear_drawing();
+                                self.update_selected_text_and_show_menu(text.clone())
+                            }
                         }
                     }
                 }
