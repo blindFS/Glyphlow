@@ -326,7 +326,7 @@ impl AppExecutor {
     fn draw_hints_from_cache(&mut self) {
         let (hint_width, new_boxes) = self.element_cache.hint_boxes(
             &Frame::from_origion(self.screen_size),
-            &self.config.theme.frame_colors,
+            &self.config.theme,
             self.config.colored_frame_min_size as f64,
         );
         self.hint_width = hint_width;
@@ -409,7 +409,7 @@ impl AppExecutor {
             len,
             iter,
             &Frame::from_origion(self.screen_size),
-            &self.config.theme.frame_colors,
+            &self.config.theme,
             self.config.colored_frame_min_size as f64,
         );
         self.hint_width = digits;

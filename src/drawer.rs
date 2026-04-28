@@ -174,8 +174,9 @@ impl GlyphlowDrawingLayer for CALayer {
                 CGMutablePath::add_line_to_point(
                     Some(&path),
                     std::ptr::null(),
-                    tri_width / 2.0,
-                    tri_height,
+                    tri_width / 2.0 - hint.delta.0,
+                    // y coordinate is inverted
+                    tri_height - hint.delta.1,
                 ); // B
                 CGMutablePath::add_line_to_point(Some(&path), std::ptr::null(), tri_width, 0.0); // C
             }

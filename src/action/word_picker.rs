@@ -20,7 +20,7 @@ body {
 }
 .line { display: block; }
 .h { color: {hl_color} }
-.rh { color: {dim_color}; background-color: {hl_color}; }
+.rh { color: {bg_color}; background-color: {hl_color}; }
 .d { color: {dim_color} }
 </style>"#;
 
@@ -213,9 +213,11 @@ fn rgba_to_css_color(rgba: (u8, u8, u8, u8)) -> String {
 fn replace_color_in_css(css: &str, theme: &GlyphlowTheme, dim_level: u8) -> String {
     let default_rgba = (255, 255, 255, 255);
     let fg_rgba = cgcolor_to_rgba(&theme.menu_fg_color).unwrap_or(default_rgba);
+    let bg_rgba = cgcolor_to_rgba(&theme.menu_bg_color).unwrap_or(default_rgba);
     let mut dim_rgba = fg_rgba;
     dim_rgba.3 /= dim_level;
     css.replace("{fg_color}", &rgba_to_css_color(fg_rgba))
+        .replace("{bg_color}", &rgba_to_css_color(bg_rgba))
         .replace(
             "{hl_color}",
             &rgba_to_css_color(cgcolor_to_rgba(&theme.menu_hl_color).unwrap_or(default_rgba)),

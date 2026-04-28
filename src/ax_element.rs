@@ -1,4 +1,4 @@
-use crate::util::hint_label_from_index;
+use crate::{config::GlyphlowTheme, util::hint_label_from_index};
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     AXValueCreate, AXValueGetValue, AXValueRef, kAXButtonRole, kAXCellRole, kAXComboBoxRole,
@@ -16,7 +16,10 @@ use core_foundation::{
 use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGColor;
 use objc2_foundation::NSSize;
-use std::{cmp::Ordering, collections::HashSet};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet, VecDeque},
+};
 use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -186,6 +189,8 @@ pub struct HintBox {
     pub x: f64,
     pub y: f64,
     pub idx: usize,
+    /// Moved distance to avoid collision
+    pub delta: (f64, f64),
     pub frame: Option<Frame>,
     pub color: Option<CFRetained<CGColor>>,
 }
@@ -270,14 +275,14 @@ impl ElementCache {
     pub fn hint_boxes(
         &self,
         screen_frame: &Frame,
-        frame_colors: &[CFRetained<CGColor>],
+        theme: &GlyphlowTheme,
         colored_frame_min_size: f64,
     ) -> (u32, Vec<HintBox>) {
         hint_boxes_from_frames(
             self.cache.len(),
             self.cache.iter().map(|it| it.frame),
             screen_frame,
-            frame_colors,
+            theme,
             colored_frame_min_size,
         )
     }
@@ -386,54 +391,199 @@ pub fn select_range_helper(
     Some((text, Frame::new(x_min, y_min, x_max, y_max)))
 }
 
+const MAX_COLLISION_OPS: usize = 150;
+
 pub fn hint_boxes_from_frames(
     len: usize,
     frames: impl Iterator<Item = Frame>,
     screen_frame: &Frame,
-    frame_colors: &[CFRetained<CGColor>],
+    theme: &GlyphlowTheme,
     colored_frame_min_size: f64,
 ) -> (u32, Vec<HintBox>) {
     if len == 0 {
         return (0, Vec::new());
     }
     let digits = len.ilog(26) + 1;
-    let color_num = frame_colors.len();
+    let color_num = theme.frame_colors.len();
     let mut color_idx = 0;
 
-    (
-        digits,
-        frames
-            .enumerate()
-            .map(|(idx, frame)| {
-                // NOTE: better positioning
-                let (_, screen_height) = screen_frame.size();
-                let frame = frame.intersect(screen_frame).unwrap_or(*screen_frame);
+    let mut boxes = frames
+        .enumerate()
+        .map(|(idx, frame)| {
+            // NOTE: better positioning
+            let (_, screen_height) = screen_frame.size();
+            let frame = frame.intersect(screen_frame).unwrap_or(*screen_frame);
 
-                let (x, y) = frame.center();
-                let (w, h) = frame.size();
+            let (x, y) = frame.center();
+            let (w, h) = frame.size();
 
-                // Draw frames for large enough elements
-                let frame = if w.max(h) >= colored_frame_min_size {
-                    color_idx += 1;
-                    Some(frame.invert_y(screen_height))
-                } else {
-                    None
+            // Draw frames for large enough elements
+            let frame = if w.max(h) >= colored_frame_min_size {
+                color_idx += 1;
+                Some(frame.invert_y(screen_height))
+            } else {
+                None
+            };
+            let color = frame
+                .as_ref()
+                .and_then(|_| theme.frame_colors.get(color_idx % color_num).cloned());
+
+            HintBox {
+                label: hint_label_from_index(idx, digits),
+                x,
+                y: (screen_height - y),
+                delta: (0.0, 0.0),
+                idx,
+                frame,
+                color,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    // Estimate box size
+    let x_thres =
+        theme.hint_font.pointSize() * digits as f64 * 0.6 + 2.0 * theme.hint_margin_size as f64;
+    let y_thres = theme.hint_font.pointSize() * 1.2 + 2.0 * theme.hint_margin_size as f64;
+    resolve_collisions_reactive(&mut boxes, x_thres, y_thres, MAX_COLLISION_OPS);
+
+    (digits, boxes)
+}
+
+pub fn resolve_collisions_reactive(
+    boxes: &mut [HintBox],
+    x_thres: f64,
+    y_thres: f64,
+    max_ops: usize,
+) {
+    if boxes.is_empty() {
+        return;
+    }
+
+    let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::with_capacity(boxes.len());
+    let mut cell_coords = vec![(0, 0); boxes.len()];
+    let mut queue = VecDeque::with_capacity(boxes.len());
+    let mut in_queue = vec![true; boxes.len()];
+
+    // Initial setup
+    for i in 0..boxes.len() {
+        let coords = (
+            (boxes[i].x / x_thres).floor() as i32,
+            (boxes[i].y / y_thres).floor() as i32,
+        );
+        cell_coords[i] = coords;
+        grid.entry(coords).or_default().push(i);
+        queue.push_back(i);
+    }
+
+    let mut ops_count = 0;
+
+    while let Some(i) = queue.pop_front() {
+        in_queue[i] = false;
+        ops_count += 1;
+        if ops_count > max_ops {
+            break;
+        }
+
+        let (cx, cy) = cell_coords[i];
+
+        // Check 9 neighboring cells
+        'outer: for dx in -1..=1 {
+            for dy in -1..=1 {
+                let target_cell = (cx + dx, cy + dy);
+
+                let Some(neighbors) = grid.get(&target_cell) else {
+                    continue;
                 };
-                let color = frame
-                    .as_ref()
-                    .and_then(|_| frame_colors.get(color_idx % color_num).cloned());
+                for &j in neighbors {
+                    if i == j {
+                        continue;
+                    }
 
-                HintBox {
-                    label: hint_label_from_index(idx, digits),
-                    x,
-                    y: (screen_height - y),
-                    idx,
-                    frame,
-                    color,
+                    let diff_x = boxes[i].x - boxes[j].x;
+                    let diff_y = boxes[i].y - boxes[j].y;
+                    let abs_dx = diff_x.abs();
+                    let abs_dy = diff_y.abs();
+
+                    if abs_dx < x_thres && abs_dy < y_thres {
+                        // Collision found! Resolve it.
+                        let (shift_x, shift_y) = (x_thres - abs_dx, y_thres - abs_dy);
+
+                        if shift_x < shift_y {
+                            let move_dist =
+                                (shift_x / 2.0) * (if diff_x >= 0.0 { 1.0 } else { -1.0 });
+                            boxes[i].x += move_dist;
+                            boxes[i].delta.0 += move_dist;
+                            boxes[j].x -= move_dist;
+                            boxes[j].delta.0 -= move_dist;
+                        } else {
+                            let move_dist =
+                                (shift_y / 2.0) * (if diff_y >= 0.0 { 1.0 } else { -1.0 });
+                            boxes[i].y += move_dist;
+                            boxes[i].delta.1 += move_dist;
+                            boxes[j].y -= move_dist;
+                            boxes[j].delta.1 -= move_dist;
+                        }
+
+                        // Update grid positions and mark both as dirty
+                        update_and_requeue(
+                            i,
+                            boxes,
+                            &mut cell_coords,
+                            &mut grid,
+                            &mut queue,
+                            &mut in_queue,
+                            (x_thres, y_thres),
+                        );
+                        update_and_requeue(
+                            j,
+                            boxes,
+                            &mut cell_coords,
+                            &mut grid,
+                            &mut queue,
+                            &mut in_queue,
+                            (x_thres, y_thres),
+                        );
+
+                        // After moving i, we should re-fetch its new neighbors
+                        // breaking here allows the next loop to handle i's new position
+                        break 'outer;
+                    }
                 }
-            })
-            .collect(),
-    )
+            }
+        }
+    }
+}
+
+fn update_and_requeue(
+    idx: usize,
+    boxes: &[HintBox],
+    cell_coords: &mut [(i32, i32)],
+    grid: &mut HashMap<(i32, i32), Vec<usize>>,
+    queue: &mut VecDeque<usize>,
+    in_queue: &mut [bool],
+    thres: (f64, f64),
+) {
+    let old_c = cell_coords[idx];
+    let (xt, yt) = thres;
+    let new_c = (
+        (boxes[idx].x / xt).floor() as i32,
+        (boxes[idx].y / yt).floor() as i32,
+    );
+
+    if old_c != new_c {
+        if let Some(list) = grid.get_mut(&old_c)
+            && let Some(pos) = list.iter().position(|&x| x == idx)
+        {
+            list.swap_remove(pos);
+        }
+        grid.entry(new_c).or_default().push(idx);
+        cell_coords[idx] = new_c;
+    }
+
+    if !in_queue[idx] {
+        queue.push_back(idx);
+        in_queue[idx] = true;
+    }
 }
 
 pub trait GetAttribute {
