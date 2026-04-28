@@ -16,7 +16,7 @@ use objc2_vision::{
 };
 use tokio::sync::oneshot;
 
-use crate::ax_element::Frame;
+use crate::util::Frame;
 
 async fn capture_focused_window(frame_rect: CGRect) -> Result<Retained<CGImage>, String> {
     let (tx, rx) = oneshot::channel();

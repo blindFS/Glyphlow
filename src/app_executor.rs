@@ -1,18 +1,18 @@
 use crate::{
-    AppSignal, DASH_BOARD_MENU_ITEMS, FilterMode, Mode, SCROLLBAR_MENU_ITEMS, ScrollAction,
-    StaticMenuItem, TEXT_ACTION_MENU_ITEMS, TextAction,
+    AppSignal, DASH_BOARD_MENU_ITEMS, FilterMode, MenuItem, Mode, SCROLLBAR_MENU_ITEMS,
+    ScrollAction, TEXT_ACTION_MENU_ITEMS, TextAction,
     action::{
         OCRResult, WordPicker, get_dictionary_attributed_string, perform_ocr, screen_shot,
         text_from_clipboard, text_to_clipboard,
     },
     ax_element::{
-        ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, RoleOfInterest,
-        SetAttribute, Target, hint_boxes_from_frames, select_range_helper, traverse_elements,
+        ElementCache, ElementOfInterest, GetAttribute, RoleOfInterest, SetAttribute, Target,
+        traverse_elements,
     },
     config::GlyphlowConfig,
     drawer::GlyphlowDrawingLayer,
     os_util::get_focused_pid,
-    util::estimate_frame_for_text,
+    util::{Frame, HintBox, estimate_frame_for_text, hint_boxes_from_frames, select_range_helper},
 };
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
 use accessibility_sys::kAXFocusedAttribute;
@@ -201,10 +201,10 @@ impl AppExecutor {
         msg.push_str(&format!("\n\n{}\n", text));
         msg.push_str(&Self::menu_string(&TEXT_ACTION_MENU_ITEMS));
         if let Some(editor) = self.config.editor.as_ref() {
-            msg.push_str(&format!("\n{} ({})", editor.display, editor.key));
+            msg.push_str(&format!("\n({}) {}", editor.key, editor.display));
         }
         for action in self.config.text_actions.iter() {
-            msg.push_str(&format!("\n{} ({})", action.display, action.key));
+            msg.push_str(&format!("\n({}) {}", action.key, action.display));
         }
         self.draw_menu(&msg);
     }
@@ -219,7 +219,7 @@ impl AppExecutor {
         let mut msg = "Pick a Target:".to_string();
         msg.push_str(&Self::menu_string(&DASH_BOARD_MENU_ITEMS));
         if let Some(editor) = self.config.editor.as_ref() {
-            msg.push_str(&format!("\n{} ({})", editor.display, editor.key));
+            msg.push_str(&format!("\n({}) {}", editor.key, editor.display));
         }
         self.clear_drawing();
         self.draw_selected_frame();
@@ -243,7 +243,7 @@ impl AppExecutor {
         tokio::spawn(async { delay_and_deactivate(sender).await });
     }
 
-    fn menu_string(items: &[StaticMenuItem]) -> String {
+    fn menu_string(items: &[MenuItem]) -> String {
         let mut res = String::new();
         for item in items {
             res.push('\n');
@@ -326,7 +326,7 @@ impl AppExecutor {
     fn draw_hints_from_cache(&mut self) {
         let (hint_width, new_boxes) = self.element_cache.hint_boxes(
             &Frame::from_origion(self.screen_size),
-            &self.config.theme.frame_colors,
+            &self.config.theme,
             self.config.colored_frame_min_size as f64,
         );
         self.hint_width = hint_width;
@@ -409,7 +409,7 @@ impl AppExecutor {
             len,
             iter,
             &Frame::from_origion(self.screen_size),
-            &self.config.theme.frame_colors,
+            &self.config.theme,
             self.config.colored_frame_min_size as f64,
         );
         self.hint_width = digits;
@@ -728,7 +728,7 @@ impl AppExecutor {
                     self.notify(&format!("Multi selection is now {on_off}."));
                 }
                 _ => {
-                    self.notify_then_deactivate("Multi selection only works for text.");
+                    self.notify("Multi selection only works for text.");
                 }
             },
             AppSignal::Filter(key_char, mode) => {
@@ -840,7 +840,7 @@ impl AppExecutor {
                         true
                     }
                     TextAction::Dictionary => {
-                        log::info!("Looking up `{text}` in Apple Dictionary.");
+                        log::trace!("Looking up `{text}` in Apple Dictionary.");
                         if let Some(attr_string) = get_dictionary_attributed_string(
                             &text,
                             &self.config.dictionaries,
