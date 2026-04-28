@@ -6,13 +6,13 @@ use crate::{
         text_from_clipboard, text_to_clipboard,
     },
     ax_element::{
-        ElementCache, ElementOfInterest, Frame, GetAttribute, HintBox, RoleOfInterest,
-        SetAttribute, Target, hint_boxes_from_frames, select_range_helper, traverse_elements,
+        ElementCache, ElementOfInterest, GetAttribute, RoleOfInterest, SetAttribute, Target,
+        traverse_elements,
     },
     config::GlyphlowConfig,
     drawer::GlyphlowDrawingLayer,
     os_util::get_focused_pid,
-    util::estimate_frame_for_text,
+    util::{Frame, HintBox, estimate_frame_for_text, hint_boxes_from_frames, select_range_helper},
 };
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
 use accessibility_sys::kAXFocusedAttribute;

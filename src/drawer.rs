@@ -12,9 +12,8 @@ use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSi
 use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer, CATransaction, kCAAlignmentCenter};
 
 use crate::{
-    ax_element::{Frame, HintBox},
     config::GlyphlowTheme,
-    util::estimate_frame_for_text,
+    util::{Frame, HintBox, estimate_frame_for_text},
 };
 
 enum Center {
