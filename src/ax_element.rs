@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use crate::util::hint_label_from_index;
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
@@ -15,10 +13,11 @@ use core_foundation::{
     boolean::CFBoolean,
     string::CFString,
 };
-
 use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGColor;
 use objc2_foundation::NSSize;
+use std::{cmp::Ordering, collections::HashSet};
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum RoleOfInterest {
@@ -55,12 +54,55 @@ impl ElementOfInterest {
             frame,
         }
     }
+
+    pub fn pseudo(context: Option<String>, frame: Frame) -> Self {
+        Self {
+            element: None,
+            context,
+            role: RoleOfInterest::GenericNode,
+            frame,
+        }
+    }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Copy)]
 pub struct Frame {
     pub top_left: CGPoint,
     pub bottom_right: CGPoint,
+}
+
+impl Eq for Frame {}
+
+impl PartialOrd for Frame {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+const MIN_HEIGHT_THRESHOLD: f64 = 10.0;
+
+impl Ord for Frame {
+    // Compare the bottom left point, y coordinate first, if about the same, then x
+    fn cmp(&self, other: &Self) -> Ordering {
+        let (x1, y1) = (self.top_left.x, self.bottom_right.y);
+        let (_, h1) = self.size();
+        let (x2, y2) = (other.top_left.x, other.bottom_right.y);
+        let (_, h2) = other.size();
+
+        // For some multi-line segments, heights are quite different
+        let height_thres = (h2.min(h1) * 0.8).min(MIN_HEIGHT_THRESHOLD);
+        if y1 > y2 + height_thres {
+            Ordering::Greater
+        } else if y2 > y1 + height_thres {
+            Ordering::Less
+        } else if x1 > x2 {
+            Ordering::Greater
+        } else if x1 < x2 {
+            Ordering::Less
+        } else {
+            Ordering::Equal
+        }
+    }
 }
 
 impl Frame {
@@ -130,6 +172,15 @@ impl Frame {
         } else {
             None
         }
+    }
+
+    pub fn union(&self, other: &Frame) -> Self {
+        Frame::new(
+            self.top_left.x.min(other.top_left.x),
+            self.top_left.y.min(other.top_left.y),
+            self.bottom_right.x.max(other.bottom_right.x),
+            self.bottom_right.y.max(other.bottom_right.y),
+        )
     }
 }
 
@@ -228,12 +279,114 @@ impl ElementCache {
     ) -> (u32, Vec<HintBox>) {
         hint_boxes_from_frames(
             self.cache.len(),
-            self.cache.iter().map(|it| it.frame.clone()),
+            self.cache.iter().map(|it| it.frame),
             screen_frame,
             frame_colors,
             colored_frame_min_size,
         )
     }
+
+    pub fn select_range(
+        &self,
+        idx1: usize,
+        idx2: usize,
+        ref_role: Option<&RoleOfInterest>,
+    ) -> Option<(String, Frame)> {
+        let choices: Vec<(String, Frame, bool)> = self
+            .cache
+            .iter()
+            .map(|eoi| {
+                let is_valid = ref_role.is_none_or(|ref_role| *ref_role == eoi.role);
+                (eoi.context.clone().unwrap_or_default(), eoi.frame, is_valid)
+            })
+            .collect();
+        select_range_helper(&choices, idx1, idx2)
+    }
+}
+
+fn estimate_font_height(s: &str, frame: &Frame) -> f64 {
+    let unicode_width = s.width();
+    let (w, h) = frame.size();
+    if w < 1.0 {
+        return w;
+    }
+    let line_count = (h / 2.0 * unicode_width as f64 / w).round() + 1.0;
+    h / line_count
+}
+
+/// Heuristic of selecting a paragraph of texts,
+/// given 2 frames as the start and end
+// TODO: tests
+// TODO: languages that read from right to left
+pub fn select_range_helper(
+    choices: &[(String, Frame, bool)],
+    idx1: usize,
+    idx2: usize,
+) -> Option<(String, Frame)> {
+    let (s1, frame1, _) = choices.get(idx1)?;
+    let (s2, frame2, _) = choices.get(idx2)?;
+    let (s_frame, e_frame) = if frame1 < frame2 {
+        (frame1, frame2)
+    } else {
+        (frame2, frame1)
+    };
+    let y_min = s_frame.top_left.y;
+    let y_max = e_frame.bottom_right.y;
+    let mut x_min = s_frame.top_left.x.min(e_frame.top_left.x);
+    let mut x_max = e_frame.bottom_right.x.max(s_frame.bottom_right.x);
+
+    // NOTE: Exclude elements too far left/right
+    let font_height = estimate_font_height(s1, frame1).min(estimate_font_height(s2, frame2));
+    let x_thres = font_height * 2.5;
+
+    // Roughly sort all elements in y range
+    let mut within_y_range = choices
+        .iter()
+        .filter(|(_, f, v)| *v && f >= s_frame && f <= e_frame)
+        .collect::<Vec<_>>();
+    within_y_range.sort_by_key(|(_, f, _)| f);
+
+    // Find the x_min
+    let mut x_ranges = within_y_range
+        .iter()
+        .map(|(_, f, _)| (f.top_left.x, f.bottom_right.x))
+        .collect::<Vec<_>>();
+    x_ranges.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+    let (mut this_min, mut this_max) = *x_ranges
+        .get_mut(0)
+        .expect("Should contains at least one choice in the given y range.");
+    for (x1, x2) in x_ranges.iter().skip(1) {
+        if this_max + x_thres > x_min {
+            x_min = this_min.min(x_min);
+            break;
+        } else if *x1 > this_max + x_thres {
+            this_min = *x1;
+            this_max = *x2;
+        } else {
+            this_max = this_max.max(*x2);
+        }
+    }
+
+    let mut text = String::new();
+    let mut last_y = s_frame.bottom_right.y;
+
+    for (s, f, _) in within_y_range.iter() {
+        // Too far left/right
+        if f.top_left.x > x_max + x_thres || f.bottom_right.x < x_min - x_thres {
+            continue;
+        }
+        // NOTE: add newline if the new y is large enough,
+        // Some margin (3px) for miscalculated frames, e.g. OCR frames
+        if f.top_left.y > last_y - 3.0 {
+            text.push('\n');
+        }
+
+        text.push_str(s);
+        last_y = f.bottom_right.y;
+        x_max = x_max.max(f.bottom_right.x);
+    }
+    Some((text, Frame::new(x_min, y_min, x_max, y_max)))
 }
 
 pub fn hint_boxes_from_frames(
@@ -257,9 +410,7 @@ pub fn hint_boxes_from_frames(
             .map(|(idx, frame)| {
                 // NOTE: better positioning
                 let (_, screen_height) = screen_frame.size();
-                let frame = frame
-                    .intersect(screen_frame)
-                    .unwrap_or_else(|| screen_frame.clone());
+                let frame = frame.intersect(screen_frame).unwrap_or(*screen_frame);
 
                 let (x, y) = frame.center();
                 let (w, h) = frame.size();
@@ -348,7 +499,7 @@ impl GetAttribute for AXUIElement {
     fn visible_frame(&self, parent_frame: &Frame, role: &CFString) -> Option<Frame> {
         // NOTE: scroll bar positioning depends on its value
         if *role == kAXScrollBarRole {
-            return Some(parent_frame.clone());
+            return Some(*parent_frame);
         }
 
         let is_hidden = self
@@ -374,7 +525,7 @@ impl GetAttribute for AXUIElement {
             // TODO: trade-off among false-positive, false-negative and performance
             this_frame.intersect(parent_frame)
         } else {
-            Some(parent_frame.clone())
+            Some(*parent_frame)
         }
     }
 

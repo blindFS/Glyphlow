@@ -57,9 +57,9 @@ pub fn create_overlay_window(mtm: MainThreadMarker, screen_size: CGSize) -> Reta
 pub trait GlyphlowDrawingLayer {
     fn from_window(window: &Retained<NSWindow>) -> Option<Retained<CALayer>>;
     fn clear(&self);
-    fn draw_hints(
+    fn draw_hints<'a>(
         &self,
-        hints: &[HintBox],
+        hints: impl Iterator<Item = &'a HintBox>,
         theme: &GlyphlowTheme,
         key_prefix_len: usize,
         screen_size: CGSize,
@@ -95,9 +95,9 @@ impl GlyphlowDrawingLayer for CALayer {
         Some(root_layer)
     }
 
-    fn draw_hints(
+    fn draw_hints<'a>(
         &self,
-        hints: &[HintBox],
+        hints: impl Iterator<Item = &'a HintBox>,
         theme: &GlyphlowTheme,
         key_prefix_len: usize,
         screen_size: CGSize,
