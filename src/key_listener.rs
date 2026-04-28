@@ -136,7 +136,7 @@ pub enum Mode {
     Editing,
     WordPicking,
     OCRResultFiltering,
-    Notification,
+    WaitAndDeactivate,
 }
 
 #[derive(Debug)]
@@ -252,7 +252,7 @@ impl KeyListener {
             Mode::OCRResultFiltering => filter_helper(key_char, state, FilterMode::OCR),
             Mode::TextActionMenu => helper(&self.text_actions, state),
             Mode::Scrolling => helper(&self.scroll_actions, state),
-            Mode::Notification => {
+            Mode::WaitAndDeactivate => {
                 self.send(AppSignal::DeActivate);
                 *state = Mode::Idle;
                 true
