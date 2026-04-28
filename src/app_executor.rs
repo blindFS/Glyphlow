@@ -73,7 +73,7 @@ pub struct AppExecutor {
     screen_size: CGSize,
     window: Retained<CALayer>,
     /// Useful for notification clearing
-    last_menu: Option<Retained<CALayer>>,
+    notification_layers: Vec<Retained<CALayer>>,
     /// Which elements of interest to look for
     target: Target,
     config: GlyphlowConfig,
@@ -113,7 +113,7 @@ impl AppExecutor {
             hint_width: 0,
             screen_size,
             window,
-            last_menu: None,
+            notification_layers: Vec::new(),
             config,
             timeout_sender,
             selected: None,
@@ -145,7 +145,7 @@ impl AppExecutor {
     fn clear_cache(&mut self) {
         self.word_picker = None;
         self.ocr_cache = None;
-        self.last_menu = None;
+        self.notification_layers.clear();
         self.hint_boxes.clear();
         self.element_cache.clear();
         self.key_prefix.clear();
@@ -238,7 +238,7 @@ impl AppExecutor {
 
     fn notify(&mut self, msg: &str) {
         log::info!("{msg}");
-        self.last_menu = Some(self.draw_menu(msg));
+        self.notification_layers.push(self.draw_menu(msg));
         let sender = self.timeout_sender.clone();
         tokio::spawn(async { delay_and_deactivate(sender).await });
     }
@@ -939,10 +939,12 @@ impl AppExecutor {
             AppSignal::ClearNotification => {
                 if self.check_mode(Mode::WaitAndDeactivate) {
                     self.deactivate();
-                } else if let Some(last_menu) = self.last_menu.as_ref() {
-                    last_menu.removeFromSuperlayer();
+                } else {
+                    for nl in &self.notification_layers {
+                        nl.removeFromSuperlayer();
+                    }
                 }
-                self.last_menu = None;
+                self.notification_layers.clear();
             }
         }
     }
