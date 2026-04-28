@@ -95,12 +95,8 @@ impl Ord for Frame {
             Ordering::Greater
         } else if y2 > y1 + height_thres {
             Ordering::Less
-        } else if x1 > x2 {
-            Ordering::Greater
-        } else if x1 < x2 {
-            Ordering::Less
         } else {
-            Ordering::Equal
+            x1.total_cmp(&x2)
         }
     }
 }
@@ -310,14 +306,15 @@ fn estimate_font_height(s: &str, frame: &Frame) -> f64 {
     if w < 1.0 {
         return w;
     }
-    let line_count = (h / 2.0 * unicode_width as f64 / w).round() + 1.0;
+    let line_count = (h * unicode_width as f64 / 3.0 / w).sqrt().round() + 1.0;
     h / line_count
 }
 
-/// Heuristic of selecting a paragraph of texts,
-/// given 2 frames as the start and end
 // TODO: tests
 // TODO: languages that read from right to left
+
+/// Heuristic of selecting a paragraph of texts,
+/// given 2 frames as the start and end
 pub fn select_range_helper(
     choices: &[(String, Frame, bool)],
     idx1: usize,
@@ -765,5 +762,288 @@ pub fn traverse_elements(
                 traverse_elements(&child, &new_frame, cache, target);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod frame_tests {
+    use super::*;
+    use std::cmp::Ordering;
+
+    #[test]
+    fn test_frame_ordering_vertical_priority() {
+        // Higher y (bottom_right.y) should be "Greater" regardless of x
+        let frame_top = Frame::new(0.0, 0.0, 10.0, 50.0);
+        let frame_bottom = Frame::new(100.0, 0.0, 110.0, 20.0);
+
+        assert_eq!(frame_top.cmp(&frame_bottom), Ordering::Greater);
+        assert_eq!(frame_bottom.cmp(&frame_top), Ordering::Less);
+    }
+
+    #[test]
+    fn test_frame_ordering_horizontal_within_threshold() {
+        // These frames have similar y-coordinates (difference < MIN_HEIGHT_THRESHOLD)
+        // So they should be sorted by x (top_left.x)
+        let frame_left = Frame::new(10.0, 0.0, 20.0, 15.0);
+        let frame_right = Frame::new(50.0, 0.0, 60.0, 16.0);
+
+        assert_eq!(frame_left.cmp(&frame_right), Ordering::Less);
+        assert_eq!(frame_right.cmp(&frame_left), Ordering::Greater);
+    }
+
+    #[test]
+    fn test_intersect_success() {
+        let f1 = Frame::new(0.0, 0.0, 10.0, 10.0);
+        let f2 = Frame::new(5.0, 5.0, 15.0, 15.0);
+
+        let intersection = f1.intersect(&f2).expect("Should intersect");
+
+        assert_eq!(intersection.top_left.x, 5.0);
+        assert_eq!(intersection.top_left.y, 5.0);
+        assert_eq!(intersection.bottom_right.x, 10.0);
+        assert_eq!(intersection.bottom_right.y, 10.0);
+    }
+
+    #[test]
+    fn test_intersect_none() {
+        let f1 = Frame::new(0.0, 0.0, 5.0, 5.0);
+        let f2 = Frame::new(10.0, 10.0, 15.0, 15.0);
+
+        assert!(f1.intersect(&f2).is_none());
+    }
+
+    #[test]
+    fn test_intersect_edge_touching() {
+        // Rectangles touching at the exact edge should return None
+        // because of the strict '<' check in your implementation
+        let f1 = Frame::new(0.0, 0.0, 10.0, 10.0);
+        let f2 = Frame::new(10.0, 0.0, 20.0, 10.0);
+
+        assert!(
+            f1.intersect(&f2).is_none(),
+            "Touching edges should not intersect"
+        );
+    }
+
+    #[test]
+    fn test_intersect_fully_contained() {
+        let big = Frame::new(0.0, 0.0, 100.0, 100.0);
+        let small = Frame::new(20.0, 20.0, 50.0, 50.0);
+
+        // Small inside big should return small
+        let result = big.intersect(&small).expect("Should intersect");
+        assert_eq!(result, small);
+
+        // Commutative check: big inside small (mathematically)
+        let result_rev = small.intersect(&big).expect("Should intersect");
+        assert_eq!(result_rev, small);
+    }
+
+    #[test]
+    fn test_intersect_partial_overlap_strip() {
+        // Overlap only on X axis, but spans entire Y height
+        let f1 = Frame::new(0.0, 0.0, 20.0, 100.0);
+        let f2 = Frame::new(10.0, 0.0, 30.0, 100.0);
+
+        let result = f1.intersect(&f2).expect("Should intersect");
+        assert_eq!(result, Frame::new(10.0, 0.0, 20.0, 100.0));
+    }
+
+    #[test]
+    fn test_intersect_single_axis_overlap_only() {
+        // X-axis overlaps, but Y-axis does not
+        let f1 = Frame::new(0.0, 0.0, 50.0, 10.0);
+        let f2 = Frame::new(10.0, 20.0, 40.0, 30.0);
+
+        assert!(
+            f1.intersect(&f2).is_none(),
+            "Should not intersect if Y is separated"
+        );
+    }
+
+    #[test]
+    fn test_intersect_identical_frames() {
+        let f1 = Frame::new(10.0, 10.0, 20.0, 20.0);
+        let f2 = Frame::new(10.0, 10.0, 20.0, 20.0);
+
+        let result = f1.intersect(&f2).expect("Should intersect");
+        assert_eq!(result, f1);
+    }
+
+    #[test]
+    fn test_intersect_negative_coordinates() {
+        let f1 = Frame::new(-50.0, -50.0, -10.0, -10.0);
+        let f2 = Frame::new(-20.0, -20.0, 10.0, 10.0);
+
+        let result = f1.intersect(&f2).expect("Should intersect");
+        assert_eq!(result, Frame::new(-20.0, -20.0, -10.0, -10.0));
+    }
+
+    #[test]
+    fn test_intersect_zero_size_overlap() {
+        // One frame is a "point" or "line" (width or height is 0)
+        // Given your `if inter_x1 < inter_x2` logic, this should return None
+        let f1 = Frame::new(0.0, 0.0, 10.0, 10.0);
+        let f2 = Frame::new(5.0, 0.0, 5.0, 10.0); // Zero width
+
+        assert!(
+            f1.intersect(&f2).is_none(),
+            "Zero-width overlap should be None"
+        );
+    }
+
+    #[test]
+    fn test_sorting() {
+        let mut frames = [
+            Frame::new(100.0, 0.0, 110.0, 100.0), // Far right, but very high Y (Last)
+            Frame::new(10.0, 0.0, 20.0, 10.0),    // Left, low Y (First)
+            Frame::new(50.0, 0.0, 60.0, 10.0),    // Right, low Y (Second)
+        ];
+
+        frames.sort();
+
+        assert_eq!(frames[0].top_left.x, 10.0);
+        assert_eq!(frames[1].top_left.x, 50.0);
+        assert_eq!(frames[2].top_left.x, 100.0);
+    }
+}
+
+#[cfg(test)]
+mod select_range_tests {
+    use super::*;
+
+    /// Helper function to quickly generate test data
+    fn make_choice(
+        text: &str,
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+        visible: bool,
+    ) -> (String, Frame, bool) {
+        (text.to_string(), Frame::new(x, y, x + w, y + h), visible)
+    }
+
+    #[test]
+    fn test_select_single_column_paragraph() {
+        let choices = vec![
+            make_choice("Hello ", 0.0, 0.0, 40.0, 10.0, true),
+            make_choice("world.", 45.0, 0.0, 40.0, 10.0, true),
+            make_choice("This ", 0.0, 15.0, 30.0, 10.0, true), // New line
+            make_choice("is ", 35.0, 15.0, 20.0, 10.0, true),
+            make_choice("Rust.", 60.0, 15.0, 30.0, 10.0, true),
+        ];
+
+        // Select from "Hello " to "Rust."
+        let (text, frame) = select_range_helper(&choices, 0, 4).unwrap();
+
+        // `last_y` logic expects a newline when `top_left.y > last_y - 3.0`
+        assert_eq!(text, "Hello world.\nThis is Rust.");
+
+        // Bounding box should encompass the whole block
+        assert_eq!(frame.top_left.x, 0.0);
+        assert_eq!(frame.top_left.y, 0.0);
+        assert_eq!(frame.bottom_right.x, 90.0);
+        assert_eq!(frame.bottom_right.y, 25.0);
+    }
+
+    #[test]
+    fn test_select_multi_column_exclude_right() {
+        // Font height = 10.0. x_thres = 25.0.
+        // Column 1 ends at x=50. Column 2 starts at x=100.
+        // Gap is 50, which is > x_thres, so they should be treated as separate columns.
+        let choices = vec![
+            // Column 1
+            make_choice("Col1_L1 ", 0.0, 0.0, 50.0, 10.0, true),
+            make_choice("Col1_L2", 0.0, 15.0, 50.0, 10.0, true),
+            // Column 2
+            make_choice("Col2_L1 ", 100.0, 0.0, 50.0, 10.0, true),
+            make_choice("Col2_L2", 100.0, 15.0, 50.0, 10.0, true),
+        ];
+
+        // Select start to end of Column 1
+        // Indices 0 and 1
+        let (text, _) = select_range_helper(&choices, 0, 1).unwrap();
+
+        // Should completely ignore Column 2
+        assert_eq!(text, "Col1_L1 \nCol1_L2");
+    }
+
+    #[test]
+    fn test_select_multi_column_exclude_left() {
+        let choices = vec![
+            // Column 1
+            make_choice("Col1_L1 ", 0.0, 0.0, 50.0, 10.0, true),
+            make_choice("Col1_L2", 0.0, 15.0, 50.0, 10.0, true),
+            // Column 2
+            make_choice("Col2_L1 ", 100.0, 0.0, 50.0, 10.0, true),
+            make_choice("Col2_L2", 100.0, 15.0, 50.0, 10.0, true),
+        ];
+
+        // Select start to end of Column 2
+        // Indices 2 and 3
+        let (text, _) = select_range_helper(&choices, 2, 3).unwrap();
+
+        // Should completely ignore Column 1
+        assert_eq!(text, "Col2_L1 \nCol2_L2");
+    }
+
+    #[test]
+    fn test_reverse_selection() {
+        let choices = vec![
+            make_choice("Start ", 0.0, 0.0, 40.0, 10.0, true),
+            make_choice("Middle ", 45.0, 0.0, 40.0, 10.0, true),
+            make_choice("End", 0.0, 15.0, 30.0, 10.0, true),
+        ];
+
+        // User dragged from "End" (idx 2) backwards to "Start" (idx 0)
+        let (text_reverse, frame_reverse) = select_range_helper(&choices, 2, 0).unwrap();
+        let (text_forward, frame_forward) = select_range_helper(&choices, 0, 2).unwrap();
+
+        // The output should be identical regardless of selection direction
+        assert_eq!(text_reverse, text_forward);
+        assert_eq!(frame_reverse, frame_forward);
+        assert_eq!(text_reverse, "Start Middle \nEnd");
+    }
+
+    #[test]
+    fn test_ignores_invisible_elements() {
+        let choices = vec![
+            make_choice("Keep1 ", 0.0, 0.0, 40.0, 10.0, true),
+            make_choice("IgnoreMe ", 45.0, 0.0, 40.0, 10.0, false), // Valid frame, but visible = false
+            make_choice("Keep2", 90.0, 0.0, 30.0, 10.0, true),
+        ];
+
+        let (text, _) = select_range_helper(&choices, 0, 2).unwrap();
+
+        // The invisible element should be skipped during the `.filter(|(_, f, v)| *v ...)` step
+        assert_eq!(text, "Keep1 Keep2");
+    }
+
+    #[test]
+    fn test_invalid_indices_return_none() {
+        let choices = vec![make_choice("Only", 0.0, 0.0, 40.0, 10.0, true)];
+
+        // Out of bounds index
+        assert!(select_range_helper(&choices, 0, 5).is_none());
+    }
+
+    #[test]
+    fn test_estimate_multiline_wrap() {
+        // A box 60px high, containing a string that should wrap into 3 lines.
+        // If it detects 3 lines, height should be 60 / 3 = 20.
+        let text = "This is a long string that definitely wraps.";
+        let frame = Frame::new(0.0, 0.0, 100.0, 60.0);
+
+        let height = estimate_font_height(text, &frame);
+        assert_eq!(height, 15.0);
+    }
+
+    #[test]
+    fn test_estimate_narrow_box_safety() {
+        let frame = Frame::new(0.0, 0.0, 0.5, 20.0);
+        let height = estimate_font_height("any text", &frame);
+
+        assert_eq!(height, 0.5);
     }
 }
