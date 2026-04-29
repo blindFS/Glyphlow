@@ -50,7 +50,7 @@ fn default_hint_hl() -> CFRetained<CGColor> {
     color_from_hex("#11172620")
 }
 fn default_menu_font() -> Retained<NSFont> {
-    NSFont::fontWithName_size(ns_string!("Andale Mono"), 12.0).expect("Default font should exist.")
+    NSFont::fontWithName_size(ns_string!("Andale Mono"), 20.0).expect("Default font should exist.")
 }
 fn default_menu_margin() -> u8 {
     10

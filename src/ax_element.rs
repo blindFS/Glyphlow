@@ -497,7 +497,13 @@ pub fn traverse_elements(
                 if *child == *element {
                     continue;
                 }
-                traverse_elements(&child, &new_frame, cache, target);
+                // TODO: more systematic way to control different levels of visibility filter
+                let frame = if *target == Target::MenuItem {
+                    *parent_frame
+                } else {
+                    new_frame
+                };
+                traverse_elements(&child, &frame, cache, target);
             }
         }
     }
