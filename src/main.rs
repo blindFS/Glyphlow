@@ -4,12 +4,12 @@ use core_foundation::{
 };
 use glyphlow::{
     AppExecutor, AppSignal, KeyListener, Mode,
-    config::GlyphlowConfig,
+    config::{GlyphlowConfig, get_config_path},
     drawer::{GlyphlowDrawingLayer, create_overlay_window, get_main_screen_size},
     os_util::check_accessibility_permissions,
 };
 use notify::RecursiveMode;
-use notify_debouncer_mini::new_debouncer;
+use notify_debouncer_mini::{DebounceEventResult, new_debouncer};
 use objc2::MainThreadMarker;
 use objc2_quartz_core::CALayer;
 use rdev::{EventType, grab};
@@ -32,7 +32,13 @@ async fn main() {
 
     let (tx, mut rx) = mpsc::channel::<AppSignal>(100);
 
-    let config = GlyphlowConfig::load_config();
+    let config_path = get_config_path();
+    let config = GlyphlowConfig::load_config(&config_path);
+    log::info!(
+        "Press key combination {:?} to start",
+        config.global_trigger_key.keys
+    );
+
     let key_listener = KeyListener::new(tx, &config);
 
     let state = Arc::new(Mutex::new(Mode::Idle));
@@ -45,33 +51,46 @@ async fn main() {
     let window = CALayer::from_window(&window).expect("Failed to get root layer of window.");
 
     // Listen to temp file updates
-    let temp_file = create_cache_file().expect("Failed to create temp file.");
-    let (ftx, mut frx) = mpsc::channel(100);
+    let cache_file = create_cache_file().expect("Failed to create temp file.");
+    let (ftx, mut frx) = mpsc::channel::<PathBuf>(100);
     // NOTE: listen to file updates with FsEvent
-    let Ok(mut debouncer) =
-        new_debouncer(
-            std::time::Duration::from_millis(200),
-            move |res| match res {
-                Ok(_) => {
-                    // Notify: file updated
-                    let _ = ftx.blocking_send(());
+    let Ok(mut debouncer) = new_debouncer(
+        std::time::Duration::from_millis(200),
+        move |res: DebounceEventResult| match res {
+            Ok(events) => {
+                let mut pbs: HashSet<PathBuf> = HashSet::new();
+                for e in events {
+                    pbs.insert(e.path);
                 }
-                Err(e) => log::error!("Watch error: {:?}", e),
-            },
-        )
-    else {
+                for pb in pbs {
+                    let _ = ftx.blocking_send(pb);
+                }
+            }
+            Err(e) => log::error!("Watch error: {:?}", e),
+        },
+    ) else {
+        log::error!("Failed to create debouncer.");
         return;
     };
 
-    debouncer
+    if let Err(e) = debouncer
         .watcher()
-        .watch(temp_file.as_path(), RecursiveMode::NonRecursive)
-        .expect("Failed to watch file.");
+        .watch(cache_file.as_path(), RecursiveMode::NonRecursive)
+    {
+        log::error!("Failed to watch temp file: {e}");
+    }
+    if let Some(path) = config_path
+        && let Err(e) = debouncer
+            .watcher()
+            .watch(path.as_path(), RecursiveMode::NonRecursive)
+    {
+        log::error!("Failed to watch config file: {e}");
+    }
 
     // Listen to notification timeout
     let (ttx, mut trx) = mpsc::channel::<()>(100);
     let mut app_executor =
-        AppExecutor::new(state.clone(), config, window, screen_size, temp_file, ttx);
+        AppExecutor::new(state.clone(), config, window, screen_size, cache_file, ttx);
 
     thread::spawn(move || {
         let pressed_keys = pressed_keys.clone();
@@ -98,7 +117,7 @@ async fn main() {
     loop {
         tokio::select! {
             Some(signal) = rx.recv() => app_executor.handle_signal(signal).await,
-            Some(()) = frx.recv() => app_executor.handle_signal(AppSignal::FileUpdate).await,
+            Some(pb) = frx.recv() => app_executor.handle_signal(AppSignal::FileUpdate(pb)).await,
             Some(()) = trx.recv() => app_executor.handle_signal(AppSignal::ClearNotification).await,
             _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
                 // NOTE: necessary for up-to-date get_focused_pid and UI drawing

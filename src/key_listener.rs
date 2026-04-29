@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt::Display,
+    path::PathBuf,
     sync::{Mutex, MutexGuard},
 };
 
@@ -50,7 +51,7 @@ pub enum AppSignal {
     ReadClipboard,
     ScreenShot,
     FrameOCR,
-    FileUpdate,
+    FileUpdate(PathBuf),
     ClearNotification,
 }
 
