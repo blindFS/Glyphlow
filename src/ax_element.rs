@@ -9,7 +9,7 @@ use accessibility_sys::{
     kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction, kAXScrollBarRole,
     kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
     kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
-    kAXValueTypeCGPoint, kAXValueTypeCGSize,
+    kAXValueTypeCGPoint, kAXValueTypeCGSize, kAXWindowRole,
 };
 use core_foundation::{
     base::{CFRange, CFType, CFTypeRef, TCFType},
@@ -433,6 +433,13 @@ pub fn traverse_elements(
                 }
                 _ => (),
             },
+            kAXWindowRole => {
+                // NOTE: For AXApplication the frame is usually None, defaults to full screen.
+                // Need to narrow down to window frame at this place.
+                if let Some(win_frame) = element.get_frame() {
+                    new_frame = win_frame;
+                };
+            }
             kAXComboBoxRole | kAXTextFieldRole | kAXTextAreaRole => match target {
                 Target::Editable => {
                     cache.add(
