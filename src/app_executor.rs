@@ -522,7 +522,7 @@ impl AppExecutor {
                 self.notify_then_deactivate(&format!("OCR failed: {e:?}"), Level::Error);
             }
             _ => {
-                self.notify_then_deactivate("Empty OCR result.", Level::Error);
+                self.notify_then_deactivate("Empty OCR result.", Level::Warn);
             }
         }
     }
@@ -783,7 +783,7 @@ impl AppExecutor {
                     } else {
                         "off"
                     };
-                    self.notify(&format!("Multi selection is now {on_off}."), Level::Info);
+                    self.notify(&format!("Multi-selection is now {on_off}."), Level::Info);
                 }
                 _ => {
                     self.notify("Multi selection only works for text.", Level::Warn);

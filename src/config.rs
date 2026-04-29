@@ -353,11 +353,15 @@ impl GlyphlowConfig {
 }
 
 pub fn get_config_path() -> Result<PathBuf, String> {
-    let Some(base_dir) = std::env::var("XDG_CONFIG_HOME").ok() else {
-        return Err("To read customized configuration file, environment variable XDG_CONFIG_HOME is required.".into());
-    };
+    let base_dir = std::env::var("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|_| std::env::var("HOME").map(|dir| PathBuf::from(dir).join(".config")))
+        .map_err(|_| {
+            "Need environment variable `XDG_CONFIG_HOME` or `HOME` to load a configurtion file."
+                .to_string()
+        })?;
 
-    let base_dir = PathBuf::from(base_dir).join("glyphlow");
+    let base_dir = base_dir.join("glyphlow");
     if !base_dir.exists() {
         fs::create_dir_all(&base_dir)
             .map_err(|e| format!("Failed to create config directory at {base_dir:?}: {e:?}"))?;

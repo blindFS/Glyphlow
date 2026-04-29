@@ -140,12 +140,21 @@ async fn main() {
 }
 
 fn create_cache_file() -> Option<PathBuf> {
-    let cache_dir = std::env::var("HOME")
+    let cache_dir = std::env::var("XDG_CACHE_HOME")
         .ok()
-        .map(|dir| PathBuf::from(dir).join(".cache/glyphlow"))?;
+        .map(|dir| PathBuf::from(dir).join("glyphlow"))
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|dir| PathBuf::from(dir).join(".cache/glyphlow"))
+        })?;
     if !cache_dir.exists() {
         std::fs::create_dir_all(&cache_dir).ok()?;
     }
     let cache_file = cache_dir.join("tempfile.md");
+    if !cache_file.exists() {
+        log::info!("Creating tempfile: {cache_file:?}");
+        std::fs::File::create(&cache_file).ok()?;
+    }
     Some(cache_file)
 }
