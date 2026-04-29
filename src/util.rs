@@ -349,7 +349,7 @@ pub fn resolve_collisions_reactive(
     while let Some(i) = queue.pop_front() {
         in_queue[i] = false;
         ops_count += 1;
-        if ops_count > max_ops {
+        if ops_count > max_ops + boxes.len() {
             break;
         }
 
