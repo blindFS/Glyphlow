@@ -15,7 +15,7 @@ use crate::{
     util::{Frame, HintBox, estimate_frame_for_text, hint_boxes_from_frames, select_range_helper},
 };
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
-use accessibility_sys::kAXFocusedAttribute;
+use accessibility_sys::{kAXErrorCannotComplete, kAXFocusedAttribute};
 use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber, string::CFString};
 use log::Level;
 use objc2::rc::Retained;
@@ -416,8 +416,16 @@ impl AppExecutor {
         if self.is_electron || *role == RoleOfInterest::Cell {
             Self::simulate_click(x, y, false);
         } else if let Err(e) = element.press() {
-            log::warn!("Failed to do UI press on element: {e}, simulating mouse click instead...");
-            Self::simulate_click(x, y, false);
+            log::warn!("Failed to do UI press on element: {e}");
+            match e {
+                // NOTE: Sometimes this error is false alarm, usually because it takes longer
+                // than expected, we shouldn't click in this case, otherwise it is performed twice.
+                accessibility::Error::Ax(err_num) if err_num == kAXErrorCannotComplete => {}
+                _ => {
+                    log::info!("Simulating mouse click instead...");
+                    Self::simulate_click(x, y, false);
+                }
+            }
         };
     }
 
@@ -431,8 +439,16 @@ impl AppExecutor {
         let (x, y) = center;
 
         if let Err(e) = element.show_menu() {
-            log::warn!("Failed to show menu on element: {e}, simulating mouse click instead...");
-            Self::simulate_click(x, y, true);
+            log::warn!("Failed to show menu on element: {e}");
+            match e {
+                // NOTE: Sometimes this error is false alarm, usually because it takes longer
+                // than expected, we shouldn't click in this case, otherwise it is performed twice.
+                accessibility::Error::Ax(err_num) if err_num == kAXErrorCannotComplete => {}
+                _ => {
+                    log::info!("Simulating mouse click instead...");
+                    Self::simulate_click(x, y, true);
+                }
+            }
         };
     }
 

@@ -470,7 +470,7 @@ pub fn traverse_elements(
             }
             kAXGroupRole => match target {
                 // NOTE: Add AXGroup only if it has no children and is clickable
-                Target::Clickable if !element.has_children() && element.is_clickable() => {
+                Target::Clickable if element.is_clickable() => {
                     cache.add(element, None, RoleOfInterest::Button);
                 }
                 // NOTE: Potential texts in leaf AXGroup
