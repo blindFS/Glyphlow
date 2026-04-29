@@ -429,7 +429,6 @@ pub fn traverse_elements(
                 }
                 _ => (),
             },
-            // TODO: select only the visible part, `kAXVisibleCharacterRangeAttribute`
             kAXComboBoxRole | kAXTextFieldRole | kAXTextAreaRole => match target {
                 Target::Editable => {
                     cache.add(

@@ -314,12 +314,12 @@ impl Default for GlyphlowConfig {
 }
 
 impl GlyphlowConfig {
-    pub fn load_config() -> Self {
-        let Some(path) = get_config_path() else {
+    pub fn load_config(config_path: &Option<PathBuf>) -> Self {
+        let Some(path) = config_path else {
             return Self::default();
         };
 
-        let config = if let Ok(content) = fs::read_to_string(&path) {
+        if let Ok(content) = fs::read_to_string(path) {
             log::info!("Loading config from {path:?}");
             match toml::from_str::<Self>(&content) {
                 Ok(existing_config) => existing_config,
@@ -333,17 +333,11 @@ impl GlyphlowConfig {
         } else {
             log::info!("Saving config to {path:?}");
             let default_config = Self::default();
-            if let Err(e) = default_config.save_config(&path) {
+            if let Err(e) = default_config.save_config(path) {
                 log::error!("Failed to save config file. Error: {e}");
             }
             default_config
-        };
-
-        log::info!(
-            "Press key combination {:?} to start",
-            config.global_trigger_key.keys
-        );
-        config
+        }
     }
 
     fn save_config(&self, path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
@@ -353,10 +347,15 @@ impl GlyphlowConfig {
     }
 }
 
-fn get_config_path() -> Option<PathBuf> {
-    let base_dir = std::env::var("XDG_CONFIG_HOME")
-        .ok()
-        .map(|dir| PathBuf::from(dir).join("glyphlow"))?;
+pub fn get_config_path() -> Option<PathBuf> {
+    let Some(base_dir) = std::env::var("XDG_CONFIG_HOME").ok() else {
+        log::warn!(
+            "To read customized configuration file, environment variable XDG_CONFIG_HOME is required."
+        );
+        return None;
+    };
+
+    let base_dir = PathBuf::from(base_dir).join("glyphlow");
     if !base_dir.exists() {
         fs::create_dir_all(&base_dir).ok()?;
     }

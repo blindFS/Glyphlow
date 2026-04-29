@@ -17,18 +17,17 @@ use crate::{
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
 use accessibility_sys::kAXFocusedAttribute;
 use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber, string::CFString};
-
+use log::Level;
 use objc2::rc::Retained;
 use objc2_core_foundation::CGSize;
 use objc2_quartz_core::CALayer;
 use rdev::{Button, EventType, simulate};
-use tokio::sync::mpsc::Sender;
-
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
     time::Duration,
 };
+use tokio::sync::mpsc::Sender;
 
 static MAX_TEXT_DISPLAY_LEN: usize = 30;
 
@@ -231,16 +230,23 @@ impl AppExecutor {
             .draw_menu(msg, self.screen_size, &self.config.theme)
     }
 
-    fn notify_then_deactivate(&mut self, msg: &str) {
-        self.notify(msg);
+    const SHORT_TIMEOUT: u64 = 1;
+    const LONG_TIMEOUT: u64 = 2;
+
+    fn notify_then_deactivate(&mut self, msg: &str, log_level: Level) {
+        self.notify(msg, log_level);
         self.set_mode(Mode::WaitAndDeactivate);
     }
 
-    fn notify(&mut self, msg: &str) {
-        log::info!("{msg}");
+    fn notify(&mut self, msg: &str, log_level: Level) {
+        let timeout_secs = match log_level {
+            log::Level::Info => Self::SHORT_TIMEOUT,
+            _ => Self::LONG_TIMEOUT,
+        };
+        log::log!(log_level, "{msg}");
         self.notification_layers.push(self.draw_menu(msg));
         let sender = self.timeout_sender.clone();
-        tokio::spawn(async { delay_and_deactivate(sender).await });
+        tokio::spawn(async move { delay_and_deactivate(sender, timeout_secs).await });
     }
 
     fn menu_string(items: &[MenuItem]) -> String {
@@ -343,7 +349,7 @@ impl AppExecutor {
             self.set_mode(Mode::Filtering);
         } else {
             self.clear_drawing();
-            self.notify_then_deactivate("No relevant UI elements found.");
+            self.notify_then_deactivate("No relevant UI elements found.", Level::Warn);
         }
     }
 
@@ -465,10 +471,10 @@ impl AppExecutor {
                 self.set_mode(Mode::OCRResultFiltering);
             }
             Err(e) => {
-                self.notify_then_deactivate(&format!("OCR failed: {e:?}"));
+                self.notify_then_deactivate(&format!("OCR failed: {e:?}"), Level::Error);
             }
             _ => {
-                self.notify_then_deactivate("Empty OCR result.");
+                self.notify_then_deactivate("Empty OCR result.", Level::Error);
             }
         }
     }
@@ -576,7 +582,10 @@ impl AppExecutor {
                             self.set_mode(Mode::Editing);
                         }
                         Err(e) => {
-                            self.notify_then_deactivate(&format!("Failed to open editor: {e}"));
+                            self.notify_then_deactivate(
+                                &format!("Failed to open editor: {e}"),
+                                Level::Error,
+                            );
                         }
                     }
                 }
@@ -638,11 +647,14 @@ impl AppExecutor {
             .stdout(std::process::Stdio::piped())
             .spawn()
         else {
-            self.notify_then_deactivate(&format!(
-                "Failed to spawn command: {} {}",
-                action.command,
-                action.args.join(" ")
-            ));
+            self.notify_then_deactivate(
+                &format!(
+                    "Failed to spawn command: {} {}",
+                    action.command,
+                    action.args.join(" ")
+                ),
+                Level::Error,
+            );
             return true;
         };
 
@@ -656,14 +668,14 @@ impl AppExecutor {
                     self.clear_drawing();
                     self.update_selected_text_and_show_menu(new_text);
                 } else if !o.stderr.is_empty() {
-                    self.notify_then_deactivate(&format!(
-                        "External stderr: {}",
-                        String::from_utf8_lossy(&o.stderr)
-                    ));
+                    self.notify_then_deactivate(
+                        &format!("External stderr: {}", String::from_utf8_lossy(&o.stderr)),
+                        Level::Error,
+                    );
                 }
             }
             Err(e) => {
-                self.notify_then_deactivate(&format!("Failed to run command: {e}"));
+                self.notify_then_deactivate(&format!("Failed to run command: {e}"), Level::Error);
             }
         }
 
@@ -725,10 +737,10 @@ impl AppExecutor {
                     } else {
                         "off"
                     };
-                    self.notify(&format!("Multi selection is now {on_off}."));
+                    self.notify(&format!("Multi selection is now {on_off}."), Level::Info);
                 }
                 _ => {
-                    self.notify("Multi selection only works for text.");
+                    self.notify("Multi selection only works for text.", Level::Warn);
                 }
             },
             AppSignal::Filter(key_char, mode) => {
@@ -836,7 +848,7 @@ impl AppExecutor {
                     }
                     TextAction::Copy => {
                         text_to_clipboard(&text);
-                        self.notify_then_deactivate("Copied to clipboard.");
+                        self.notify_then_deactivate("Copied to clipboard.", Level::Info);
                         true
                     }
                     TextAction::Dictionary => {
@@ -856,7 +868,7 @@ impl AppExecutor {
                                 &self.config.theme,
                             );
                         } else {
-                            self.notify_then_deactivate("No definition found.");
+                            self.notify_then_deactivate("No definition found.", Level::Warn);
                         }
                         true
                     }
@@ -871,7 +883,10 @@ impl AppExecutor {
                     }
                     TextAction::Editor => {
                         if let Err(e) = self.open_editor(&text) {
-                            self.notify_then_deactivate(&format!("Failed to open editor: {e}"));
+                            self.notify_then_deactivate(
+                                &format!("Failed to open editor: {e}"),
+                                Level::Error,
+                            );
                             true
                         } else {
                             false
@@ -902,9 +917,9 @@ impl AppExecutor {
                         .unwrap_or_else(|| Frame::from_origion(self.screen_size))
                 };
                 if screen_shot(frame).await {
-                    self.notify_then_deactivate("Screenshot copied to clipboard.");
+                    self.notify_then_deactivate("Screenshot copied to clipboard.", Level::Info);
                 } else {
-                    self.notify_then_deactivate("Failed to take screenshot.");
+                    self.notify_then_deactivate("Failed to take screenshot.", Level::Error);
                 };
             }
             AppSignal::FrameOCR => {
@@ -917,23 +932,27 @@ impl AppExecutor {
                 }
             }
             // TODO: Keep a `self.editing_element` for using other glyphlow features during the editing?
-            AppSignal::FileUpdate => {
-                if self.check_mode(Mode::Editing)
+            AppSignal::FileUpdate(pb) => {
+                if pb == self.temp_file
+                    && self.check_mode(Mode::Editing)
                     && let Ok(new_text) = std::fs::read_to_string(&self.temp_file)
                 {
                     self.update_selected_text(new_text, true);
+                } else if pb != self.temp_file {
+                    self.notify_then_deactivate("Configuration reloaded.\nKeybinding changes won't be applied until next launch.", Level::Warn);
+                    self.config = GlyphlowConfig::load_config(&Some(pb));
                 }
             }
             AppSignal::ReadClipboard => {
+                self.clear_drawing();
                 if let Some(text) = text_from_clipboard() {
-                    self.clear_drawing();
                     self.selected = Some(ElementOfInterest::pseudo(
                         None,
                         Frame::from_origion(self.screen_size),
                     ));
                     self.update_selected_text_and_show_menu(text);
                 } else {
-                    self.notify_then_deactivate("No text found in clipboard.");
+                    self.notify_then_deactivate("No text found in clipboard.", Level::Warn);
                 }
             }
             AppSignal::ClearNotification => {
@@ -950,7 +969,7 @@ impl AppExecutor {
     }
 }
 
-async fn delay_and_deactivate(sender: Sender<()>) {
-    tokio::time::sleep(Duration::from_secs(1)).await;
+async fn delay_and_deactivate(sender: Sender<()>, timeout_secs: u64) {
+    tokio::time::sleep(Duration::from_secs(timeout_secs)).await;
     let _ = sender.send(()).await;
 }
