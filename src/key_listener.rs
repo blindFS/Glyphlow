@@ -19,6 +19,7 @@ pub enum TextAction {
     Dictionary,
     Split,
     Press,
+    ShowMenu,
     Editor,
     /// index of the action in the config
     UserDefined(usize),
@@ -116,7 +117,7 @@ pub const SCROLLBAR_MENU_ITEMS: [MenuItem; 4] = [
     ),
 ];
 
-pub const TEXT_ACTION_MENU_ITEMS: [MenuItem; 4] = [
+pub const TEXT_ACTION_MENU_ITEMS: [MenuItem; 5] = [
     MenuItem::new("⮺ Copy", 'C', AppSignal::TextAction(TextAction::Copy)),
     MenuItem::new(
         "◫ Dictionary",
@@ -124,7 +125,16 @@ pub const TEXT_ACTION_MENU_ITEMS: [MenuItem; 4] = [
         AppSignal::TextAction(TextAction::Dictionary),
     ),
     MenuItem::new("󰃻 Split", 'S', AppSignal::TextAction(TextAction::Split)),
-    MenuItem::new("󰳽 Press", 'P', AppSignal::TextAction(TextAction::Press)),
+    MenuItem::new(
+        "󰳽 Press [Left Click]",
+        'P',
+        AppSignal::TextAction(TextAction::Press),
+    ),
+    MenuItem::new(
+        " Menu [Right Click]",
+        'M',
+        AppSignal::TextAction(TextAction::ShowMenu),
+    ),
 ];
 
 #[derive(Debug, PartialEq)]

@@ -33,7 +33,17 @@ async fn main() {
     let (tx, mut rx) = mpsc::channel::<AppSignal>(100);
 
     let config_path = get_config_path();
-    let config = GlyphlowConfig::load_config(&config_path);
+    let config = match config_path
+        .clone()
+        .and_then(|cp| GlyphlowConfig::load_config(&cp))
+    {
+        Ok(config) => config,
+        Err(msg) => {
+            log::error!("{msg}");
+            GlyphlowConfig::default()
+        }
+    };
+
     log::info!(
         "Press key combination {:?} to start",
         config.global_trigger_key.keys
@@ -79,7 +89,7 @@ async fn main() {
     {
         log::error!("Failed to watch temp file: {e}");
     }
-    if let Some(path) = config_path
+    if let Ok(path) = config_path
         && let Err(e) = debouncer
             .watcher()
             .watch(path.as_path(), RecursiveMode::NonRecursive)

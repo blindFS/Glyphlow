@@ -9,7 +9,7 @@ use crate::{
         ElementCache, ElementOfInterest, GetAttribute, RoleOfInterest, SetAttribute, Target,
         traverse_elements,
     },
-    config::GlyphlowConfig,
+    config::{GlyphlowConfig, VisibilityCheckingLevel},
     drawer::GlyphlowDrawingLayer,
     os_util::get_focused_pid,
     util::{Frame, HintBox, estimate_frame_for_text, hint_boxes_from_frames, select_range_helper},
@@ -319,12 +319,19 @@ impl AppExecutor {
             ..
         }) = self.selected.as_ref()
         {
+            let vis_level = if target == Target::MenuItem {
+                VisibilityCheckingLevel::Loose
+            } else {
+                self.config.visibility_checking_level
+            };
+
             traverse_elements(
                 element,
                 // Very loose visibility constraint
                 &Frame::from_origion(self.screen_size),
                 &mut self.element_cache,
                 &target,
+                vis_level,
             );
         }
     }
@@ -363,16 +370,38 @@ impl AppExecutor {
         std::thread::sleep(Duration::from_millis(20));
     }
 
-    fn simulate_click(x: f64, y: f64) {
+    fn simulate_click(x: f64, y: f64, right: bool) {
+        let button = if right { Button::Right } else { Button::Left };
         Self::simulate_event(&EventType::MouseMove { x, y });
-        Self::simulate_event(&EventType::ButtonPress(Button::Left));
-        Self::simulate_event(&EventType::ButtonRelease(Button::Left));
+        Self::simulate_event(&EventType::ButtonPress(button));
+        Self::simulate_event(&EventType::ButtonRelease(button));
     }
 
     fn click_on_selected(&self) {
         if let Some(ElementOfInterest { frame, .. }) = self.selected.as_ref() {
             let (x, y) = frame.center();
-            Self::simulate_click(x, y);
+            Self::simulate_click(x, y, false);
+        }
+    }
+
+    fn right_click_menu_on_selected(&mut self) {
+        if let Some(ElementOfInterest { element, frame, .. }) = self.selected.as_ref() {
+            let center = frame.center();
+            let (x, y) = center;
+            if let Some(element) = element {
+                self.right_click_menu_on_element(element, center)
+            } else {
+                Self::simulate_click(x, y, true);
+            }
+            // HACK: wait for the right click menu to draw.
+            std::thread::sleep(Duration::from_millis(100));
+            self.selected = None;
+            self.activate(Target::MenuItem);
+        } else {
+            self.notify(
+                "Trying to perform a right click with nothing selected.",
+                Level::Error,
+            );
         }
     }
 
@@ -385,10 +414,10 @@ impl AppExecutor {
         Self::focus_on_element(element);
 
         if self.is_electron || *role == RoleOfInterest::Cell {
-            Self::simulate_click(x, y);
+            Self::simulate_click(x, y, false);
         } else if let Err(e) = element.press() {
             log::warn!("Failed to do UI press on element: {e}, simulating mouse click instead...");
-            Self::simulate_click(x, y);
+            Self::simulate_click(x, y, false);
         };
     }
 
@@ -398,9 +427,12 @@ impl AppExecutor {
         };
     }
 
-    fn right_click_menu_on_element(element: &AXUIElement) {
+    fn right_click_menu_on_element(&self, element: &AXUIElement, center: (f64, f64)) {
+        let (x, y) = center;
+
         if let Err(e) = element.show_menu() {
-            log::warn!("Failed to show menu on element: {e}");
+            log::warn!("Failed to show menu on element: {e}, simulating mouse click instead...");
+            Self::simulate_click(x, y, true);
         };
     }
 
@@ -511,10 +543,8 @@ impl AppExecutor {
                     self.deactivate();
                 }
                 Target::Image => {
-                    Self::right_click_menu_on_element(element);
-                    // HACK: wait for the right click menu to draw.
-                    std::thread::sleep(Duration::from_millis(100));
-                    self.activate(Target::MenuItem);
+                    self.selected = Some(eoi.clone());
+                    self.right_click_menu_on_selected();
                 }
                 Target::ImageOCR => self.perform_ocr_on_frame(*frame).await,
                 Target::Text => {
@@ -846,6 +876,10 @@ impl AppExecutor {
                         self.click_on_selected();
                         false
                     }
+                    TextAction::ShowMenu => {
+                        self.right_click_menu_on_selected();
+                        true
+                    }
                     TextAction::Copy => {
                         text_to_clipboard(&text);
                         self.notify_then_deactivate("Copied to clipboard.", Level::Info);
@@ -939,8 +973,15 @@ impl AppExecutor {
                 {
                     self.update_selected_text(new_text, true);
                 } else if pb != self.temp_file {
-                    self.notify_then_deactivate("Configuration reloaded.\nKeybinding changes won't be applied until next launch.", Level::Warn);
-                    self.config = GlyphlowConfig::load_config(&Some(pb));
+                    match GlyphlowConfig::load_config(&pb) {
+                        Ok(new_config) => {
+                            self.config = new_config;
+                            self.notify_then_deactivate("Configuration reloaded.\nKeybinding changes won't be applied until next launch.", Level::Warn);
+                        }
+                        Err(msg) => {
+                            self.notify_then_deactivate(&msg, Level::Error);
+                        }
+                    };
                 }
             }
             AppSignal::ReadClipboard => {
