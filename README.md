@@ -33,7 +33,7 @@ At this pre-alpha stage, you can try this app by:
 This app is designed to be lean and clean, it only generates 2 files:
 
 1. A configuration file `$XDG_CONFIG_HOME/glyphlow/config.toml` or `~/.config/glyphlow/config.toml` if the env-var is not set.
-2. A cache file for temporary editing: `$XDG_CACHE_HOME/glyflow/tempfile.md` or `~/.cache/glyphlow/tempfile.md`.
+2. A cache file for temporary editing: `$XDG_CACHE_HOME/glyphlow/tempfile.md` or `~/.cache/glyphlow/tempfile.md`.
 
 ## Configuration
 

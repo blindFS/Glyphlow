@@ -17,7 +17,7 @@ use core_foundation::{
     string::CFString,
 };
 use objc2_core_foundation::{CGPoint, CGSize};
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum RoleOfInterest {
@@ -68,7 +68,7 @@ impl ElementOfInterest {
 #[derive(Default)]
 pub struct ElementCache {
     pub cache: Vec<ElementOfInterest>,
-    seen_center: HashSet<(u64, u64)>,
+    seen_center: HashMap<(u64, u64), usize>,
     element_min_width: f64,
     element_min_height: f64,
     image_min_size: f64,
@@ -78,7 +78,7 @@ impl ElementCache {
     pub fn new(min_width: f64, min_height: f64, image_min_size: f64) -> Self {
         ElementCache {
             cache: vec![],
-            seen_center: HashSet::new(),
+            seen_center: HashMap::new(),
             element_min_width: min_width,
             element_min_height: min_height,
             image_min_size,
@@ -130,15 +130,15 @@ impl ElementCache {
         let center = (x.to_bits(), y.to_bits());
 
         // NOTE: de-duplication for DOM elements
-        // TODO: avoid collision
-        if !self.seen_center.contains(&center) {
-            self.seen_center.insert(center);
-            self.cache.push(ElementOfInterest::new(
-                Some(element.clone()),
-                context,
-                role,
-                frame,
-            ));
+        let new_ele = ElementOfInterest::new(Some(element.clone()), context, role.clone(), frame);
+        // Keep all nodes with Target::ChildElement/GenericNode, as it's basically a debugging mode
+        if role != RoleOfInterest::GenericNode
+            && let Some(idx) = self.seen_center.get(&center)
+        {
+            self.cache[*idx] = new_ele;
+        } else {
+            self.seen_center.insert(center, self.cache.len());
+            self.cache.push(new_ele);
         }
     }
 
@@ -469,7 +469,6 @@ pub fn traverse_elements(
                 }
             }
             kAXGroupRole => match target {
-                // NOTE: Add AXGroup only if it has no children and is clickable
                 Target::Clickable if element.is_clickable() => {
                     cache.add(element, None, RoleOfInterest::Button);
                 }
