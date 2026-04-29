@@ -241,6 +241,12 @@ pub struct KeyBinding {
     pub keys: Vec<Key>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Copy)]
+pub enum VisibilityCheckingLevel {
+    Loose,
+    Strict,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GlyphlowConfig {
     #[serde(default = "default_global_keybinding")]
@@ -263,6 +269,8 @@ pub struct GlyphlowConfig {
     pub ocr_languages: Vec<String>,
     #[serde(default = "default_dictionaries")]
     pub dictionaries: Vec<String>,
+    #[serde(default = "default_vis_level")]
+    pub visibility_checking_level: VisibilityCheckingLevel,
 }
 
 fn default_global_keybinding() -> KeyBinding {
@@ -294,6 +302,9 @@ fn default_ocr_languages() -> Vec<String> {
 fn default_dictionaries() -> Vec<String> {
     vec!["New Oxford American Dictionary".into()]
 }
+fn default_vis_level() -> VisibilityCheckingLevel {
+    VisibilityCheckingLevel::Loose
+}
 
 impl Default for GlyphlowConfig {
     fn default() -> Self {
@@ -309,26 +320,20 @@ impl Default for GlyphlowConfig {
             colored_frame_min_size: default_frame_min_size(),
             ocr_languages: default_ocr_languages(),
             dictionaries: default_dictionaries(),
+            visibility_checking_level: default_vis_level(),
         }
     }
 }
 
 impl GlyphlowConfig {
-    pub fn load_config(config_path: &Option<PathBuf>) -> Self {
-        let Some(path) = config_path else {
-            return Self::default();
-        };
-
+    pub fn load_config(path: &PathBuf) -> Result<Self, String> {
         if let Ok(content) = fs::read_to_string(path) {
             log::info!("Loading config from {path:?}");
             match toml::from_str::<Self>(&content) {
-                Ok(existing_config) => existing_config,
-                Err(e) => {
-                    log::error!(
-                        "Failed to parse config file, using default config instead. Error: {e}"
-                    );
-                    Self::default()
-                }
+                Ok(existing_config) => Ok(existing_config),
+                Err(e) => Err(format!(
+                    "Failed to parse config file, using default config instead. Error: {e}"
+                )),
             }
         } else {
             log::info!("Saving config to {path:?}");
@@ -336,7 +341,7 @@ impl GlyphlowConfig {
             if let Err(e) = default_config.save_config(path) {
                 log::error!("Failed to save config file. Error: {e}");
             }
-            default_config
+            Ok(default_config)
         }
     }
 
@@ -347,19 +352,17 @@ impl GlyphlowConfig {
     }
 }
 
-pub fn get_config_path() -> Option<PathBuf> {
+pub fn get_config_path() -> Result<PathBuf, String> {
     let Some(base_dir) = std::env::var("XDG_CONFIG_HOME").ok() else {
-        log::warn!(
-            "To read customized configuration file, environment variable XDG_CONFIG_HOME is required."
-        );
-        return None;
+        return Err("To read customized configuration file, environment variable XDG_CONFIG_HOME is required.".into());
     };
 
     let base_dir = PathBuf::from(base_dir).join("glyphlow");
     if !base_dir.exists() {
-        fs::create_dir_all(&base_dir).ok()?;
+        fs::create_dir_all(&base_dir)
+            .map_err(|e| format!("Failed to create config directory at {base_dir:?}: {e:?}"))?;
     }
-    Some(base_dir.join("config.toml"))
+    Ok(base_dir.join("config.toml"))
 }
 
 mod key_combo_format {

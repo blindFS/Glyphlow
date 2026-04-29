@@ -1,5 +1,5 @@
 use crate::{
-    config::GlyphlowTheme,
+    config::{GlyphlowTheme, VisibilityCheckingLevel},
     util::{Frame, HintBox, hint_boxes_from_frames, select_range_helper},
 };
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
@@ -343,6 +343,7 @@ pub fn traverse_elements(
     parent_frame: &Frame,
     cache: &mut ElementCache,
     target: &Target,
+    vis_level: VisibilityCheckingLevel,
 ) {
     if let Ok(role) = element.role() {
         // Get child elements 1 level lower
@@ -368,17 +369,20 @@ pub fn traverse_elements(
                     ..
                 }) = cache.cache.first()
             {
-                traverse_elements(&element.clone(), &frame.clone(), cache, target);
+                traverse_elements(&element.clone(), &frame.clone(), cache, target, vis_level);
             }
 
             return;
         }
 
         // If invisible, return early
-        let Some(new_frame) = element.visible_frame(parent_frame, &role) else {
+        let Some(mut new_frame) = element.visible_frame(parent_frame, &role) else {
             // element.inspect();
             return;
         };
+        if vis_level == VisibilityCheckingLevel::Loose {
+            new_frame = *parent_frame;
+        }
 
         // TODO: Fine-grained control
         #[allow(non_upper_case_globals)]
@@ -497,13 +501,7 @@ pub fn traverse_elements(
                 if *child == *element {
                     continue;
                 }
-                // TODO: more systematic way to control different levels of visibility filter
-                let frame = if *target == Target::MenuItem {
-                    *parent_frame
-                } else {
-                    new_frame
-                };
-                traverse_elements(&child, &frame, cache, target);
+                traverse_elements(&child, &new_frame, cache, target, vis_level);
             }
         }
     }

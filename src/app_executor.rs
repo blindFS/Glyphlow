@@ -9,7 +9,7 @@ use crate::{
         ElementCache, ElementOfInterest, GetAttribute, RoleOfInterest, SetAttribute, Target,
         traverse_elements,
     },
-    config::GlyphlowConfig,
+    config::{GlyphlowConfig, VisibilityCheckingLevel},
     drawer::GlyphlowDrawingLayer,
     os_util::get_focused_pid,
     util::{Frame, HintBox, estimate_frame_for_text, hint_boxes_from_frames, select_range_helper},
@@ -319,12 +319,19 @@ impl AppExecutor {
             ..
         }) = self.selected.as_ref()
         {
+            let vis_level = if target == Target::MenuItem {
+                VisibilityCheckingLevel::Loose
+            } else {
+                self.config.visibility_checking_level
+            };
+
             traverse_elements(
                 element,
                 // Very loose visibility constraint
                 &Frame::from_origion(self.screen_size),
                 &mut self.element_cache,
                 &target,
+                vis_level,
             );
         }
     }
@@ -966,8 +973,15 @@ impl AppExecutor {
                 {
                     self.update_selected_text(new_text, true);
                 } else if pb != self.temp_file {
-                    self.notify_then_deactivate("Configuration reloaded.\nKeybinding changes won't be applied until next launch.", Level::Warn);
-                    self.config = GlyphlowConfig::load_config(&Some(pb));
+                    match GlyphlowConfig::load_config(&pb) {
+                        Ok(new_config) => {
+                            self.config = new_config;
+                            self.notify_then_deactivate("Configuration reloaded.\nKeybinding changes won't be applied until next launch.", Level::Warn);
+                        }
+                        Err(msg) => {
+                            self.notify_then_deactivate(&msg, Level::Error);
+                        }
+                    };
                 }
             }
             AppSignal::ReadClipboard => {
