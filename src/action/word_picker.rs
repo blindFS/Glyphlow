@@ -135,7 +135,8 @@ impl WordPicker {
             .words
             .get(start..=end)
             .map(|w| w.iter().map(|w| w.text.clone()).collect())?;
-        Some(s.join(" "))
+
+        Some(join_strings(s.into_iter()))
     }
 
     pub fn get_attributed_string(
@@ -205,6 +206,24 @@ fn get_segment_re() -> &'static Regex {
     RE.get_or_init(|| Regex::new(SCRIPT_SEGMENT_PATTERN).unwrap())
 }
 
+fn contains_cjk(s: &str) -> bool {
+    s.chars().any(|c| matches!(c, '\u{4E00}'..='\u{9FFF}'))
+}
+
+fn join_strings(strings: impl Iterator<Item = String>) -> String {
+    let mut res = String::new();
+    let mut is_last_cjk = true;
+    for w in strings {
+        let is_this_cjk = contains_cjk(&w);
+        if !(res.is_empty() || is_last_cjk && is_this_cjk) {
+            res.push(' ');
+        }
+        res.push_str(&w);
+        is_last_cjk = is_this_cjk;
+    }
+    res
+}
+
 fn rgba_to_css_color(rgba: (u8, u8, u8, u8)) -> String {
     let (r, g, b, a) = rgba;
     format!("rgba({}, {}, {}, {:.2})", r, g, b, a as f64 / 255.0)
@@ -231,13 +250,12 @@ fn multilingual_split(input: &str) -> Vec<String> {
     let segment_re = get_segment_re();
     let mut result = Vec::new();
 
-    // Split into words, CJK words are separated
+    // Level1: split into words, CJK words are separated
     for token in input.split_whitespace() {
         if url_re.is_match(token) {
             result.push(token.to_string());
         } else {
             for mat in segment_re.find_iter(token) {
-                // hello, -> hello
                 let w = mat.as_str().to_string();
                 if !w.is_empty() {
                     result.push(w);
@@ -246,17 +264,47 @@ fn multilingual_split(input: &str) -> Vec<String> {
         }
     }
 
-    // For a single piece without spaces, split by punctuations
-    if result.len() == 1
-        && let Some(w) = result.first()
-    {
-        return w
-            .split(|c: char| c.is_ascii_punctuation())
-            .filter(|s| !s.is_empty())
-            .map(String::from)
-            .collect();
+    if result.len() > 1 {
+        return result;
     }
 
+    // Level2: for a single piece without spaces, split by punctuations
+    let Some(w) = result.first() else {
+        return Vec::new();
+    };
+
+    let result: Vec<String> = w
+        .split(|c: char| c.is_ascii_punctuation())
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect();
+
+    if result.len() > 1 {
+        return result;
+    }
+
+    // Level3: for a single piece without spaces and punctuations,
+    // Split into ascii pieces and non-ascii characters
+    let Some(w) = result.first() else {
+        return Vec::new();
+    };
+
+    let mut result: Vec<String> = Vec::new();
+    let mut buffer = String::new();
+    for c in w.chars() {
+        if c.is_ascii() {
+            buffer.push(c);
+        } else {
+            if !buffer.is_empty() {
+                result.push(buffer.clone());
+                buffer.clear();
+            }
+            result.push(c.to_string());
+        }
+    }
+    if !buffer.is_empty() {
+        result.push(buffer);
+    }
     result
 }
 
@@ -336,5 +384,61 @@ mod tests {
         let input = "Rust랑한국어";
         let expected = vec!["Rust", "랑한국어"];
         assert_eq!(multilingual_split(input), expected);
+    }
+
+    #[test]
+    fn test_cjk_into_characters() {
+        let input = "랑한국어中文";
+        let expected: Vec<_> = input.chars().map(|c| c.to_string()).collect();
+        assert_eq!(multilingual_split(input), expected);
+    }
+
+    #[test]
+    fn test_ascii_with_emojis() {
+        let input = "English😁👻";
+        let expected = vec!["English", "😁", "👻"];
+        assert_eq!(multilingual_split(input), expected);
+    }
+
+    #[test]
+    fn test_empty_and_single_elements() {
+        let empty: Vec<String> = vec![];
+        assert_eq!(join_strings(empty.into_iter()), "");
+
+        assert_eq!(join_strings(vec!["Hello".to_string()].into_iter()), "Hello");
+        assert_eq!(join_strings(vec!["世界".to_string()].into_iter()), "世界");
+
+        let empty_strs = vec!["".into(), "".into(), "".into()];
+        assert_eq!(join_strings(empty_strs.into_iter()), "");
+    }
+
+    #[test]
+    fn test_homogeneous_joining() {
+        let latin = vec!["Rust".into(), "is".into(), "fast".into()];
+        assert_eq!(join_strings(latin.into_iter()), "Rust is fast");
+
+        let cjk = vec!["你好".into(), "世界".into(), "再见".into()];
+        assert_eq!(join_strings(cjk.into_iter()), "你好世界再见");
+    }
+
+    #[test]
+    fn test_mixed_language_transitions() {
+        let eng_cjk = vec!["Hello".into(), "世界".into()];
+        assert_eq!(join_strings(eng_cjk.into_iter()), "Hello 世界");
+
+        let cjk_eng = vec!["世界".into(), "Hello".into()];
+        assert_eq!(join_strings(cjk_eng.into_iter()), "世界 Hello");
+
+        let mixed = vec![
+            "The".into(),
+            "word".into(),
+            "世界".into(),
+            "means".into(),
+            "World".into(),
+        ];
+        assert_eq!(join_strings(mixed.into_iter()), "The word 世界 means World");
+
+        let sandwich = vec!["你好".into(), "Rust".into(), "世界".into()];
+        assert_eq!(join_strings(sandwich.into_iter()), "你好 Rust 世界");
     }
 }
