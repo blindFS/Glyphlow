@@ -15,7 +15,9 @@ use crate::{
     util::{Frame, HintBox, estimate_frame_for_text, hint_boxes_from_frames, select_range_helper},
 };
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
-use accessibility_sys::{kAXErrorCannotComplete, kAXFocusedAttribute};
+use accessibility_sys::{
+    kAXErrorAttributeUnsupported, kAXErrorCannotComplete, kAXFocusedAttribute,
+};
 use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber, string::CFString};
 use log::Level;
 use objc2::rc::Retained;
@@ -420,7 +422,9 @@ impl AppExecutor {
             match e {
                 // NOTE: Sometimes this error is false alarm, usually because it takes longer
                 // than expected, we shouldn't click in this case, otherwise it is performed twice.
-                accessibility::Error::Ax(err_num) if err_num == kAXErrorCannotComplete => {}
+                accessibility::Error::Ax(err_num)
+                    if err_num == kAXErrorCannotComplete
+                        || err_num == kAXErrorAttributeUnsupported => {}
                 _ => {
                     log::info!("Simulating mouse click instead...");
                     Self::simulate_click(x, y, false);
@@ -443,7 +447,9 @@ impl AppExecutor {
             match e {
                 // NOTE: Sometimes this error is false alarm, usually because it takes longer
                 // than expected, we shouldn't click in this case, otherwise it is performed twice.
-                accessibility::Error::Ax(err_num) if err_num == kAXErrorCannotComplete => {}
+                accessibility::Error::Ax(err_num)
+                    if err_num == kAXErrorCannotComplete
+                        || err_num == kAXErrorAttributeUnsupported => {}
                 _ => {
                     log::info!("Simulating mouse click instead...");
                     Self::simulate_click(x, y, true);
