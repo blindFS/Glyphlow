@@ -6,13 +6,14 @@ use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     AXValueCreate, AXValueGetValue, AXValueRef, kAXButtonRole, kAXCellRole, kAXComboBoxRole,
     kAXDescriptionAttribute, kAXGroupRole, kAXHiddenAttribute, kAXImageRole, kAXMenuBarRole,
-    kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction, kAXScrollBarRole,
-    kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
-    kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
+    kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction, kAXRowRole,
+    kAXScrollBarRole, kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole,
+    kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
     kAXValueTypeCGPoint, kAXValueTypeCGSize, kAXWindowRole,
 };
 use core_foundation::{
-    base::{CFRange, CFType, CFTypeRef, TCFType},
+    array::CFArray,
+    base::{CFRange, CFType, CFTypeRef, FromVoid, TCFType},
     boolean::CFBoolean,
     string::CFString,
 };
@@ -181,6 +182,7 @@ pub trait GetAttribute {
     fn get_pos(&self) -> Option<CGPoint>;
     fn get_size(&self) -> Option<CGSize>;
     fn get_frame(&self) -> Option<Frame>;
+    fn get_dom_classes(&self) -> Option<Vec<String>>;
     fn inspect(&self);
     fn visible_frame(&self, parent_frame: &Frame, role: &CFString) -> Option<Frame>;
     fn is_clickable(&self) -> bool;
@@ -277,6 +279,20 @@ impl GetAttribute for AXUIElement {
         self.children()
             .ok()
             .is_some_and(|children| !children.is_empty())
+    }
+
+    fn get_dom_classes(&self) -> Option<Vec<String>> {
+        let cf_vals = self
+            .get_attribute("AXDOMClassList")?
+            .downcast::<CFArray>()?;
+
+        let mut classes: Vec<String> = Vec::new();
+        for val in cf_vals.iter() {
+            let s = unsafe { CFString::from_void(*val) };
+            classes.push(s.to_string());
+        }
+
+        Some(classes)
     }
 }
 
@@ -410,6 +426,24 @@ pub fn traverse_elements(
                     cache.add(element, None, RoleOfInterest::Cell);
                 }
             }
+            // NOTE: first found in Discord app
+            // hopefully won't cause too many false positives
+            kAXRowRole => {
+                if *target == Target::Clickable {
+                    let mut has_cell_child = false;
+                    if let Ok(children) = element.children() {
+                        for child in &children {
+                            if child.role().is_ok_and(|r| r == kAXCellRole) {
+                                has_cell_child = true;
+                                break;
+                            }
+                        }
+                    }
+                    if !has_cell_child {
+                        cache.add(element, None, RoleOfInterest::Cell);
+                    }
+                }
+            }
             kAXImageRole => match target {
                 Target::Image | Target::ImageOCR => {
                     cache.add(element, None, RoleOfInterest::Image);
@@ -494,11 +528,12 @@ pub fn traverse_elements(
                     cache.add(element, None, RoleOfInterest::ScrollBar);
                 }
             }
-            _ => {
-                if *target == Target::Clickable && element.is_clickable() {
+            _ => match target {
+                Target::Clickable if element.is_clickable() => {
                     cache.add(element, None, RoleOfInterest::Button);
                 }
-            }
+                _ => (),
+            },
         }
 
         if let Ok(children) = element.visible_children().or_else(|_| element.children()) {
