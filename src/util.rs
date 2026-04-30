@@ -251,6 +251,8 @@ pub fn select_range_helper(
         // Some margin (3px) for miscalculated frames, e.g. OCR frames
         if f.top_left.y > last_y - 3.0 {
             text.push('\n');
+        } else if !text.is_empty() && !text.ends_with(' ') && !s.starts_with(' ') {
+            text.push(' ');
         }
 
         text.push_str(s);
@@ -670,10 +672,10 @@ mod select_range_tests {
     fn test_select_multi_column_exclude_left() {
         let choices = vec![
             // Column 1
-            make_choice("Col1_L1 ", 0.0, 0.0, 50.0, 10.0, true),
+            make_choice("Col1_L1", 0.0, 0.0, 50.0, 10.0, true),
             make_choice("Col1_L2", 0.0, 15.0, 50.0, 10.0, true),
             // Column 2
-            make_choice("Col2_L1 ", 100.0, 0.0, 50.0, 10.0, true),
+            make_choice("Col2_L1", 100.0, 0.0, 50.0, 10.0, true),
             make_choice("Col2_L2", 100.0, 15.0, 50.0, 10.0, true),
         ];
 
@@ -682,14 +684,14 @@ mod select_range_tests {
         let (text, _) = select_range_helper(&choices, 2, 3).unwrap();
 
         // Should completely ignore Column 1
-        assert_eq!(text, "Col2_L1 \nCol2_L2");
+        assert_eq!(text, "Col2_L1\nCol2_L2");
     }
 
     #[test]
     fn test_reverse_selection() {
         let choices = vec![
             make_choice("Start ", 0.0, 0.0, 40.0, 10.0, true),
-            make_choice("Middle ", 45.0, 0.0, 40.0, 10.0, true),
+            make_choice("Middle", 45.0, 0.0, 40.0, 10.0, true),
             make_choice("End", 0.0, 15.0, 30.0, 10.0, true),
         ];
 
@@ -700,13 +702,13 @@ mod select_range_tests {
         // The output should be identical regardless of selection direction
         assert_eq!(text_reverse, text_forward);
         assert_eq!(frame_reverse, frame_forward);
-        assert_eq!(text_reverse, "Start Middle \nEnd");
+        assert_eq!(text_reverse, "Start Middle\nEnd");
     }
 
     #[test]
     fn test_ignores_invisible_elements() {
         let choices = vec![
-            make_choice("Keep1 ", 0.0, 0.0, 40.0, 10.0, true),
+            make_choice("Keep1", 0.0, 0.0, 40.0, 10.0, true),
             make_choice("IgnoreMe ", 45.0, 0.0, 40.0, 10.0, false), // Valid frame, but visible = false
             make_choice("Keep2", 90.0, 0.0, 30.0, 10.0, true),
         ];

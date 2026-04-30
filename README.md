@@ -41,7 +41,8 @@ Here's an example of how to select and translate the lyrics in Apple Music.
 
 #### Precise selection
 
-If you want to select a specific piece of text in an identified element, you can
+If you want to select a specific sub-piece of text in an identified element,
+you can
 
 1. Split the whole context into pieces, the interface of word picker will pop up
 2. Toggle multi-selection mode on within the word picker
@@ -60,7 +61,7 @@ If you want to select a specific piece of text in an identified element, you can
 <img width="363" height="316" alt="Image" src="https://github.com/user-attachments/assets/5d89c973-c043-4ba9-a760-727e81fc5c96" />
 
 - Easily extensible text actions, please refer to the [Configuration](#configuration) section
-  - Avoids the hassle of plugin management
+  - Avoids the hassle of plugin management, easier to share across devices
 - Act on text from clipboard
 - Customizable theme
 
@@ -122,8 +123,10 @@ args = ["-c", "r#'{glyphlow_text}'# | url encode | ^open $'https://translate.goo
 [editor]
 display = " Editor"
 key = 'V'
-command = "tmux"
-args = ["new-window", "-t", "dev", "^open -a Ghostty; ^nvim {glyphlow_temp_file}"]
+# command = "tmux"
+# args = ["new-window", "-t", "dev", "^open -a Ghostty; ^nvim {glyphlow_temp_file}"]
+command = "open"
+args = ["-a", "Zed", "{glyphlow_temp_file}"]
 
 [theme]
 hint_font = "AndaleMono:16"
