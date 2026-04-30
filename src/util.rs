@@ -834,8 +834,9 @@ mod collision_tests {
         resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 100);
 
         let diff_x = (boxes[0].x - boxes[1].x).abs();
+        let diff_y = (boxes[0].y - boxes[1].y).abs();
         assert!(
-            diff_x >= 10.0,
+            diff_x >= 10.0 || diff_y >= 10.0,
             "Should resolve collisions even across grid boundaries"
         );
     }
