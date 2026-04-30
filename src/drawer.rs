@@ -188,7 +188,7 @@ impl GlyphlowDrawingLayer for CALayer {
                 NSSize::new(tri_width, tri_height),
             ));
 
-            box_layer.addSublayer(&tri_layer);
+            box_layer.insertSublayer_atIndex(&tri_layer, 0);
             self.addSublayer(&box_layer);
         }
     }
