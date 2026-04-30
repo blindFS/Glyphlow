@@ -311,8 +311,8 @@ pub fn hint_boxes_from_frames(
 
     // Estimate box size
     let x_thres =
-        theme.hint_font.pointSize() * digits as f64 * 0.6 + 2.0 * theme.hint_margin_size as f64;
-    let y_thres = theme.hint_font.pointSize() * 1.2 + 2.0 * theme.hint_margin_size as f64;
+        theme.hint_font.pointSize() * digits as f64 * 0.8 + 2.0 * theme.hint_margin_size as f64;
+    let y_thres = theme.hint_font.pointSize() * 1.5 + 2.0 * theme.hint_margin_size as f64;
     resolve_collisions_reactive(&mut boxes, x_thres, y_thres, MAX_COLLISION_OPS);
 
     (digits, boxes)
@@ -349,6 +349,7 @@ pub fn resolve_collisions_reactive(
     while let Some(i) = queue.pop_front() {
         in_queue[i] = false;
         ops_count += 1;
+        // Initial checking for each element doesn't count
         if ops_count > max_ops + boxes.len() {
             break;
         }
@@ -377,7 +378,13 @@ pub fn resolve_collisions_reactive(
                         // Collision found! Resolve it.
                         let (shift_x, shift_y) = (x_thres - abs_dx, y_thres - abs_dy);
 
-                        if shift_x < shift_y {
+                        // Move in a less crowded direction
+                        let x_m_count = grid.get(&(cx - 1, cy)).map(|v| v.len()).unwrap_or(0);
+                        let x_p_count = grid.get(&(cx + 1, cy)).map(|v| v.len()).unwrap_or(0);
+                        let y_m_count = grid.get(&(cx, cy - 1)).map(|v| v.len()).unwrap_or(0);
+                        let y_p_count = grid.get(&(cx, cy + 1)).map(|v| v.len()).unwrap_or(0);
+
+                        if x_m_count + x_p_count <= y_m_count + y_p_count {
                             let move_dist =
                                 (shift_x / 2.0) * (if diff_x >= 0.0 { 1.0 } else { -1.0 });
                             boxes[i].x += move_dist;
@@ -827,8 +834,9 @@ mod collision_tests {
         resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 100);
 
         let diff_x = (boxes[0].x - boxes[1].x).abs();
+        let diff_y = (boxes[0].y - boxes[1].y).abs();
         assert!(
-            diff_x >= 10.0,
+            diff_x >= 10.0 || diff_y >= 10.0,
             "Should resolve collisions even across grid boundaries"
         );
     }
