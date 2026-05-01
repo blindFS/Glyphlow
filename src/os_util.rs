@@ -7,12 +7,13 @@ use core_foundation::{
 use objc2::rc::Retained;
 use objc2_app_kit::{NSRunningApplication, NSWorkspace};
 
-const ELECTRON_FRAMEWORKS: [&str; 5] = [
+const ELECTRON_FRAMEWORKS: [&str; 6] = [
     "Electron Framework.framework", // Standard Electron (VS Code, Slack, Discord)
     "Google Chrome Framework.framework", // Google Chrome
     "Chromium Framework.framework", // Unbranded Chromium
     "Microsoft Edge Framework.framework", // Microsoft Edge
     "Brave Framework.framework",    // Brave Browser
+    "libAvaloniaNative.dylib",      // HACK: Avalonia
 ];
 
 fn check_is_electron_app(app: &Retained<NSRunningApplication>) -> Option<bool> {

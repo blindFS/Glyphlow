@@ -442,7 +442,9 @@ impl AppExecutor {
     fn right_click_menu_on_element(&self, element: &AXUIElement, center: (f64, f64)) {
         let (x, y) = center;
 
-        if let Err(e) = element.show_menu() {
+        if self.is_electron {
+            Self::simulate_click(x, y, true);
+        } else if let Err(e) = element.show_menu() {
             log::warn!("Failed to show menu on element: {e}");
             match e {
                 // NOTE: Sometimes this error is false alarm, usually because it takes longer
