@@ -211,7 +211,7 @@ impl KeyListener {
             |key_signals: &HashMap<char, AppSignal>, mut state: MutexGuard<'_, Mode>| -> bool {
                 if let Some(signal) = key_signals.get(&key_char) {
                     self.send(signal.clone());
-                } else {
+                } else if key_char == ' ' {
                     self.send(AppSignal::DeActivate);
                     *state = Mode::Idle;
                 }
