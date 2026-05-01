@@ -18,7 +18,7 @@ Like those in a video game or in a button.
 
 Text can be extracted from either UI elements or Apple VisionKit OCR results
 
-<https://github.com/user-attachments/assets/9a75dd87-a61a-4e8c-9bee-41dcb59c285f>
+<https://github.com/user-attachments/assets/7955f04a-2d4d-4f58-ac66-26677904e0c7>
 
 ### Image Copying and Input Text Editing
 
