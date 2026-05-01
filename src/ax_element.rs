@@ -4,15 +4,16 @@ use crate::{
 };
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
-    AXValueCreate, AXValueGetValue, AXValueRef, kAXButtonRole, kAXCellRole, kAXComboBoxRole,
-    kAXDescriptionAttribute, kAXGroupRole, kAXHiddenAttribute, kAXImageRole, kAXMenuBarRole,
-    kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction, kAXRowRole,
+    AXUIElementCopyMultipleAttributeValues, AXValueCreate, AXValueGetValue, AXValueRef,
+    kAXButtonRole, kAXCellRole, kAXComboBoxRole, kAXDescriptionAttribute, kAXErrorSuccess,
+    kAXGroupRole, kAXHiddenAttribute, kAXImageRole, kAXMenuBarRole, kAXMenuItemRole,
+    kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction, kAXRoleAttribute, kAXRowRole,
     kAXScrollBarRole, kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole,
     kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
     kAXValueTypeCGPoint, kAXValueTypeCGSize, kAXWindowRole,
 };
 use core_foundation::{
-    array::CFArray,
+    array::{CFArray, CFArrayRef},
     base::{CFRange, CFType, CFTypeRef, FromVoid, TCFType},
     boolean::CFBoolean,
     string::CFString,
@@ -30,6 +31,101 @@ pub enum RoleOfInterest {
     StaticText,
     TextField,
     Cell,
+}
+
+const BASIC_ATTRIBUTES: [&str; 4] = [
+    kAXRoleAttribute,
+    kAXPositionAttribute,
+    kAXSizeAttribute,
+    kAXHiddenAttribute,
+];
+
+struct ElementBasicAttributes {
+    pub frame: Option<Frame>,
+    pub hidden: bool,
+    pub role: String,
+}
+
+impl ElementBasicAttributes {
+    fn visible_frame(&self, parent_frame: &Frame) -> Option<Frame> {
+        // NOTE: scroll bar positioning depends on its value
+        if self.role == kAXScrollBarRole {
+            return Some(*parent_frame);
+        }
+
+        if self.hidden {
+            return None;
+        }
+
+        // TODO: handle edge cases according to role
+        // e.g. popup menu
+        if let Some(this_frame) = self.frame
+            // HACK: For some apps, like Finder, it may return false empty frames
+            && this_frame.size() != (0.0, 0.0)
+        {
+            // TODO: For some fully visible structure of A -> B -> C,
+            // somehow the intersection of either A and B or B and C is not empty,
+            // but the intersection of all those 3 is empty.
+            // An extra mode that dives elements 1 level at a time, instead of flattening them all at once
+            // TODO: trade-off among false-positive, false-negative and performance
+            this_frame.intersect(parent_frame)
+        } else {
+            Some(*parent_frame)
+        }
+    }
+
+    fn from(element: &AXUIElement) -> Option<Self> {
+        let cf_attributes: Vec<CFString> =
+            BASIC_ATTRIBUTES.iter().map(|&s| CFString::new(s)).collect();
+        let cf_array_in = CFArray::from_CFTypes(&cf_attributes);
+
+        let mut values_ref: CFArrayRef = std::ptr::null();
+        let err = unsafe {
+            AXUIElementCopyMultipleAttributeValues(
+                element.as_concrete_TypeRef(),
+                cf_array_in.as_concrete_TypeRef(),
+                // Don't stop on error
+                0,
+                &mut values_ref,
+            )
+        };
+
+        if err != kAXErrorSuccess || values_ref.is_null() {
+            None
+        } else {
+            let values_array: CFArray<CFType> =
+                unsafe { CFArray::wrap_under_create_rule(values_ref) };
+            let values = values_array.get_all_values();
+
+            let role_cf = values_array.get(0).and_then(|v| v.downcast::<CFString>())?;
+            let role = role_cf.to_string();
+
+            let pos = values
+                .get(1)
+                .and_then(|pos_ptr| cftype_to_rust_type::<CGPoint>(*pos_ptr, kAXValueTypeCGPoint));
+
+            let size = values
+                .get(2)
+                .and_then(|size_ptr| cftype_to_rust_type::<CGSize>(*size_ptr, kAXValueTypeCGSize));
+
+            let frame = match (pos, size) {
+                (Some(p), Some(s)) => Some(Frame::new(p.x, p.y, p.x + s.width, p.y + s.height)),
+                _ => None,
+            };
+
+            let hidden = values_array
+                .get(3)
+                .and_then(|v| v.downcast::<CFBoolean>())
+                .map(bool::from)
+                .unwrap_or_default();
+
+            Some(Self {
+                role,
+                frame,
+                hidden,
+            })
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -91,10 +187,16 @@ impl ElementCache {
         self.seen_center.clear();
     }
 
-    pub fn add(&mut self, element: &AXUIElement, context: Option<String>, role: RoleOfInterest) {
+    pub fn add(
+        &mut self,
+        element: &AXUIElement,
+        context: Option<String>,
+        role: RoleOfInterest,
+        frame: Option<Frame>,
+    ) {
         // Has to be concrete leaf elements with frames
         // TODO: false negatives in some apps, e.g. chrome
-        let Some(frame) = element.get_frame() else {
+        let Some(frame) = frame else {
             return;
         };
 
@@ -179,12 +281,8 @@ impl ElementCache {
 pub trait GetAttribute {
     fn get_attribute(&self, attribute_name: &str) -> Option<CFType>;
     fn get_attribute_string(&self, attribute_name: &str) -> Option<String>;
-    fn get_pos(&self) -> Option<CGPoint>;
-    fn get_size(&self) -> Option<CGSize>;
-    fn get_frame(&self) -> Option<Frame>;
     fn get_dom_classes(&self) -> Option<Vec<String>>;
     fn inspect(&self);
-    fn visible_frame(&self, parent_frame: &Frame, role: &CFString) -> Option<Frame>;
     fn is_clickable(&self) -> bool;
     fn has_children(&self) -> bool;
 }
@@ -201,28 +299,6 @@ impl GetAttribute for AXUIElement {
             .map(|cf| cf.to_string())
     }
 
-    fn get_pos(&self) -> Option<CGPoint> {
-        let pos_cf = self.get_attribute(kAXPositionAttribute)?;
-        cftype_to_rust_type::<CGPoint>(&pos_cf, kAXValueTypeCGPoint)
-    }
-
-    fn get_size(&self) -> Option<CGSize> {
-        let size_cf = self.get_attribute(kAXSizeAttribute)?;
-        cftype_to_rust_type::<CGSize>(&size_cf, kAXValueTypeCGSize)
-    }
-
-    fn get_frame(&self) -> Option<Frame> {
-        let pos = self.get_pos()?;
-        let size = self.get_size()?;
-
-        Some(Frame::new(
-            pos.x,
-            pos.y,
-            pos.x + size.width,
-            pos.y + size.height,
-        ))
-    }
-
     fn inspect(&self) {
         let role = self.role();
         println!("{role:?} ==== {:?}", self.action_names());
@@ -231,39 +307,6 @@ impl GetAttribute for AXUIElement {
                 "{role:?} - {attr:?} - {:?}",
                 self.get_attribute(attr.to_string().as_str()),
             );
-        }
-    }
-
-    fn visible_frame(&self, parent_frame: &Frame, role: &CFString) -> Option<Frame> {
-        // NOTE: scroll bar positioning depends on its value
-        if *role == kAXScrollBarRole {
-            return Some(*parent_frame);
-        }
-
-        let is_hidden = self
-            .get_attribute(kAXHiddenAttribute)
-            .and_then(|val| val.downcast::<CFBoolean>())
-            .map(bool::from)
-            .unwrap_or(false);
-
-        if is_hidden {
-            return None;
-        }
-
-        // TODO: handle edge cases according to role
-        // e.g. popup menu
-        if let Some(this_frame) = self.get_frame()
-            // HACK: For some apps, like Finder, it may return false empty frames
-            && this_frame.size() != (0.0, 0.0)
-        {
-            // TODO: For some fully visible structure of A -> B -> C,
-            // somehow the intersection of either A and B or B and C is not empty,
-            // but the intersection of all those 3 is empty.
-            // An extra mode that dives elements 1 level at a time, instead of flattening them all at once
-            // TODO: trade-off among false-positive, false-negative and performance
-            this_frame.intersect(parent_frame)
-        } else {
-            Some(*parent_frame)
         }
     }
 
@@ -318,9 +361,13 @@ impl SetAttribute for AXUIElement {
 }
 
 /// A safe helper to extract C-structs from an AXValue stored inside a CFType.
-fn cftype_to_rust_type<T: Default>(cf_type: &CFType, value_type: u32) -> Option<T> {
+fn cftype_to_rust_type<T: Default>(cf_type: CFTypeRef, value_type: u32) -> Option<T> {
+    if cf_type.is_null() {
+        return None;
+    }
+
     unsafe {
-        let value_ref = cf_type.as_CFTypeRef() as AXValueRef;
+        let value_ref = cf_type as AXValueRef;
         let mut result = T::default();
 
         AXValueGetValue(value_ref, value_type, &mut result as *mut T as *mut _).then_some(result)
@@ -361,189 +408,208 @@ pub fn traverse_elements(
     target: &Target,
     vis_level: VisibilityCheckingLevel,
 ) {
-    if let Ok(role) = element.role() {
-        // Get child elements 1 level lower
-        // for false negatives aggressively filtered by the visibility checker
-        if *target == Target::ChildElement {
-            cache.clear();
-            if let Ok(children) = element.visible_children().or_else(|_| element.children()) {
-                for child in &children {
-                    // NOTE: Some apps, like App Store, have circular referencing
-                    if *child == *element {
-                        continue;
-                    }
-                    if child.visible_frame(parent_frame, &role).is_some() {
-                        cache.add(&child, None, RoleOfInterest::GenericNode);
-                    }
-                }
-            }
-            // Skip element levels where only 1 item available
-            if cache.cache.len() == 1
-                && let Some(ElementOfInterest {
-                    element: Some(element),
-                    frame,
-                    ..
-                }) = cache.cache.first()
-            {
-                traverse_elements(&element.clone(), &frame.clone(), cache, target, vis_level);
-            }
+    let Some(ele_fp) = ElementBasicAttributes::from(element) else {
+        return;
+    };
 
-            return;
-        }
-
-        // If invisible, return early
-        let Some(mut new_frame) = element.visible_frame(parent_frame, &role) else {
-            // element.inspect();
-            return;
-        };
-        if vis_level == VisibilityCheckingLevel::Loose {
-            new_frame = *parent_frame;
-        }
-
-        // TODO: Fine-grained control
-        #[allow(non_upper_case_globals)]
-        match role.to_string().as_str() {
-            // TODO: DOM Class List based image searching for icon button
-            kAXPopUpButtonRole | kAXButtonRole | "AXRadioButton" => match target {
-                Target::Clickable => {
-                    cache.add(element, None, RoleOfInterest::Button);
-                }
-                Target::Text => {
-                    if let Some(ctx) = element
-                        .label_value()
-                        .ok()
-                        .or_else(|| element.title().ok())
-                        .or_else(|| element.description().ok())
-                        .map(|cf| cf.to_string())
-                    {
-                        cache.add(element, Some(ctx), RoleOfInterest::Button);
-                    }
-                }
-                _ => (),
-            },
-            kAXCellRole => {
-                if *target == Target::Clickable {
-                    cache.add(element, None, RoleOfInterest::Cell);
-                }
-            }
-            // NOTE: first found in Discord app
-            // hopefully won't cause too many false positives
-            kAXRowRole => {
-                if *target == Target::Clickable {
-                    let mut has_cell_child = false;
-                    if let Ok(children) = element.children() {
-                        for child in &children {
-                            if child.role().is_ok_and(|r| r == kAXCellRole) {
-                                has_cell_child = true;
-                                break;
-                            }
-                        }
-                    }
-                    if !has_cell_child {
-                        cache.add(element, None, RoleOfInterest::Cell);
-                    }
-                }
-            }
-            kAXImageRole => match target {
-                Target::Image | Target::ImageOCR => {
-                    cache.add(element, None, RoleOfInterest::Image);
-                }
-                Target::Clickable if element.is_clickable() => {
-                    cache.add(element, None, RoleOfInterest::Button);
-                }
-                _ => (),
-            },
-            kAXStaticTextRole => match target {
-                Target::Clickable if element.is_clickable() => {
-                    cache.add(element, None, RoleOfInterest::Button);
-                }
-                Target::Text => {
-                    if let Some(value) = element
-                        .get_attribute_string(kAXValueAttribute)
-                        .or_else(|| element.get_attribute_string(kAXDescriptionAttribute))
-                    {
-                        cache.add(element, Some(value), RoleOfInterest::StaticText);
-                    }
-                }
-                _ => (),
-            },
-            kAXWindowRole => {
-                // NOTE: For AXApplication the frame is usually None, defaults to full screen.
-                // Need to narrow down to window frame at this place.
-                if let Some(win_frame) = element.get_frame() {
-                    new_frame = win_frame;
-                };
-            }
-            kAXComboBoxRole | kAXTextFieldRole | kAXTextAreaRole => match target {
-                Target::Editable => {
-                    cache.add(
-                        element,
-                        element.get_attribute_string(kAXValueAttribute),
-                        RoleOfInterest::TextField,
-                    );
-                }
-                Target::Text => {
-                    if let Some(value) = element.get_attribute_string(kAXValueAttribute) {
-                        cache.add(element, Some(value), RoleOfInterest::StaticText);
-                    }
-                }
-                // NOTE: Even if not clickable, still could be focused on click
-                Target::Clickable => {
-                    cache.add(element, None, RoleOfInterest::TextField);
-                }
-                _ => (),
-            },
-            kAXMenuBarRole => {
-                // NOTE: Exclude system menu bar items
-                if let Some(CGPoint { x, y }) = element.get_pos()
-                    && x == 0.0
-                    && y == 0.0
-                {
-                    return;
-                }
-            }
-            kAXGroupRole => match target {
-                Target::Clickable if element.is_clickable() => {
-                    cache.add(element, None, RoleOfInterest::Button);
-                }
-                // NOTE: Potential texts in leaf AXGroup
-                Target::ImageOCR if !element.has_children() => {
-                    cache.add(element, None, RoleOfInterest::Image);
-                }
-                _ => (),
-            },
-            kAXMenuItemRole => match target {
-                Target::Text => {
-                    if let Some(title) = element.get_attribute_string(kAXTitleAttribute) {
-                        cache.add(element, Some(title), RoleOfInterest::MenuItem);
-                    }
-                }
-                Target::MenuItem | Target::Clickable => {
-                    cache.add(element, None, RoleOfInterest::MenuItem);
-                }
-                _ => (),
-            },
-            kAXScrollBarRole => {
-                if *target == Target::ScrollBar {
-                    cache.add(element, None, RoleOfInterest::ScrollBar);
-                }
-            }
-            _ => match target {
-                Target::Clickable if element.is_clickable() => {
-                    cache.add(element, None, RoleOfInterest::Button);
-                }
-                _ => (),
-            },
-        }
-
+    // Get child elements 1 level lower
+    // for false negatives aggressively filtered by the visibility checker
+    if *target == Target::ChildElement {
+        cache.clear();
         if let Ok(children) = element.visible_children().or_else(|_| element.children()) {
             for child in &children {
                 // NOTE: Some apps, like App Store, have circular referencing
                 if *child == *element {
                     continue;
                 }
-                traverse_elements(&child, &new_frame, cache, target, vis_level);
+                if ElementBasicAttributes::from(&child)
+                    .and_then(|fp| fp.visible_frame(parent_frame))
+                    .is_some()
+                {
+                    cache.add(&child, None, RoleOfInterest::GenericNode, ele_fp.frame);
+                }
             }
+        }
+        // Skip element levels where only 1 item available
+        if cache.cache.len() == 1
+            && let Some(ElementOfInterest {
+                element: Some(element),
+                frame,
+                ..
+            }) = cache.cache.first()
+        {
+            traverse_elements(&element.clone(), &frame.clone(), cache, target, vis_level);
+        }
+
+        return;
+    }
+
+    // If invisible, return early
+    let Some(mut new_frame) = ele_fp.visible_frame(parent_frame) else {
+        // element.inspect();
+        return;
+    };
+    if vis_level == VisibilityCheckingLevel::Loose {
+        new_frame = *parent_frame;
+    }
+
+    // TODO: Fine-grained control
+    #[allow(non_upper_case_globals)]
+    match ele_fp.role.as_str() {
+        // TODO: DOM Class List based image searching for icon button
+        kAXPopUpButtonRole | kAXButtonRole | "AXRadioButton" => match target {
+            Target::Clickable => {
+                cache.add(element, None, RoleOfInterest::Button, ele_fp.frame);
+            }
+            Target::Text => {
+                if let Some(ctx) = element
+                    .label_value()
+                    .ok()
+                    .or_else(|| element.title().ok())
+                    .or_else(|| element.description().ok())
+                    .map(|cf| cf.to_string())
+                {
+                    cache.add(element, Some(ctx), RoleOfInterest::Button, ele_fp.frame);
+                }
+            }
+            _ => (),
+        },
+        kAXCellRole => {
+            if *target == Target::Clickable {
+                cache.add(element, None, RoleOfInterest::Cell, ele_fp.frame);
+            }
+        }
+        // NOTE: first found in Discord app
+        // hopefully won't cause too many false positives
+        kAXRowRole => {
+            if *target == Target::Clickable {
+                let mut has_cell_child = false;
+                if let Ok(children) = element.children() {
+                    for child in &children {
+                        if child.role().is_ok_and(|r| r == kAXCellRole) {
+                            has_cell_child = true;
+                            break;
+                        }
+                    }
+                }
+                if !has_cell_child {
+                    cache.add(element, None, RoleOfInterest::Cell, ele_fp.frame);
+                }
+            }
+        }
+        kAXImageRole => match target {
+            Target::Image | Target::ImageOCR => {
+                cache.add(element, None, RoleOfInterest::Image, ele_fp.frame);
+            }
+            Target::Clickable if element.is_clickable() => {
+                cache.add(element, None, RoleOfInterest::Button, ele_fp.frame);
+            }
+            _ => (),
+        },
+        kAXStaticTextRole => match target {
+            Target::Clickable if element.is_clickable() => {
+                cache.add(element, None, RoleOfInterest::Button, ele_fp.frame);
+            }
+            Target::Text => {
+                if let Some(value) = element
+                    .get_attribute_string(kAXValueAttribute)
+                    .or_else(|| element.get_attribute_string(kAXDescriptionAttribute))
+                {
+                    cache.add(
+                        element,
+                        Some(value),
+                        RoleOfInterest::StaticText,
+                        ele_fp.frame,
+                    );
+                }
+            }
+            _ => (),
+        },
+        kAXWindowRole => {
+            // NOTE: For AXApplication the frame is usually None, defaults to full screen.
+            // Need to narrow down to window frame at this place.
+            if let Some(win_frame) = ele_fp.frame {
+                new_frame = win_frame;
+            };
+        }
+        kAXComboBoxRole | kAXTextFieldRole | kAXTextAreaRole => match target {
+            Target::Editable => {
+                cache.add(
+                    element,
+                    element.get_attribute_string(kAXValueAttribute),
+                    RoleOfInterest::TextField,
+                    ele_fp.frame,
+                );
+            }
+            Target::Text => {
+                if let Some(value) = element.get_attribute_string(kAXValueAttribute) {
+                    cache.add(
+                        element,
+                        Some(value),
+                        RoleOfInterest::StaticText,
+                        ele_fp.frame,
+                    );
+                }
+            }
+            // NOTE: Even if not clickable, still could be focused on click
+            Target::Clickable => {
+                cache.add(element, None, RoleOfInterest::TextField, ele_fp.frame);
+            }
+            _ => (),
+        },
+        kAXMenuBarRole => {
+            // NOTE: Exclude system menu bar items
+            if let Some(Frame {
+                top_left: CGPoint { x, y },
+                ..
+            }) = ele_fp.frame
+                && x == 0.0
+                && y == 0.0
+            {
+                return;
+            }
+        }
+        kAXGroupRole => match target {
+            Target::Clickable if element.is_clickable() => {
+                cache.add(element, None, RoleOfInterest::Button, ele_fp.frame);
+            }
+            // NOTE: Potential texts in leaf AXGroup
+            Target::ImageOCR if !element.has_children() => {
+                cache.add(element, None, RoleOfInterest::Image, ele_fp.frame);
+            }
+            _ => (),
+        },
+        kAXMenuItemRole => match target {
+            Target::Text => {
+                if let Some(title) = element.get_attribute_string(kAXTitleAttribute) {
+                    cache.add(element, Some(title), RoleOfInterest::MenuItem, ele_fp.frame);
+                }
+            }
+            Target::MenuItem | Target::Clickable => {
+                cache.add(element, None, RoleOfInterest::MenuItem, ele_fp.frame);
+            }
+            _ => (),
+        },
+        kAXScrollBarRole => {
+            if *target == Target::ScrollBar {
+                cache.add(element, None, RoleOfInterest::ScrollBar, ele_fp.frame);
+            }
+        }
+        _ => match target {
+            Target::Clickable if element.is_clickable() => {
+                cache.add(element, None, RoleOfInterest::Button, ele_fp.frame);
+            }
+            _ => (),
+        },
+    }
+
+    if let Ok(children) = element.visible_children().or_else(|_| element.children()) {
+        for child in &children {
+            // NOTE: Some apps, like App Store, have circular referencing
+            if *child == *element {
+                continue;
+            }
+            traverse_elements(&child, &new_frame, cache, target, vis_level);
         }
     }
 }
