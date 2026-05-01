@@ -422,11 +422,10 @@ pub fn traverse_elements(
                 if *child == *element {
                     continue;
                 }
-                if ElementBasicAttributes::from(&child)
-                    .and_then(|fp| fp.visible_frame(parent_frame))
-                    .is_some()
+                if let Some(child_fp) = ElementBasicAttributes::from(&child)
+                    && child_fp.visible_frame(parent_frame).is_some()
                 {
-                    cache.add(&child, None, RoleOfInterest::GenericNode, ele_fp.frame);
+                    cache.add(&child, None, RoleOfInterest::GenericNode, child_fp.frame);
                 }
             }
         }
