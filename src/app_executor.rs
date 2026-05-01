@@ -6,8 +6,7 @@ use crate::{
         text_from_clipboard, text_to_clipboard,
     },
     ax_element::{
-        ElementCache, ElementOfInterest, GetAttribute, RoleOfInterest, SetAttribute, Target,
-        traverse_elements,
+        ElementCache, ElementOfInterest, RoleOfInterest, SetAttribute, Target, traverse_elements,
     },
     config::{GlyphlowConfig, VisibilityCheckingLevel},
     drawer::GlyphlowDrawingLayer,
@@ -290,9 +289,7 @@ impl AppExecutor {
         self.is_electron = is_electron;
 
         let focused_window = AXUIElement::application(pid);
-        let window_frame = focused_window
-            .get_frame()
-            .unwrap_or_else(|| Frame::from_origion(self.screen_size));
+        let window_frame = Frame::from_origion(self.screen_size);
 
         self.selected = Some(ElementOfInterest::new(
             Some(focused_window),
