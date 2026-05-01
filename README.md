@@ -67,12 +67,17 @@ you can
 
 ## Installation
 
-At this pre-alpha stage, you can try this app by:
+### Homebrew
 
-1. Download the latest version from the [releases page](https://github.com/blindFS/Glyphlow/releases).
-2. Extract it and strip the quarantine information: `xattr -c glyphlow`
-3. Run `glyphlow` in a terminal, and grant the accessibility permission
-to your terminal app when prompted at the first time.
+1. Install with brew tap and start the service
+
+```bash
+brew tap blindfs/tools
+brew install glyphlow
+brew services start glyphlow
+```
+
+2. Grant accessibility permission to it
 
 ## Purging
 
@@ -135,5 +140,5 @@ menu_font = "IosevkaTerm Nerd Font Mono:26"
 
 ## Roadmap
 
-1. [ ] nix-flake/homebrew-tap, and make it a user service
+1. [ ] nix-flake
 2. [ ] menu bar icon
