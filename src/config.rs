@@ -414,7 +414,11 @@ mod cgcolor_format {
                 "Failed to convert color {color:?} to hex string.",
             ));
         };
-        let s = format!("#{:02x}{:02x}{:02x}{:02x}", r, g, b, a);
+        let s = if a == 255 {
+            format!("#{:02x}{:02x}{:02x}", r, g, b)
+        } else {
+            format!("#{:02x}{:02x}{:02x}{:02x}", r, g, b, a)
+        };
         serializer.serialize_str(&s)
     }
 
@@ -548,7 +552,7 @@ mod tests {
         let toml_str = toml::to_string(&theme).expect("Should serialize theme");
 
         // Ensure our custom color string is present in the TOML
-        assert!(toml_str.contains("#aabbccff"));
+        assert!(toml_str.contains("#aabbcc"));
 
         let decoded: GlyphlowTheme = toml::from_str(&toml_str).expect("Should deserialize theme");
 
