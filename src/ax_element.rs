@@ -520,11 +520,10 @@ pub fn traverse_elements(
                 cache.add(element, None, RoleOfInterest::Button, ele_fp.frame);
             }
             Target::Text => {
-                if let Some(ctx) = element
+                if let Ok(ctx) = element
                     .label_value()
-                    .ok()
-                    .or_else(|| element.title().ok())
-                    .or_else(|| element.description().ok())
+                    .or_else(|_| element.title())
+                    .or_else(|_| element.description())
                     .map(|cf| cf.to_string())
                 {
                     cache.add(element, Some(ctx), RoleOfInterest::Button, ele_fp.frame);

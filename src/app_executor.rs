@@ -306,8 +306,14 @@ impl AppExecutor {
         }
         self.last_pid = pid;
 
-        let focused_window = focused_app.focused_window().ok().unwrap_or(focused_app);
-        let window_frame = focused_window.get_frame().unwrap_or(screen_frame);
+        // HACK: some electron apps put right click pop-up menus in different windows
+        let (focused_window, window_frame) = if is_electron && self.target == Target::MenuItem {
+            (focused_app, screen_frame)
+        } else {
+            let window = focused_app.focused_window().unwrap_or(focused_app);
+            let frame = window.get_frame().unwrap_or(screen_frame);
+            (window, frame)
+        };
 
         self.selected = Some(ElementOfInterest::new(
             Some(focused_window),
