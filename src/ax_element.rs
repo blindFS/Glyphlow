@@ -28,7 +28,6 @@ pub enum RoleOfInterest {
     Image,
     MenuItem,
     ScrollBar,
-    ScrollArea,
     StaticText,
     TextField,
     Cell,
@@ -217,10 +216,8 @@ impl ElementCache {
         let (w, h) = frame.size();
         match role {
             // NOTE: some roles to keep
-            RoleOfInterest::GenericNode
-            | RoleOfInterest::ScrollBar
-            | RoleOfInterest::ScrollArea
-            | RoleOfInterest::TextField => {}
+            RoleOfInterest::GenericNode | RoleOfInterest::ScrollBar | RoleOfInterest::TextField => {
+            }
             RoleOfInterest::Image if w.min(h) < self.image_min_size => {
                 return;
             }

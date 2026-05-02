@@ -359,6 +359,16 @@ impl AppExecutor {
         if !self.element_cache.cache.is_empty() {
             self.draw_hints_from_cache();
             self.set_mode(Mode::Filtering);
+        } else if self.target == Target::Scrollable
+            && let Some(eoi) = self.selected.as_ref()
+        {
+            // Fallback to mouse scroll
+            let (x, y) = eoi.frame.center();
+            Self::simulate_event(&EventType::MouseMove { x, y });
+            self.clear_drawing();
+            self.clear_cache();
+            self.draw_scroll_bar_menu();
+            self.set_mode(Mode::Scrolling);
         } else {
             self.clear_drawing();
             self.notify_then_deactivate("No relevant UI elements found.", Level::Warn);
@@ -848,37 +858,61 @@ impl AppExecutor {
             AppSignal::ScrollAction(sa) => {
                 let Some(ElementOfInterest {
                     element: Some(element),
+                    role,
+                    frame,
                     ..
                 }) = self.selected.as_ref()
                 else {
-                    panic!(
-                        "A scrollbar is supposed to be selected before entering Mode::Scrolling!"
-                    )
+                    panic!("An element is supposed to be selected before entering Mode::Scrolling!")
                 };
 
-                let Some(old_val) = element
-                    .value()
-                    .ok()
-                    .and_then(|v| v.downcast::<CFNumber>())
-                    .and_then(|f| f.to_f64())
-                else {
-                    self.deactivate();
-                    return;
-                };
+                if *role == RoleOfInterest::ScrollBar {
+                    let Some(old_val) = element
+                        .value()
+                        .ok()
+                        .and_then(|v| v.downcast::<CFNumber>())
+                        .and_then(|f| f.to_f64())
+                    else {
+                        self.deactivate();
+                        return;
+                    };
 
-                let scroll_unit = self.config.scroll_distance;
-                match sa {
-                    ScrollAction::DownRight => {
-                        Self::scroll_to_value(element, old_val + scroll_unit);
+                    let scroll_unit = self.config.scroll_distance;
+                    match sa {
+                        ScrollAction::DownRight => {
+                            Self::scroll_to_value(element, old_val + scroll_unit);
+                        }
+                        ScrollAction::UpLeft => {
+                            Self::scroll_to_value(element, old_val - scroll_unit);
+                        }
+                        ScrollAction::IncreaseDistance => {
+                            self.config.scroll_distance *= 1.5;
+                        }
+                        ScrollAction::DecreaseDistance => {
+                            self.config.scroll_distance /= 1.5;
+                        }
                     }
-                    ScrollAction::UpLeft => {
-                        Self::scroll_to_value(element, old_val - scroll_unit);
-                    }
-                    ScrollAction::IncreaseDistance => {
-                        self.config.scroll_distance *= 1.5;
-                    }
-                    ScrollAction::DecreaseDistance => {
-                        self.config.scroll_distance /= 1.5;
+                } else {
+                    let distance = (frame.size().1 * self.config.scroll_distance).max(1.0) as i64;
+                    match sa {
+                        ScrollAction::DownRight => {
+                            Self::simulate_event(&EventType::Wheel {
+                                delta_x: distance,
+                                delta_y: -distance,
+                            });
+                        }
+                        ScrollAction::UpLeft => {
+                            Self::simulate_event(&EventType::Wheel {
+                                delta_x: -distance,
+                                delta_y: distance,
+                            });
+                        }
+                        ScrollAction::IncreaseDistance => {
+                            self.config.scroll_distance *= 1.5;
+                        }
+                        ScrollAction::DecreaseDistance => {
+                            self.config.scroll_distance /= 1.5;
+                        }
                     }
                 }
             }
