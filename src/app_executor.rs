@@ -88,6 +88,7 @@ pub struct AppExecutor {
     /// Special treatment for Electron based apps.
     /// Like simulate mouse clicking instead of `element.press()`
     is_electron: bool,
+    last_pid: i32,
     /// For multi-selection
     multi_selection: MultiSeletionState,
 }
@@ -122,6 +123,7 @@ impl AppExecutor {
             word_picker: None,
             ocr_cache: None,
             is_electron: false,
+            last_pid: 0,
             multi_selection: MultiSeletionState::default(),
         }
     }
@@ -291,6 +293,14 @@ impl AppExecutor {
 
         let focused_app = AXUIElement::application(pid);
         let screen_frame = Frame::from_origion(self.screen_size);
+
+        // HACK: need this to bootstrap UI tree generation for some electron apps,
+        // e.g. Discord
+        if is_electron && pid != self.last_pid {
+            let _ = focused_app.role();
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        self.last_pid = pid;
 
         let focused_window = focused_app.focused_window().ok().unwrap_or(focused_app);
         let window_frame = focused_window.get_frame().unwrap_or(screen_frame);
@@ -751,10 +761,7 @@ impl AppExecutor {
 
     fn update_selected_text(&mut self, new_text: String, replace: bool) {
         if let Some(ElementOfInterest {
-            element,
-            context,
-            // role,
-            ..
+            element, context, ..
         }) = self.selected.as_mut()
         {
             if replace
