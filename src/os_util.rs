@@ -12,7 +12,7 @@ const ELECTRON_FRAMEWORKS: [&str; 6] = [
     "Google Chrome Framework.framework", // Google Chrome
     "Chromium Framework.framework", // Unbranded Chromium
     "Microsoft Edge Framework.framework", // Microsoft Edge
-    "Brave Framework.framework",    // Brave Browser
+    "Brave Browser Framework.framework", // Brave Browser
     "libAvaloniaNative.dylib",      // HACK: Avalonia
 ];
 
