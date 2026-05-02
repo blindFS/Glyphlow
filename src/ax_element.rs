@@ -109,6 +109,10 @@ impl ElementBasicAttributes {
                 .and_then(|size_ptr| cftype_to_rust_type::<CGSize>(*size_ptr, kAXValueTypeCGSize));
 
             let frame = match (pos, size) {
+                // HACK: exclude electron element scrolled off y axis
+                (Some(_), Some(CGSize { height: 1.0, .. })) => {
+                    return None;
+                }
                 (Some(p), Some(s)) => Some(Frame::new(p.x, p.y, p.x + s.width, p.y + s.height)),
                 _ => None,
             };
