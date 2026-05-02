@@ -284,20 +284,23 @@ impl AppExecutor {
         )
     }
 
-    fn select_app_window(&mut self) -> Option<Frame> {
-        let (pid, is_electron) = get_focused_pid()?;
+    fn select_app_window(&mut self) {
+        let Some((pid, is_electron)) = get_focused_pid() else {
+            return;
+        };
         self.is_electron = is_electron;
 
-        let focused_window = AXUIElement::application(pid);
-        let window_frame = Frame::from_origion(self.screen_size);
+        let focused_app = AXUIElement::application(pid);
+        let screen_frame = Frame::from_origion(self.screen_size);
+
+        let focused_window = focused_app.focused_window().ok().unwrap_or(focused_app);
 
         self.selected = Some(ElementOfInterest::new(
             Some(focused_window),
             None,
             RoleOfInterest::GenericNode,
-            window_frame,
+            screen_frame,
         ));
-        Some(window_frame)
     }
 
     fn ui_element_traverse_on_activation(&mut self, target: Target) {
@@ -612,7 +615,7 @@ impl AppExecutor {
                         self.draw_hints_from_cache();
                     }
                 }
-                Target::ScrollBar => {
+                Target::Scrollable => {
                     self.selected = Some(eoi.clone());
                     self.clear_cache();
                     self.draw_scroll_bar_menu();
@@ -769,7 +772,7 @@ impl AppExecutor {
                 self.set_mode(Mode::DashBoard);
             }
             AppSignal::Activate(target) => {
-                let quick_follow = target == Target::ScrollBar
+                let quick_follow = target == Target::Scrollable
                     || target == Target::Editable
                     || target == Target::Edit;
                 self.activate(target);
@@ -959,17 +962,8 @@ impl AppExecutor {
                 let frame = if let Some(eoi) = self.selected.as_ref() {
                     &eoi.frame
                 } else {
-                    &self
-                        .select_app_window()
-                        .map(|f| {
-                            // NOTE: Some apps, Finder, returns empty frame
-                            if f.size() == (0.0, 0.0) {
-                                Frame::from_origion(self.screen_size)
-                            } else {
-                                f
-                            }
-                        })
-                        .unwrap_or_else(|| Frame::from_origion(self.screen_size))
+                    // Defaults to fullscreen
+                    &Frame::from_origion(self.screen_size)
                 };
                 if screen_shot(frame).await {
                     self.notify_then_deactivate("Screenshot copied to clipboard.", Level::Info);

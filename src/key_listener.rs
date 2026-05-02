@@ -85,7 +85,7 @@ impl Display for MenuItem {
 pub const DASH_BOARD_MENU_ITEMS: [MenuItem; 9] = [
     MenuItem::new("󰦨 Text", 'T', AppSignal::Activate(Target::Text)),
     MenuItem::new("󰳽 Press", 'P', AppSignal::Activate(Target::Clickable)),
-    MenuItem::new("󱕒 ScrollBar", 'S', AppSignal::Activate(Target::ScrollBar)),
+    MenuItem::new("󱕒 ScrollBar", 'S', AppSignal::Activate(Target::Scrollable)),
     MenuItem::new("󰊄 Input", 'I', AppSignal::Activate(Target::Editable)),
     MenuItem::new(" Image", 'M', AppSignal::Activate(Target::Image)),
     MenuItem::new("󰙅 Element", 'E', AppSignal::Activate(Target::ChildElement)),

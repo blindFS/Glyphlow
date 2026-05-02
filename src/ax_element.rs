@@ -6,10 +6,10 @@ use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     AXUIElementCopyMultipleAttributeValues, AXValueCreate, AXValueGetValue, AXValueRef,
     kAXButtonRole, kAXCellRole, kAXComboBoxRole, kAXDescriptionAttribute, kAXErrorSuccess,
-    kAXGroupRole, kAXHiddenAttribute, kAXImageRole, kAXMenuBarRole, kAXMenuItemRole,
-    kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction, kAXRoleAttribute, kAXRowRole,
-    kAXScrollBarRole, kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole,
-    kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
+    kAXGroupRole, kAXHiddenAttribute, kAXImageRole, kAXMenuItemRole, kAXPopUpButtonRole,
+    kAXPositionAttribute, kAXPressAction, kAXRoleAttribute, kAXRowRole, kAXScrollBarRole,
+    kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
+    kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
     kAXValueTypeCGPoint, kAXValueTypeCGSize, kAXWindowRole,
 };
 use core_foundation::{
@@ -28,6 +28,7 @@ pub enum RoleOfInterest {
     Image,
     MenuItem,
     ScrollBar,
+    ScrollArea,
     StaticText,
     TextField,
     Cell,
@@ -195,16 +196,31 @@ impl ElementCache {
         frame: Option<Frame>,
     ) {
         // Has to be concrete leaf elements with frames
-        // TODO: false negatives in some apps, e.g. chrome
         let Some(frame) = frame else {
             return;
+        };
+
+        // NOTE: Use parent frames for scroll bars,
+        // replaces the existing AXScrollArea in later center point check
+        let frame = if role == RoleOfInterest::ScrollBar
+            && let Some(parent_frame) = element
+                .parent()
+                .ok()
+                .and_then(|p| ElementBasicAttributes::from(&p))
+                .and_then(|p_fp| p_fp.frame)
+        {
+            parent_frame
+        } else {
+            frame
         };
 
         let (w, h) = frame.size();
         match role {
             // NOTE: some roles to keep
-            RoleOfInterest::GenericNode | RoleOfInterest::ScrollBar | RoleOfInterest::TextField => {
-            }
+            RoleOfInterest::GenericNode
+            | RoleOfInterest::ScrollBar
+            | RoleOfInterest::ScrollArea
+            | RoleOfInterest::TextField => {}
             RoleOfInterest::Image if w.min(h) < self.image_min_size => {
                 return;
             }
@@ -398,7 +414,7 @@ pub enum Target {
     Text,
     MenuItem,
     ChildElement,
-    ScrollBar,
+    Scrollable,
 }
 
 pub fn traverse_elements(
@@ -556,18 +572,6 @@ pub fn traverse_elements(
             }
             _ => (),
         },
-        kAXMenuBarRole => {
-            // NOTE: Exclude system menu bar items
-            if let Some(Frame {
-                top_left: CGPoint { x, y },
-                ..
-            }) = ele_fp.frame
-                && x == 0.0
-                && y == 0.0
-            {
-                return;
-            }
-        }
         kAXGroupRole => match target {
             Target::Clickable if element.is_clickable() => {
                 cache.add(element, None, RoleOfInterest::Button, ele_fp.frame);
@@ -590,7 +594,7 @@ pub fn traverse_elements(
             _ => (),
         },
         kAXScrollBarRole => {
-            if *target == Target::ScrollBar {
+            if *target == Target::Scrollable {
                 cache.add(element, None, RoleOfInterest::ScrollBar, ele_fp.frame);
             }
         }
