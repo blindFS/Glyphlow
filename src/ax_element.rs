@@ -1,5 +1,5 @@
 use crate::{
-    config::{GlyphlowTheme, VisibilityCheckingLevel},
+    config::{GlyphlowConfig, GlyphlowTheme, VisibilityCheckingLevel},
     util::{Frame, HintBox, hint_boxes_from_frames, select_range_helper},
 };
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
@@ -180,6 +180,12 @@ impl ElementCache {
             element_min_height: min_height,
             image_min_size,
         }
+    }
+
+    pub fn reload_config(&mut self, new_config: &GlyphlowConfig) {
+        self.element_min_width = new_config.element_min_width as f64;
+        self.element_min_height = new_config.element_min_height as f64;
+        self.image_min_size = new_config.image_min_size as f64;
     }
 
     pub fn clear(&mut self) {

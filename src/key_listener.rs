@@ -238,6 +238,7 @@ impl KeyListener {
                             .is_some_and(|r| *k == r || pressed_keys.contains(&r))
                 }) {
                     self.send(AppSignal::DashBoard);
+                    *state = Mode::DashBoard;
                     true
                 } else {
                     false

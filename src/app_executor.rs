@@ -80,6 +80,9 @@ pub struct AppExecutor {
     config: GlyphlowConfig,
     hint_width: u32,
     selected: Option<ElementOfInterest>,
+    /// Keep track of editing element,
+    /// so that we can use other glyphlow actions while editing
+    editing: Option<ElementOfInterest>,
     /// For editing element text values
     temp_file: PathBuf,
     word_picker: Option<WordPicker>,
@@ -119,6 +122,7 @@ impl AppExecutor {
             config,
             timeout_sender,
             selected: None,
+            editing: None,
             temp_file,
             word_picker: None,
             ocr_cache: None,
@@ -629,8 +633,6 @@ impl AppExecutor {
                     self.selected = Some(eoi.clone());
                     self.ui_element_traverse_on_activation(Target::ChildElement);
                     // Actions for current selected element
-                    // TODO:
-                    // 1. Mouse ops
                     if self.element_cache.cache.is_empty() {
                         self.set_mode(Mode::DashBoard);
                         self.draw_dash_board();
@@ -650,7 +652,7 @@ impl AppExecutor {
                     self.deactivate();
                 }
                 Target::Edit => {
-                    self.selected = Some(eoi.clone());
+                    self.editing = Some(eoi.clone());
                     // Focused before editing to increase the success rate
                     Self::focus_on_element(element);
                     let text = context.clone().unwrap_or_default();
@@ -759,36 +761,33 @@ impl AppExecutor {
         true
     }
 
-    fn update_selected_text(&mut self, new_text: String, replace: bool) {
-        if let Some(ElementOfInterest {
-            element, context, ..
-        }) = self.selected.as_mut()
-        {
-            if replace
-                && let Some(ele) = element
-                && let Err(e) = ele.set_value(CFString::new(&new_text).as_CFType())
-            {
-                log::warn!("Failed to set the text of focused element: {element:?}\n Error: {e}");
-            }
+    fn update_selected_text(&mut self, new_text: String) {
+        if let Some(ElementOfInterest { context, .. }) = self.selected.as_mut() {
             *context = Some(new_text);
+        }
+    }
+
+    fn update_editing_text(&mut self, new_text: String) {
+        if let Some(ElementOfInterest {
+            element: Some(ele), ..
+        }) = self.editing.as_ref()
+            && let Err(e) = ele.set_value(CFString::new(&new_text).as_CFType())
+        {
+            log::warn!("Failed to set the text of focused element: {ele:?}\n Error: {e}");
+            // Reset editing upon failure
+            self.editing = None;
         }
     }
 
     fn update_selected_text_and_show_menu(&mut self, new_text: String) {
         self.set_mode(Mode::TextActionMenu);
         self.draw_text_action_menu(&new_text);
-        self.update_selected_text(new_text, false);
+        self.update_selected_text(new_text);
     }
 
     pub async fn handle_signal(&mut self, signal: AppSignal) {
         match signal {
             AppSignal::DashBoard => {
-                if self.check_mode(Mode::Editing) {
-                    // Stops editing
-                    self.clear_cache();
-                    self.selected = None;
-                }
-                self.set_mode(Mode::DashBoard);
                 self.draw_dash_board();
             }
             AppSignal::Activate(target) => {
@@ -1026,16 +1025,15 @@ impl AppExecutor {
                     self.activate(Target::ImageOCR);
                 }
             }
-            // TODO: Keep a `self.editing_element` for using other glyphlow features during the editing?
             AppSignal::FileUpdate(pb) => {
                 if pb == self.temp_file
-                    && self.check_mode(Mode::Editing)
                     && let Ok(new_text) = std::fs::read_to_string(&self.temp_file)
                 {
-                    self.update_selected_text(new_text, true);
+                    self.update_editing_text(new_text);
                 } else if pb != self.temp_file {
                     match GlyphlowConfig::load_config(&pb) {
                         Ok(new_config) => {
+                            self.element_cache.reload_config(&new_config);
                             self.config = new_config;
                             self.notify_then_deactivate("Configuration reloaded.\nKeybinding changes won't be applied until next launch.", Level::Warn);
                         }
