@@ -238,8 +238,8 @@ impl AppExecutor {
     const LONG_TIMEOUT: u64 = 2;
 
     fn notify_then_deactivate(&mut self, msg: &str, log_level: Level) {
-        self.notify(msg, log_level);
         self.set_mode(Mode::WaitAndDeactivate);
+        self.notify(msg, log_level);
     }
 
     fn notify(&mut self, msg: &str, log_level: Level) {
@@ -367,18 +367,18 @@ impl AppExecutor {
         self.ui_element_traverse_on_activation(target);
 
         if !self.element_cache.cache.is_empty() {
-            self.draw_hints_from_cache();
             self.set_mode(Mode::Filtering);
+            self.draw_hints_from_cache();
         } else if self.target == Target::Scrollable
             && let Some(eoi) = self.selected.as_ref()
         {
             // Fallback to mouse scroll
             let (x, y) = eoi.frame.center();
             Self::simulate_event(&EventType::MouseMove { x, y });
-            self.clear_drawing();
             self.clear_cache();
-            self.draw_scroll_bar_menu();
             self.set_mode(Mode::Scrolling);
+            self.clear_drawing();
+            self.draw_scroll_bar_menu();
         } else {
             self.clear_drawing();
             self.notify_then_deactivate("No relevant UI elements found.", Level::Warn);
@@ -546,8 +546,8 @@ impl AppExecutor {
             Ok(ocr_res) if !ocr_res.is_empty() => {
                 self.ocr_cache = Some(ocr_res);
                 self.key_prefix.clear();
-                self.ocr_res_filtering();
                 self.set_mode(Mode::OCRResultFiltering);
+                self.ocr_res_filtering();
             }
             Err(e) => {
                 self.notify_then_deactivate(&format!("OCR failed: {e:?}"), Level::Error);
@@ -621,8 +621,8 @@ impl AppExecutor {
                         }
                     } else if let Some(text) = context {
                         self.selected = Some(eoi.clone());
-                        self.draw_text_action_menu(text);
                         self.set_mode(Mode::TextActionMenu);
+                        self.draw_text_action_menu(text);
                     }
                 }
                 Target::ChildElement => {
@@ -632,8 +632,8 @@ impl AppExecutor {
                     // TODO:
                     // 1. Mouse ops
                     if self.element_cache.cache.is_empty() {
-                        self.draw_dash_board();
                         self.set_mode(Mode::DashBoard);
+                        self.draw_dash_board();
                     } else {
                         self.draw_hints_from_cache();
                     }
@@ -641,8 +641,8 @@ impl AppExecutor {
                 Target::Scrollable => {
                     self.selected = Some(eoi.clone());
                     self.clear_cache();
-                    self.draw_scroll_bar_menu();
                     self.set_mode(Mode::Scrolling);
+                    self.draw_scroll_bar_menu();
                 }
                 Target::Editable => {
                     self.selected = Some(eoi.clone());
@@ -775,9 +775,9 @@ impl AppExecutor {
     }
 
     fn update_selected_text_and_show_menu(&mut self, new_text: String) {
+        self.set_mode(Mode::TextActionMenu);
         self.draw_text_action_menu(&new_text);
         self.update_selected_text(new_text, false);
-        self.set_mode(Mode::TextActionMenu);
     }
 
     pub async fn handle_signal(&mut self, signal: AppSignal) {
@@ -788,8 +788,8 @@ impl AppExecutor {
                     self.clear_cache();
                     self.selected = None;
                 }
-                self.draw_dash_board();
                 self.set_mode(Mode::DashBoard);
+                self.draw_dash_board();
             }
             AppSignal::Activate(target) => {
                 let quick_follow = target == Target::Scrollable
@@ -979,8 +979,8 @@ impl AppExecutor {
 
                         self.clear_cache();
                         self.word_picker = Some(word_picker);
-                        self.draw_word_picker();
                         self.set_mode(Mode::WordPicking);
+                        self.draw_word_picker();
                         true
                     }
                     TextAction::Editor => {
