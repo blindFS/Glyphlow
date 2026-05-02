@@ -65,9 +65,7 @@ you can
 - Act on text from clipboard
 - Customizable theme
 
-## Installation
-
-### Homebrew
+## Getting Started
 
 1. Install with brew tap and start the service
 
@@ -78,6 +76,8 @@ brew services start glyphlow
 ```
 
 2. Grant accessibility permission to it
+
+3. Press the global trigger (defaults to "ALT + g") to start
 
 ## Purging
 
