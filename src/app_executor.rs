@@ -402,13 +402,14 @@ impl AppExecutor {
                 log::error!("Failed to simulate event {event_type:?}: {e}");
             }
         }
-        std::thread::sleep(Duration::from_millis(20));
     }
 
     fn simulate_click(x: f64, y: f64, right: bool) {
         let button = if right { Button::Right } else { Button::Left };
         Self::simulate_event(&EventType::MouseMove { x, y });
+        std::thread::sleep(Duration::from_millis(20));
         Self::simulate_event(&EventType::ButtonPress(button));
+        std::thread::sleep(Duration::from_millis(20));
         Self::simulate_event(&EventType::ButtonRelease(button));
     }
 
