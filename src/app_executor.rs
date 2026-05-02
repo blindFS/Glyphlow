@@ -6,7 +6,8 @@ use crate::{
         text_from_clipboard, text_to_clipboard,
     },
     ax_element::{
-        ElementCache, ElementOfInterest, RoleOfInterest, SetAttribute, Target, traverse_elements,
+        ElementCache, ElementOfInterest, GetAttribute, RoleOfInterest, SetAttribute, Target,
+        traverse_elements,
     },
     config::{GlyphlowConfig, VisibilityCheckingLevel},
     drawer::GlyphlowDrawingLayer,
@@ -284,23 +285,24 @@ impl AppExecutor {
         )
     }
 
-    fn select_app_window(&mut self) {
-        let Some((pid, is_electron)) = get_focused_pid() else {
-            return;
-        };
+    fn select_app_window(&mut self) -> Option<Frame> {
+        let (pid, is_electron) = get_focused_pid()?;
         self.is_electron = is_electron;
 
         let focused_app = AXUIElement::application(pid);
         let screen_frame = Frame::from_origion(self.screen_size);
 
         let focused_window = focused_app.focused_window().ok().unwrap_or(focused_app);
+        let window_frame = focused_window.get_frame().unwrap_or(screen_frame);
 
         self.selected = Some(ElementOfInterest::new(
             Some(focused_window),
             None,
             RoleOfInterest::GenericNode,
-            screen_frame,
+            window_frame,
         ));
+
+        Some(window_frame)
     }
 
     fn ui_element_traverse_on_activation(&mut self, target: Target) {
@@ -318,6 +320,7 @@ impl AppExecutor {
         self.clear_cache();
         if let Some(ElementOfInterest {
             element: Some(element),
+            frame,
             ..
         }) = self.selected.as_ref()
         {
@@ -330,7 +333,7 @@ impl AppExecutor {
             traverse_elements(
                 element,
                 // Very loose visibility constraint
-                &Frame::from_origion(self.screen_size),
+                frame,
                 &mut self.element_cache,
                 &target,
                 vis_level,
@@ -962,8 +965,10 @@ impl AppExecutor {
                 let frame = if let Some(eoi) = self.selected.as_ref() {
                     &eoi.frame
                 } else {
-                    // Defaults to fullscreen
-                    &Frame::from_origion(self.screen_size)
+                    // Defaults to the window
+                    &self
+                        .select_app_window()
+                        .unwrap_or_else(|| Frame::from_origion(self.screen_size))
                 };
                 if screen_shot(frame).await {
                     self.notify_then_deactivate("Screenshot copied to clipboard.", Level::Info);
