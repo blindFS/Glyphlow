@@ -6,10 +6,10 @@ use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     AXUIElementCopyMultipleAttributeValues, AXValueCreate, AXValueGetValue, AXValueRef,
     kAXButtonRole, kAXCellRole, kAXComboBoxRole, kAXDescriptionAttribute, kAXErrorSuccess,
-    kAXGroupRole, kAXHiddenAttribute, kAXImageRole, kAXMenuBarRole, kAXMenuItemRole,
-    kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction, kAXRoleAttribute, kAXRowRole,
-    kAXScrollBarRole, kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole,
-    kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
+    kAXGroupRole, kAXHiddenAttribute, kAXImageRole, kAXMenuItemRole, kAXPopUpButtonRole,
+    kAXPositionAttribute, kAXPressAction, kAXRoleAttribute, kAXRowRole, kAXScrollBarRole,
+    kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
+    kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
     kAXValueTypeCGPoint, kAXValueTypeCGSize, kAXWindowRole,
 };
 use core_foundation::{
@@ -195,9 +195,22 @@ impl ElementCache {
         frame: Option<Frame>,
     ) {
         // Has to be concrete leaf elements with frames
-        // TODO: false negatives in some apps, e.g. chrome
         let Some(frame) = frame else {
             return;
+        };
+
+        // NOTE: Use parent frames for scroll bars,
+        // replaces the existing AXScrollArea in later center point check
+        let frame = if role == RoleOfInterest::ScrollBar
+            && let Some(parent_frame) = element
+                .parent()
+                .ok()
+                .and_then(|p| ElementBasicAttributes::from(&p))
+                .and_then(|p_fp| p_fp.frame)
+        {
+            parent_frame
+        } else {
+            frame
         };
 
         let (w, h) = frame.size();
@@ -281,6 +294,7 @@ impl ElementCache {
 pub trait GetAttribute {
     fn get_attribute(&self, attribute_name: &str) -> Option<CFType>;
     fn get_attribute_string(&self, attribute_name: &str) -> Option<String>;
+    fn get_frame(&self) -> Option<Frame>;
     fn get_dom_classes(&self) -> Option<Vec<String>>;
     fn inspect(&self);
     fn is_clickable(&self) -> bool;
@@ -297,6 +311,45 @@ impl GetAttribute for AXUIElement {
         self.get_attribute(attribute_name)
             .and_then(|val| val.downcast::<CFString>())
             .map(|cf| cf.to_string())
+    }
+
+    fn get_frame(&self) -> Option<Frame> {
+        let cf_array_in = CFArray::from_CFTypes(&[
+            CFString::new(kAXPositionAttribute),
+            CFString::new(kAXSizeAttribute),
+        ]);
+
+        let mut values_ref: CFArrayRef = std::ptr::null();
+        let err = unsafe {
+            AXUIElementCopyMultipleAttributeValues(
+                self.as_concrete_TypeRef(),
+                cf_array_in.as_concrete_TypeRef(),
+                // Don't stop on error
+                0,
+                &mut values_ref,
+            )
+        };
+
+        if err != kAXErrorSuccess || values_ref.is_null() {
+            None
+        } else {
+            let values_array: CFArray<CFType> =
+                unsafe { CFArray::wrap_under_create_rule(values_ref) };
+            let values = values_array.get_all_values();
+
+            let pos = values
+                .first()
+                .and_then(|pos_ptr| cftype_to_rust_type::<CGPoint>(*pos_ptr, kAXValueTypeCGPoint));
+
+            let size = values
+                .last()
+                .and_then(|size_ptr| cftype_to_rust_type::<CGSize>(*size_ptr, kAXValueTypeCGSize));
+
+            match (pos, size) {
+                (Some(p), Some(s)) => Some(Frame::new(p.x, p.y, p.x + s.width, p.y + s.height)),
+                _ => None,
+            }
+        }
     }
 
     fn inspect(&self) {
@@ -398,7 +451,7 @@ pub enum Target {
     Text,
     MenuItem,
     ChildElement,
-    ScrollBar,
+    Scrollable,
 }
 
 pub fn traverse_elements(
@@ -556,18 +609,6 @@ pub fn traverse_elements(
             }
             _ => (),
         },
-        kAXMenuBarRole => {
-            // NOTE: Exclude system menu bar items
-            if let Some(Frame {
-                top_left: CGPoint { x, y },
-                ..
-            }) = ele_fp.frame
-                && x == 0.0
-                && y == 0.0
-            {
-                return;
-            }
-        }
         kAXGroupRole => match target {
             Target::Clickable if element.is_clickable() => {
                 cache.add(element, None, RoleOfInterest::Button, ele_fp.frame);
@@ -590,7 +631,7 @@ pub fn traverse_elements(
             _ => (),
         },
         kAXScrollBarRole => {
-            if *target == Target::ScrollBar {
+            if *target == Target::Scrollable {
                 cache.add(element, None, RoleOfInterest::ScrollBar, ele_fp.frame);
             }
         }
@@ -602,7 +643,7 @@ pub fn traverse_elements(
         },
     }
 
-    if let Ok(children) = element.visible_children().or_else(|_| element.children()) {
+    if let Ok(children) = element.children() {
         for child in &children {
             // NOTE: Some apps, like App Store, have circular referencing
             if *child == *element {

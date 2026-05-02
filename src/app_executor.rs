@@ -6,7 +6,8 @@ use crate::{
         text_from_clipboard, text_to_clipboard,
     },
     ax_element::{
-        ElementCache, ElementOfInterest, RoleOfInterest, SetAttribute, Target, traverse_elements,
+        ElementCache, ElementOfInterest, GetAttribute, RoleOfInterest, SetAttribute, Target,
+        traverse_elements,
     },
     config::{GlyphlowConfig, VisibilityCheckingLevel},
     drawer::GlyphlowDrawingLayer,
@@ -87,6 +88,7 @@ pub struct AppExecutor {
     /// Special treatment for Electron based apps.
     /// Like simulate mouse clicking instead of `element.press()`
     is_electron: bool,
+    last_pid: i32,
     /// For multi-selection
     multi_selection: MultiSeletionState,
 }
@@ -121,6 +123,7 @@ impl AppExecutor {
             word_picker: None,
             ocr_cache: None,
             is_electron: false,
+            last_pid: 0,
             multi_selection: MultiSeletionState::default(),
         }
     }
@@ -288,8 +291,19 @@ impl AppExecutor {
         let (pid, is_electron) = get_focused_pid()?;
         self.is_electron = is_electron;
 
-        let focused_window = AXUIElement::application(pid);
-        let window_frame = Frame::from_origion(self.screen_size);
+        let focused_app = AXUIElement::application(pid);
+        let screen_frame = Frame::from_origion(self.screen_size);
+
+        // HACK: need this to bootstrap UI tree generation for some electron apps,
+        // e.g. Discord
+        if is_electron && pid != self.last_pid {
+            let _ = focused_app.role();
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        self.last_pid = pid;
+
+        let focused_window = focused_app.focused_window().ok().unwrap_or(focused_app);
+        let window_frame = focused_window.get_frame().unwrap_or(screen_frame);
 
         self.selected = Some(ElementOfInterest::new(
             Some(focused_window),
@@ -297,6 +311,7 @@ impl AppExecutor {
             RoleOfInterest::GenericNode,
             window_frame,
         ));
+
         Some(window_frame)
     }
 
@@ -315,6 +330,7 @@ impl AppExecutor {
         self.clear_cache();
         if let Some(ElementOfInterest {
             element: Some(element),
+            frame,
             ..
         }) = self.selected.as_ref()
         {
@@ -327,7 +343,7 @@ impl AppExecutor {
             traverse_elements(
                 element,
                 // Very loose visibility constraint
-                &Frame::from_origion(self.screen_size),
+                frame,
                 &mut self.element_cache,
                 &target,
                 vis_level,
@@ -353,6 +369,16 @@ impl AppExecutor {
         if !self.element_cache.cache.is_empty() {
             self.draw_hints_from_cache();
             self.set_mode(Mode::Filtering);
+        } else if self.target == Target::Scrollable
+            && let Some(eoi) = self.selected.as_ref()
+        {
+            // Fallback to mouse scroll
+            let (x, y) = eoi.frame.center();
+            Self::simulate_event(&EventType::MouseMove { x, y });
+            self.clear_drawing();
+            self.clear_cache();
+            self.draw_scroll_bar_menu();
+            self.set_mode(Mode::Scrolling);
         } else {
             self.clear_drawing();
             self.notify_then_deactivate("No relevant UI elements found.", Level::Warn);
@@ -612,7 +638,7 @@ impl AppExecutor {
                         self.draw_hints_from_cache();
                     }
                 }
-                Target::ScrollBar => {
+                Target::Scrollable => {
                     self.selected = Some(eoi.clone());
                     self.clear_cache();
                     self.draw_scroll_bar_menu();
@@ -735,10 +761,7 @@ impl AppExecutor {
 
     fn update_selected_text(&mut self, new_text: String, replace: bool) {
         if let Some(ElementOfInterest {
-            element,
-            context,
-            // role,
-            ..
+            element, context, ..
         }) = self.selected.as_mut()
         {
             if replace
@@ -769,7 +792,7 @@ impl AppExecutor {
                 self.set_mode(Mode::DashBoard);
             }
             AppSignal::Activate(target) => {
-                let quick_follow = target == Target::ScrollBar
+                let quick_follow = target == Target::Scrollable
                     || target == Target::Editable
                     || target == Target::Edit;
                 self.activate(target);
@@ -842,37 +865,61 @@ impl AppExecutor {
             AppSignal::ScrollAction(sa) => {
                 let Some(ElementOfInterest {
                     element: Some(element),
+                    role,
+                    frame,
                     ..
                 }) = self.selected.as_ref()
                 else {
-                    panic!(
-                        "A scrollbar is supposed to be selected before entering Mode::Scrolling!"
-                    )
+                    panic!("An element is supposed to be selected before entering Mode::Scrolling!")
                 };
 
-                let Some(old_val) = element
-                    .value()
-                    .ok()
-                    .and_then(|v| v.downcast::<CFNumber>())
-                    .and_then(|f| f.to_f64())
-                else {
-                    self.deactivate();
-                    return;
-                };
+                if *role == RoleOfInterest::ScrollBar {
+                    let Some(old_val) = element
+                        .value()
+                        .ok()
+                        .and_then(|v| v.downcast::<CFNumber>())
+                        .and_then(|f| f.to_f64())
+                    else {
+                        self.deactivate();
+                        return;
+                    };
 
-                let scroll_unit = self.config.scroll_distance;
-                match sa {
-                    ScrollAction::DownRight => {
-                        Self::scroll_to_value(element, old_val + scroll_unit);
+                    let scroll_unit = self.config.scroll_distance;
+                    match sa {
+                        ScrollAction::DownRight => {
+                            Self::scroll_to_value(element, old_val + scroll_unit);
+                        }
+                        ScrollAction::UpLeft => {
+                            Self::scroll_to_value(element, old_val - scroll_unit);
+                        }
+                        ScrollAction::IncreaseDistance => {
+                            self.config.scroll_distance *= 1.5;
+                        }
+                        ScrollAction::DecreaseDistance => {
+                            self.config.scroll_distance /= 1.5;
+                        }
                     }
-                    ScrollAction::UpLeft => {
-                        Self::scroll_to_value(element, old_val - scroll_unit);
-                    }
-                    ScrollAction::IncreaseDistance => {
-                        self.config.scroll_distance *= 1.5;
-                    }
-                    ScrollAction::DecreaseDistance => {
-                        self.config.scroll_distance /= 1.5;
+                } else {
+                    let distance = (frame.size().1 * self.config.scroll_distance).max(1.0) as i64;
+                    match sa {
+                        ScrollAction::DownRight => {
+                            Self::simulate_event(&EventType::Wheel {
+                                delta_x: distance,
+                                delta_y: -distance,
+                            });
+                        }
+                        ScrollAction::UpLeft => {
+                            Self::simulate_event(&EventType::Wheel {
+                                delta_x: -distance,
+                                delta_y: distance,
+                            });
+                        }
+                        ScrollAction::IncreaseDistance => {
+                            self.config.scroll_distance *= 1.5;
+                        }
+                        ScrollAction::DecreaseDistance => {
+                            self.config.scroll_distance /= 1.5;
+                        }
                     }
                 }
             }
@@ -959,16 +1006,9 @@ impl AppExecutor {
                 let frame = if let Some(eoi) = self.selected.as_ref() {
                     &eoi.frame
                 } else {
+                    // Defaults to the window
                     &self
                         .select_app_window()
-                        .map(|f| {
-                            // NOTE: Some apps, Finder, returns empty frame
-                            if f.size() == (0.0, 0.0) {
-                                Frame::from_origion(self.screen_size)
-                            } else {
-                                f
-                            }
-                        })
                         .unwrap_or_else(|| Frame::from_origion(self.screen_size))
                 };
                 if screen_shot(frame).await {
