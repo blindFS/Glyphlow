@@ -50,6 +50,30 @@ you can
 
 <img width="440" height="387" alt="Image" src="https://github.com/user-attachments/assets/7320969c-344f-40bd-b74d-960768420b2e" />
 
+### Workflow
+
+Users can define their own workflows (currently text only) in terms of sequences
+of primitive actions.
+
+For instance, with the following configuration snippet,
+we can swiftly execute the utilities of the apple intelligence writing tool.
+
+<https://github.com/user-attachments/assets/b9b4b031-5350-4ed4-b36a-ee5a549792d4>
+
+```toml
+[[text_workflows]]
+display = " Rewrite"
+key = "R"
+actions = [
+  "Focus",
+  "SelectAll",
+  "ShowMenu",
+  { Sleep = 150 },
+  { SearchFor = { role = "MenuItem", title = "Rewrite" } },
+  "Press",
+]
+```
+
 ### Other Features
 
 - UI element tree exploring mode (E)
