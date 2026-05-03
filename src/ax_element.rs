@@ -5,11 +5,11 @@ use crate::{
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     AXUIElementCopyMultipleAttributeValues, AXValueCreate, AXValueGetValue, AXValueRef,
-    kAXButtonRole, kAXCellRole, kAXComboBoxRole, kAXDescriptionAttribute, kAXErrorSuccess,
-    kAXGroupRole, kAXHiddenAttribute, kAXImageRole, kAXMenuItemRole, kAXPopUpButtonRole,
-    kAXPositionAttribute, kAXPressAction, kAXRoleAttribute, kAXRowRole, kAXScrollBarRole,
-    kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
-    kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
+    kAXButtonRole, kAXCellRole, kAXCheckBoxRole, kAXComboBoxRole, kAXDescriptionAttribute,
+    kAXErrorSuccess, kAXGroupRole, kAXHiddenAttribute, kAXImageRole, kAXMenuItemRole,
+    kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction, kAXRoleAttribute, kAXRowRole,
+    kAXScrollBarRole, kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole,
+    kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
     kAXValueTypeCGPoint, kAXValueTypeCGSize, kAXWindowRole,
 };
 use core_foundation::{
@@ -618,6 +618,37 @@ pub fn traverse_elements(
             }
             _ => (),
         },
+        kAXCheckBoxRole => match target {
+            Target::Clickable => {
+                cache.add(element, None, RoleOfInterest::Button, ele_fp.frame);
+            }
+            Target::Text => {
+                if let Ok(value) = element.description().map(|v| v.to_string()) {
+                    cache.add(
+                        element,
+                        Some(value),
+                        RoleOfInterest::StaticText,
+                        ele_fp.frame,
+                    );
+                }
+            }
+            _ => (),
+        },
+        "AXHeading" => {
+            if *target == Target::Text
+                && let Ok(value) = element
+                    .description()
+                    .or_else(|_| element.label_value())
+                    .map(|v| v.to_string())
+            {
+                cache.add(
+                    element,
+                    Some(value),
+                    RoleOfInterest::StaticText,
+                    ele_fp.frame,
+                );
+            }
+        }
         kAXGroupRole => match target {
             Target::Clickable if element.is_clickable() => {
                 cache.add(element, None, RoleOfInterest::Button, ele_fp.frame);
