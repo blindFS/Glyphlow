@@ -273,6 +273,7 @@ pub struct KeyBinding {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Copy)]
 pub enum VisibilityCheckingLevel {
     Loose,
+    Medium,
     Strict,
 }
 

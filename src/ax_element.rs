@@ -60,10 +60,7 @@ impl ElementBasicAttributes {
 
         // TODO: handle edge cases according to role
         // e.g. popup menu
-        if let Some(this_frame) = self.frame
-            // HACK: For some apps, like Finder, it may return false empty frames
-            && this_frame.size() != (0.0, 0.0)
-        {
+        if let Some(this_frame) = self.frame {
             // TODO: For some fully visible structure of A -> B -> C,
             // somehow the intersection of either A and B or B and C is not empty,
             // but the intersection of all those 3 is empty.
@@ -110,10 +107,6 @@ impl ElementBasicAttributes {
                 .and_then(|size_ptr| cftype_to_rust_type::<CGSize>(*size_ptr, kAXValueTypeCGSize));
 
             let frame = match (pos, size) {
-                // HACK: exclude electron element scrolled off y axis
-                (Some(_), Some(CGSize { height: 1.0, .. })) => {
-                    return None;
-                }
                 (Some(p), Some(s)) => Some(Frame::new(p.x, p.y, p.x + s.width, p.y + s.height)),
                 _ => None,
             };
@@ -511,6 +504,7 @@ pub enum Target {
 pub fn traverse_elements(
     element: &AXUIElement,
     parent_frame: &Frame,
+    window_frame: &Frame,
     cache: &mut ElementCache,
     target: &Target,
     vis_level: VisibilityCheckingLevel,
@@ -530,6 +524,11 @@ pub fn traverse_elements(
                     continue;
                 }
                 if let Some(child_fp) = ElementBasicAttributes::from(&child)
+                    // HACK: exclude electron elements scrolled off y axis
+                    && child_fp.frame.is_some_and(|f| {
+                        let (_, h) = f.size();
+                        h != 1.0 && h != 0.0
+                    })
                     && child_fp.visible_frame(parent_frame).is_some()
                 {
                     cache.add(&child, None, RoleOfInterest::GenericNode, child_fp.frame);
@@ -544,7 +543,14 @@ pub fn traverse_elements(
                 ..
             }) = cache.cache.first()
         {
-            traverse_elements(&element.clone(), &frame.clone(), cache, target, vis_level);
+            traverse_elements(
+                &element.clone(),
+                &frame.clone(),
+                window_frame,
+                cache,
+                target,
+                vis_level,
+            );
         }
 
         return;
@@ -554,8 +560,27 @@ pub fn traverse_elements(
     let Some(mut new_frame) = ele_fp.visible_frame(parent_frame) else {
         return;
     };
-    if vis_level == VisibilityCheckingLevel::Loose {
-        new_frame = *parent_frame;
+
+    // HACK: exclude electron elements scrolled off y axis,
+    // but some menu items' ancestors (Discord) are of zero height
+    if *target != Target::MenuItem
+        && ele_fp.frame.is_some_and(|f| {
+            let (_, h) = f.size();
+            h == 1.0 || h == 0.0
+        })
+    {
+        return;
+    }
+
+    match vis_level {
+        VisibilityCheckingLevel::Medium => {
+            new_frame = ele_fp
+                .frame
+                .and_then(|f| f.intersect(window_frame))
+                .unwrap_or(*parent_frame);
+        }
+        VisibilityCheckingLevel::Loose => new_frame = *parent_frame,
+        _ => (),
     }
 
     // Try matching custom target first
@@ -740,7 +765,7 @@ pub fn traverse_elements(
             if *child == *element {
                 continue;
             }
-            traverse_elements(&child, &new_frame, cache, target, vis_level);
+            traverse_elements(&child, &new_frame, window_frame, cache, target, vis_level);
         }
     }
 }

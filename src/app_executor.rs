@@ -319,7 +319,7 @@ impl AppExecutor {
         self.last_pid = pid;
 
         // HACK: some electron apps put right click pop-up menus in different windows
-        let (focused_window, window_frame) = if is_electron && self.target == Target::MenuItem {
+        let (focused_window, window_frame) = if self.target == Target::MenuItem {
             (focused_app, screen_frame)
         } else {
             let window = focused_app.focused_window().unwrap_or(focused_app);
@@ -365,6 +365,7 @@ impl AppExecutor {
             traverse_elements(
                 element,
                 // Very loose visibility constraint
+                frame,
                 frame,
                 &mut self.element_cache,
                 &target,
