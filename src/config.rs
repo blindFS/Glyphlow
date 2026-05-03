@@ -21,6 +21,7 @@ pub struct CustomTarget {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum WorkFlowAction {
+    SelectAll,
     Focus,
     Press,
     ShowMenu,
@@ -319,9 +320,7 @@ fn default_text_workflows() -> Vec<WorkFlow> {
         display: " ProofRead".into(),
         actions: vec![
             WorkFlowAction::Focus,
-            WorkFlowAction::ComboKey(KeyBinding {
-                keys: vec![Key::MetaLeft, Key::KeyA],
-            }),
+            WorkFlowAction::SelectAll,
             WorkFlowAction::ShowMenu,
             WorkFlowAction::Sleep(150),
             WorkFlowAction::SearchFor(CustomTarget {

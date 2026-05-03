@@ -792,6 +792,7 @@ impl AppExecutor {
         for act in workflow.actions.iter() {
             let Some(ElementOfInterest {
                 element: Some(element),
+                context,
                 role,
                 frame,
                 ..
@@ -833,6 +834,13 @@ impl AppExecutor {
                         return;
                     }
                 }
+                WorkFlowAction::SelectAll => element.set_selected_range(
+                    0,
+                    context
+                        .clone()
+                        .map(|txt| txt.encode_utf16().count())
+                        .unwrap_or(0) as isize,
+                ),
                 WorkFlowAction::ComboKey(kb) => {
                     self.set_simulating_key(true);
                     for k in kb.keys.iter() {
