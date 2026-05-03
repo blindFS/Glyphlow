@@ -260,7 +260,7 @@ impl AppExecutor {
 
     fn notify(&mut self, msg: &str, log_level: Level) {
         let timeout_secs = match log_level {
-            log::Level::Info => Self::SHORT_TIMEOUT,
+            Level::Trace | Level::Info => Self::SHORT_TIMEOUT,
             _ => Self::LONG_TIMEOUT,
         };
         log::log!(log_level, "{msg}");
@@ -386,11 +386,15 @@ impl AppExecutor {
 
     /// Activates the app and caches UI elements
     fn activate(&mut self, target: Target) {
+        let need_help_msg = target == Target::ChildElement;
         self.ui_element_traverse_on_activation(target);
 
         if !self.element_cache.cache.is_empty() {
             self.set_mode(Mode::Filtering);
             self.draw_hints_from_cache();
+            if need_help_msg {
+                self.notify("Press Enter to act.", Level::Trace);
+            }
         } else if self.target == Target::Scrollable
             && let Some(eoi) = self.selected.as_ref()
         {

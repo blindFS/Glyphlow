@@ -159,7 +159,7 @@ impl Frame {
         let inter_x2 = self.bottom_right.x.min(other.bottom_right.x);
         let inter_y2 = self.bottom_right.y.min(other.bottom_right.y);
 
-        if inter_x1 < inter_x2 && inter_y1 < inter_y2 {
+        if inter_x1 <= inter_x2 && inter_y1 <= inter_y2 {
             Some(Frame::new(inter_x1, inter_y1, inter_x2, inter_y2))
         } else {
             None
@@ -519,8 +519,8 @@ mod frame_tests {
         let f2 = Frame::new(10.0, 0.0, 20.0, 10.0);
 
         assert!(
-            f1.intersect(&f2).is_none(),
-            "Touching edges should not intersect"
+            f1.intersect(&f2).is_some(),
+            "Touching edges should intersect"
         );
     }
 
@@ -586,8 +586,8 @@ mod frame_tests {
         let f2 = Frame::new(5.0, 0.0, 5.0, 10.0); // Zero width
 
         assert!(
-            f1.intersect(&f2).is_none(),
-            "Zero-width overlap should be None"
+            f1.intersect(&f2).is_some(),
+            "Zero-width overlap should be Some"
         );
     }
 

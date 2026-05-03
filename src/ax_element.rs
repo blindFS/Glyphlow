@@ -552,7 +552,6 @@ pub fn traverse_elements(
 
     // If invisible, return early
     let Some(mut new_frame) = ele_fp.visible_frame(parent_frame) else {
-        // element.inspect();
         return;
     };
     if vis_level == VisibilityCheckingLevel::Loose {
