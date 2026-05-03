@@ -8,6 +8,20 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum RoleOfInterest {
+    Button,
+    Generic,
+    Empty,
+    Image,
+    MenuItem,
+    ScrollBar,
+    StaticText,
+    TextField,
+    Cell,
+    CustomTarget,
+}
+
 /// Custom target element to search for in a workflow
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
 pub struct CustomTarget {
@@ -25,7 +39,7 @@ pub enum WorkFlowAction {
     Focus,
     Press,
     ShowMenu,
-    ComboKey(KeyBinding),
+    KeyCombo(KeyBinding),
     SearchFor(CustomTarget),
     Sleep(u64),
 }
@@ -34,7 +48,13 @@ pub enum WorkFlowAction {
 pub struct WorkFlow {
     pub display: String,
     pub key: char,
+    #[serde(default = "default_starting_role")]
+    pub starting_role: RoleOfInterest,
     pub actions: Vec<WorkFlowAction>,
+}
+
+fn default_starting_role() -> RoleOfInterest {
+    RoleOfInterest::Generic
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -285,8 +305,8 @@ pub struct GlyphlowConfig {
     pub theme: GlyphlowTheme,
     #[serde(default = "default_text_actions")]
     pub text_actions: Vec<CommandAction>,
-    #[serde(default = "default_text_workflows")]
-    pub text_workflows: Vec<WorkFlow>,
+    #[serde(default = "default_workflows")]
+    pub workflows: Vec<WorkFlow>,
     #[serde(default = "default_scroll_distance")]
     pub scroll_distance: f64,
     #[serde(default = "default_element_min_width")]
@@ -315,23 +335,56 @@ fn default_global_keybinding() -> KeyBinding {
 fn default_text_actions() -> Vec<CommandAction> {
     vec![]
 }
-fn default_text_workflows() -> Vec<WorkFlow> {
-    vec![WorkFlow {
-        key: 'R',
-        display: " ProofRead".into(),
-        actions: vec![
-            WorkFlowAction::Focus,
-            WorkFlowAction::SelectAll,
-            WorkFlowAction::ShowMenu,
-            WorkFlowAction::Sleep(150),
-            WorkFlowAction::SearchFor(CustomTarget {
-                role: "MenuItem".into(),
-                title: Some("Proofread".into()),
-                ..Default::default()
-            }),
-            WorkFlowAction::Press,
-        ],
-    }]
+fn default_workflows() -> Vec<WorkFlow> {
+    vec![
+        WorkFlow {
+            key: 'R',
+            display: " ProofRead".into(),
+            starting_role: RoleOfInterest::TextField,
+            actions: vec![
+                WorkFlowAction::Focus,
+                WorkFlowAction::SelectAll,
+                WorkFlowAction::ShowMenu,
+                WorkFlowAction::Sleep(150),
+                WorkFlowAction::SearchFor(CustomTarget {
+                    role: "MenuItem".into(),
+                    title: Some("Proofread".into()),
+                    ..Default::default()
+                }),
+                WorkFlowAction::Press,
+            ],
+        },
+        WorkFlow {
+            key: 'C',
+            display: "⮺ Copy".into(),
+            starting_role: RoleOfInterest::Image,
+            actions: vec![
+                WorkFlowAction::ShowMenu,
+                WorkFlowAction::Sleep(150),
+                WorkFlowAction::SearchFor(CustomTarget {
+                    role: "MenuItem".into(),
+                    title: Some("Copy Image".into()),
+                    ..Default::default()
+                }),
+                WorkFlowAction::Press,
+            ],
+        },
+        WorkFlow {
+            key: 'L',
+            display: " Copy Link".into(),
+            starting_role: RoleOfInterest::Image,
+            actions: vec![
+                WorkFlowAction::ShowMenu,
+                WorkFlowAction::Sleep(150),
+                WorkFlowAction::SearchFor(CustomTarget {
+                    role: "MenuItem".into(),
+                    title: Some("Copy Image Address".into()),
+                    ..Default::default()
+                }),
+                WorkFlowAction::Press,
+            ],
+        },
+    ]
 }
 fn default_scroll_distance() -> f64 {
     0.05
@@ -369,7 +422,7 @@ impl Default for GlyphlowConfig {
             editor: None,
             theme: GlyphlowTheme::default(),
             text_actions: default_text_actions(),
-            text_workflows: default_text_workflows(),
+            workflows: default_workflows(),
             scroll_distance: default_scroll_distance(),
             element_min_width: default_element_min_width(),
             element_min_height: default_element_min_height(),
