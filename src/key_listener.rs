@@ -23,6 +23,7 @@ pub enum TextAction {
     Editor,
     /// index of the action in the config
     UserDefined(usize),
+    WorkFlow(usize),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -172,6 +173,11 @@ impl KeyListener {
                         (ca.key, AppSignal::TextAction(TextAction::UserDefined(idx)))
                     }),
                 )
+                .chain(
+                    config.text_workflows.iter().enumerate().map(|(idx, wf)| {
+                        (wf.key, AppSignal::TextAction(TextAction::WorkFlow(idx)))
+                    }),
+                )
                 .collect::<HashMap<_, _>>();
         let mut dashboard_actions =
             Self::iter_from(DASH_BOARD_MENU_ITEMS).collect::<HashMap<_, _>>();
@@ -200,34 +206,38 @@ impl KeyListener {
         }
     }
 
+    fn helper(
+        &self,
+        key: &Key,
+        key_signals: &HashMap<char, AppSignal>,
+        mut state: MutexGuard<'_, Mode>,
+    ) -> bool {
+        let key_char = key.to_char();
+        if let Some(signal) = key_signals.get(&key_char) {
+            self.send(signal.clone());
+        } else if key_char == ' ' {
+            self.send(AppSignal::DeActivate);
+            *state = Mode::Idle;
+        }
+        true
+    }
+
+    fn filter_helper(&self, key: &Key, mut state: MutexGuard<'_, Mode>, mode: FilterMode) -> bool {
+        let key_char = key.to_char();
+        if key_char == ' ' {
+            self.send(AppSignal::DeActivate);
+            *state = Mode::Idle;
+        } else {
+            self.send(AppSignal::Filter(key_char, mode));
+        }
+        true
+    }
+
     /// Returns true if key is effective, and should be swallowed by this app
     pub fn key_down(&self, key: Key, state: &Mutex<Mode>, pressed_keys: &HashSet<Key>) -> bool {
         let Ok(mut state) = state.try_lock() else {
             return false;
         };
-        let key_char = key.to_char();
-
-        let helper =
-            |key_signals: &HashMap<char, AppSignal>, mut state: MutexGuard<'_, Mode>| -> bool {
-                if let Some(signal) = key_signals.get(&key_char) {
-                    self.send(signal.clone());
-                } else if key_char == ' ' {
-                    self.send(AppSignal::DeActivate);
-                    *state = Mode::Idle;
-                }
-                true
-            };
-
-        let filter_helper =
-            |key_char: char, mut state: MutexGuard<'_, Mode>, mode: FilterMode| -> bool {
-                if key_char == ' ' {
-                    self.send(AppSignal::DeActivate);
-                    *state = Mode::Idle;
-                } else {
-                    self.send(AppSignal::Filter(key_char, mode));
-                }
-                true
-            };
 
         match *state {
             Mode::Editing | Mode::Idle => {
@@ -244,7 +254,7 @@ impl KeyListener {
                     false
                 }
             }
-            Mode::DashBoard => helper(&self.dashboard_actions, state),
+            Mode::DashBoard => self.helper(&key, &self.dashboard_actions, state),
             // To act on selected parent node
             Mode::Filtering if key == Key::Return => {
                 self.send(AppSignal::DashBoard);
@@ -257,11 +267,11 @@ impl KeyListener {
                 self.send(AppSignal::ToggleMultiSelection);
                 true
             }
-            Mode::WordPicking => filter_helper(key_char, state, FilterMode::WordPicking),
-            Mode::Filtering => filter_helper(key_char, state, FilterMode::Generic),
-            Mode::OCRResultFiltering => filter_helper(key_char, state, FilterMode::OCR),
-            Mode::TextActionMenu => helper(&self.text_actions, state),
-            Mode::Scrolling => helper(&self.scroll_actions, state),
+            Mode::WordPicking => self.filter_helper(&key, state, FilterMode::WordPicking),
+            Mode::Filtering => self.filter_helper(&key, state, FilterMode::Generic),
+            Mode::OCRResultFiltering => self.filter_helper(&key, state, FilterMode::OCR),
+            Mode::TextActionMenu => self.helper(&key, &self.text_actions, state),
+            Mode::Scrolling => self.helper(&key, &self.scroll_actions, state),
             Mode::WaitAndDeactivate => {
                 self.send(AppSignal::DeActivate);
                 *state = Mode::Idle;

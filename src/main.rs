@@ -53,6 +53,7 @@ async fn main() {
 
     let state = Arc::new(Mutex::new(Mode::Idle));
     let pressed_keys = Arc::new(Mutex::new(HashSet::new()));
+    let simulating_keys = Arc::new(Mutex::new(false));
 
     let mtm = MainThreadMarker::new().expect("Not on main thread");
     let screen_size = get_main_screen_size(mtm);
@@ -99,16 +100,27 @@ async fn main() {
 
     // Listen to notification timeout
     let (ttx, mut trx) = mpsc::channel::<()>(100);
-    let mut app_executor =
-        AppExecutor::new(state.clone(), config, window, screen_size, cache_file, ttx);
+    let mut app_executor = AppExecutor::new(
+        state.clone(),
+        simulating_keys.clone(),
+        config,
+        window,
+        screen_size,
+        cache_file,
+        ttx,
+    );
 
     thread::spawn(move || {
         let pressed_keys = pressed_keys.clone();
+        let simulating = simulating_keys.clone();
         let state = state.clone();
         let _ = grab(move |event| {
             let Ok(mut keys) = pressed_keys.lock() else {
                 return Some(event);
             };
+            if !simulating.lock().is_ok_and(|s| !*s) {
+                return Some(event);
+            }
             let swallow = match event.event_type {
                 EventType::KeyPress(key) => {
                     keys.insert(key);

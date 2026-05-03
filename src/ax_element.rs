@@ -1,5 +1,5 @@
 use crate::{
-    config::{GlyphlowConfig, GlyphlowTheme, VisibilityCheckingLevel},
+    config::{CustomTarget, GlyphlowConfig, GlyphlowTheme, VisibilityCheckingLevel},
     util::{Frame, HintBox, hint_boxes_from_frames, select_range_helper},
 };
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
@@ -31,6 +31,7 @@ pub enum RoleOfInterest {
     StaticText,
     TextField,
     Cell,
+    CustomTarget,
 }
 
 const BASIC_ATTRIBUTES: [&str; 4] = [
@@ -130,6 +131,17 @@ impl ElementBasicAttributes {
             })
         }
     }
+
+    fn match_custom_target(&self, target: &CustomTarget) -> bool {
+        if let Some(size) = target.size
+            && !self.frame.is_some_and(|f| f.size() == size)
+        {
+            return false;
+        }
+        self.role
+            .to_lowercase()
+            .contains(&target.role.to_lowercase())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -226,8 +238,10 @@ impl ElementCache {
         let (w, h) = frame.size();
         match role {
             // NOTE: some roles to keep
-            RoleOfInterest::GenericNode | RoleOfInterest::ScrollBar | RoleOfInterest::TextField => {
-            }
+            RoleOfInterest::GenericNode
+            | RoleOfInterest::ScrollBar
+            | RoleOfInterest::TextField
+            | RoleOfInterest::CustomTarget => {}
             RoleOfInterest::Image if w.min(h) < self.image_min_size => {
                 return;
             }
@@ -309,6 +323,7 @@ pub trait GetAttribute {
     fn inspect(&self);
     fn is_clickable(&self) -> bool;
     fn has_children(&self) -> bool;
+    fn match_custom_target(&self, target: &CustomTarget) -> bool;
 }
 
 impl GetAttribute for AXUIElement {
@@ -400,6 +415,34 @@ impl GetAttribute for AXUIElement {
 
         Some(classes)
     }
+
+    fn match_custom_target(&self, target: &CustomTarget) -> bool {
+        if let Some(description) = target.description.as_ref()
+            && !self.description().is_ok_and(|d| d == *description)
+        {
+            return false;
+        }
+        if let Some(title) = target.title.as_ref()
+            && !self.title().is_ok_and(|t| t == *title)
+        {
+            return false;
+        }
+        if let Some(label) = target.label.as_ref()
+            && !self.label_value().is_ok_and(|l| l == *label)
+        {
+            return false;
+        }
+        if let Some(value) = target.value.as_ref()
+            && !self
+                .value()
+                .ok()
+                .and_then(|v| v.downcast::<CFString>())
+                .is_some_and(|v| v == *value)
+        {
+            return false;
+        }
+        true
+    }
 }
 
 pub trait SetAttribute {
@@ -462,6 +505,7 @@ pub enum Target {
     MenuItem,
     ChildElement,
     Scrollable,
+    Custom(CustomTarget),
 }
 
 pub fn traverse_elements(
@@ -514,6 +558,14 @@ pub fn traverse_elements(
     if vis_level == VisibilityCheckingLevel::Loose {
         new_frame = *parent_frame;
     }
+
+    // Try matching custom target first
+    if let Target::Custom(ct) = target
+        && ele_fp.match_custom_target(ct)
+        && element.match_custom_target(ct)
+    {
+        cache.add(element, None, RoleOfInterest::CustomTarget, ele_fp.frame);
+    };
 
     // TODO: Fine-grained control
     #[allow(non_upper_case_globals)]

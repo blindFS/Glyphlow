@@ -9,7 +9,7 @@ use crate::{
         ElementCache, ElementOfInterest, GetAttribute, RoleOfInterest, SetAttribute, Target,
         traverse_elements,
     },
-    config::{GlyphlowConfig, VisibilityCheckingLevel},
+    config::{GlyphlowConfig, VisibilityCheckingLevel, WorkFlowAction},
     drawer::GlyphlowDrawingLayer,
     os_util::get_focused_pid,
     util::{Frame, HintBox, estimate_frame_for_text, hint_boxes_from_frames, select_range_helper},
@@ -66,7 +66,8 @@ impl MultiSeletionState {
 /// Global state for Glyphlow,
 /// mainly cached UI elements, and some related drawings
 pub struct AppExecutor {
-    pub state: Arc<Mutex<Mode>>,
+    state: Arc<Mutex<Mode>>,
+    simulating_keys: Arc<Mutex<bool>>,
     /// Used for drawing hint boxes on screen
     hint_boxes: Vec<HintBox>,
     element_cache: ElementCache,
@@ -99,6 +100,7 @@ pub struct AppExecutor {
 impl AppExecutor {
     pub fn new(
         state: Arc<Mutex<Mode>>,
+        simulating_keys: Arc<Mutex<bool>>,
         config: GlyphlowConfig,
         window: Retained<CALayer>,
         screen_size: CGSize,
@@ -107,6 +109,7 @@ impl AppExecutor {
     ) -> Self {
         Self {
             state,
+            simulating_keys,
             hint_boxes: vec![],
             element_cache: ElementCache::new(
                 config.element_min_width as f64,
@@ -135,6 +138,12 @@ impl AppExecutor {
     fn set_mode(&self, mode: Mode) {
         if let Ok(mut state) = self.state.lock() {
             *state = mode;
+        }
+    }
+
+    fn set_simulating_key(&self, flag: bool) {
+        if let Ok(mut is_sim) = self.simulating_keys.lock() {
+            *is_sim = flag;
         }
     }
 
@@ -212,6 +221,9 @@ impl AppExecutor {
         }
         for action in self.config.text_actions.iter() {
             msg.push_str(&format!("\n({}) {}", action.key, action.display));
+        }
+        for workflow in self.config.text_workflows.iter() {
+            msg.push_str(&format!("\n({}) {}", workflow.key, workflow.display));
         }
         self.draw_menu(&msg);
     }
@@ -302,7 +314,7 @@ impl AppExecutor {
         // e.g. Discord
         if is_electron && pid != self.last_pid {
             let _ = focused_app.role();
-            std::thread::sleep(self.config.menu_wait_time);
+            std::thread::sleep(Duration::from_millis(self.config.menu_wait_ms));
         }
         self.last_pid = pid;
 
@@ -430,7 +442,7 @@ impl AppExecutor {
                 Self::simulate_click(x, y, true);
             }
             // HACK: wait for the right click menu to draw.
-            std::thread::sleep(self.config.menu_wait_time);
+            std::thread::sleep(Duration::from_millis(self.config.menu_wait_ms));
             self.selected = None;
             self.activate(Target::MenuItem);
         } else {
@@ -604,6 +616,9 @@ impl AppExecutor {
                     self.selected = Some(eoi.clone());
                     self.right_click_menu_on_selected();
                 }
+                Target::Custom(_) => {
+                    self.selected = Some(eoi.clone());
+                }
                 Target::ImageOCR => self.perform_ocr_on_frame(*frame).await,
                 Target::Text => {
                     if self.multi_selection.is_on {
@@ -718,12 +733,12 @@ impl AppExecutor {
         Ok(())
     }
 
-    fn take_external_action(&mut self, idx: usize, selected_text: &str) -> bool {
+    fn take_external_action(&mut self, idx: usize, selected_text: &str) {
         let action = self
             .config
             .text_actions
             .get(idx)
-            .expect("Internal Error: text action idex: {idx} out of bounds.");
+            .expect("Internal Error: text action index: {idx} out of bounds.");
         let args = action
             .args
             .iter()
@@ -741,7 +756,7 @@ impl AppExecutor {
                 ),
                 Level::Error,
             );
-            return true;
+            return;
         };
 
         // Wait for the stdout as the new text
@@ -764,8 +779,73 @@ impl AppExecutor {
                 self.notify_then_deactivate(&format!("Failed to run command: {e}"), Level::Error);
             }
         }
+    }
 
-        true
+    async fn execute_workflow(&mut self, idx: usize) {
+        let workflow = self
+            .config
+            .text_workflows
+            .get(idx)
+            .cloned()
+            .expect("Internal Error: text workflow index: {idx} out of bounds.");
+
+        for act in workflow.actions.iter() {
+            let Some(ElementOfInterest {
+                element: Some(element),
+                role,
+                frame,
+                ..
+            }) = self.selected.as_ref()
+            else {
+                self.notify_then_deactivate(
+                    "Running workflow without any selected element.",
+                    Level::Error,
+                );
+                return;
+            };
+            match act {
+                WorkFlowAction::Focus => {
+                    Self::focus_on_element(element);
+                }
+                WorkFlowAction::Press => {
+                    let center = frame.center();
+                    self.press_on_element(element, role, center);
+                }
+                WorkFlowAction::ShowMenu => {
+                    let center = frame.center();
+                    self.right_click_menu_on_element(element, center);
+                }
+                WorkFlowAction::Sleep(ms) => {
+                    std::thread::sleep(Duration::from_millis(*ms));
+                }
+                WorkFlowAction::SearchFor(ct) => {
+                    self.selected = None;
+                    self.activate(Target::Custom(ct.clone()));
+                    if self.element_cache.cache.len() == 1 {
+                        self.quick_follow().await;
+                    } else if self.element_cache.cache.len() > 1 {
+                        self.notify_then_deactivate(
+                            "Multiple elements found.\nOperation canceled.\nPlease run manually",
+                            Level::Warn,
+                        );
+                        return;
+                    } else {
+                        return;
+                    }
+                }
+                WorkFlowAction::ComboKey(kb) => {
+                    self.set_simulating_key(true);
+                    for k in kb.keys.iter() {
+                        Self::simulate_event(&EventType::KeyPress(*k));
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                    for k in kb.keys.iter().rev() {
+                        Self::simulate_event(&EventType::KeyRelease(*k));
+                    }
+                    self.set_simulating_key(false);
+                }
+            }
+        }
     }
 
     fn update_selected_text(&mut self, new_text: String) {
@@ -1000,7 +1080,14 @@ impl AppExecutor {
                             false
                         }
                     }
-                    TextAction::UserDefined(idx) => self.take_external_action(idx, &text),
+                    TextAction::UserDefined(idx) => {
+                        self.take_external_action(idx, &text);
+                        true
+                    }
+                    TextAction::WorkFlow(idx) => {
+                        self.execute_workflow(idx).await;
+                        true
+                    }
                 };
 
                 if !keep_drawing {
