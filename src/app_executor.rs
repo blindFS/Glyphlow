@@ -998,13 +998,13 @@ impl AppExecutor {
                     match sa {
                         ScrollAction::DownRight => {
                             Self::simulate_event(&EventType::Wheel {
-                                delta_x: -distance,
+                                delta_x: 0,
                                 delta_y: -distance,
                             });
                         }
                         ScrollAction::UpLeft => {
                             Self::simulate_event(&EventType::Wheel {
-                                delta_x: distance,
+                                delta_x: 0,
                                 delta_y: distance,
                             });
                         }
