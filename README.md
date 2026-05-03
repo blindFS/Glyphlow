@@ -76,7 +76,6 @@ brew services start glyphlow
 ```
 
 2. Grant accessibility permission to it
-
 3. Press the global trigger (defaults to "ALT + g") to start
 
 ## Purging
@@ -142,3 +141,11 @@ menu_font = "IosevkaTerm Nerd Font Mono:26"
 
 1. [ ] nix-flake
 2. [ ] menu bar icon
+
+## Acknowledgements
+
+This project is inspired by
+
+1. [Neru](https://github.com/y3owk1n/neru)
+2. [PopClip](https://www.popclip.app/)
+3. [Smartisan Big Bang](https://github.com/SmartisanTech/android)
