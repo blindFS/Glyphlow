@@ -7,6 +7,7 @@ use rdev::Key;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GlyphlowTheme {
@@ -271,6 +272,8 @@ pub struct GlyphlowConfig {
     pub dictionaries: Vec<String>,
     #[serde(default = "default_vis_level")]
     pub visibility_checking_level: VisibilityCheckingLevel,
+    #[serde(default = "default_menu_wait_time")]
+    pub menu_wait_time: Duration,
 }
 
 fn default_global_keybinding() -> KeyBinding {
@@ -306,6 +309,10 @@ fn default_vis_level() -> VisibilityCheckingLevel {
     VisibilityCheckingLevel::Loose
 }
 
+fn default_menu_wait_time() -> Duration {
+    Duration::from_millis(100)
+}
+
 impl Default for GlyphlowConfig {
     fn default() -> Self {
         GlyphlowConfig {
@@ -321,6 +328,7 @@ impl Default for GlyphlowConfig {
             ocr_languages: default_ocr_languages(),
             dictionaries: default_dictionaries(),
             visibility_checking_level: default_vis_level(),
+            menu_wait_time: default_menu_wait_time(),
         }
     }
 }

@@ -302,7 +302,7 @@ impl AppExecutor {
         // e.g. Discord
         if is_electron && pid != self.last_pid {
             let _ = focused_app.role();
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(self.config.menu_wait_time);
         }
         self.last_pid = pid;
 
@@ -430,7 +430,7 @@ impl AppExecutor {
                 Self::simulate_click(x, y, true);
             }
             // HACK: wait for the right click menu to draw.
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(self.config.menu_wait_time);
             self.selected = None;
             self.activate(Target::MenuItem);
         } else {
