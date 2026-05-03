@@ -834,13 +834,13 @@ impl AppExecutor {
                         return;
                     }
                 }
-                WorkFlowAction::SelectAll => element.set_selected_range(
-                    0,
-                    context
+                WorkFlowAction::SelectAll => {
+                    let len = context
                         .clone()
                         .map(|txt| txt.encode_utf16().count())
-                        .unwrap_or(0) as isize,
-                ),
+                        .unwrap_or(0) as isize;
+                    element.set_selected_range(0, len);
+                }
                 WorkFlowAction::ComboKey(kb) => {
                     self.set_simulating_key(true);
                     for k in kb.keys.iter() {
