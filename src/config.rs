@@ -8,6 +8,43 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+/// Custom target element to search for in a workflow
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
+pub struct CustomTarget {
+    pub role: String,
+    pub label: Option<String>,
+    pub value: Option<String>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub size: Option<(f64, f64)>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum WorkFlowAction {
+    SelectAll,
+    Focus,
+    Press,
+    ShowMenu,
+    ComboKey(KeyBinding),
+    SearchFor(CustomTarget),
+    Sleep(u64),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct WorkFlow {
+    pub display: String,
+    pub key: char,
+    pub actions: Vec<WorkFlowAction>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CommandAction {
+    pub command: String,
+    pub args: Vec<String>,
+    pub display: String,
+    pub key: char,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GlyphlowTheme {
     #[serde(with = "nsfont_format", default = "default_hint_font")]
@@ -129,14 +166,6 @@ pub fn cgcolor_to_rgba(cgcolor: &CFRetained<CGColor>) -> Option<(u8, u8, u8, u8)
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct CommandAction {
-    pub command: String,
-    pub args: Vec<String>,
-    pub display: String,
-    pub key: char,
-}
-
 pub trait AlphabeticKey {
     fn to_char(&self) -> char;
     fn to_str(&self) -> String;
@@ -255,6 +284,8 @@ pub struct GlyphlowConfig {
     pub theme: GlyphlowTheme,
     #[serde(default = "default_text_actions")]
     pub text_actions: Vec<CommandAction>,
+    #[serde(default = "default_text_workflows")]
+    pub text_workflows: Vec<WorkFlow>,
     #[serde(default = "default_scroll_distance")]
     pub scroll_distance: f64,
     #[serde(default = "default_element_min_width")]
@@ -271,6 +302,8 @@ pub struct GlyphlowConfig {
     pub dictionaries: Vec<String>,
     #[serde(default = "default_vis_level")]
     pub visibility_checking_level: VisibilityCheckingLevel,
+    #[serde(default = "default_menu_wait_ms")]
+    pub menu_wait_ms: u64,
 }
 
 fn default_global_keybinding() -> KeyBinding {
@@ -280,6 +313,24 @@ fn default_global_keybinding() -> KeyBinding {
 }
 fn default_text_actions() -> Vec<CommandAction> {
     vec![]
+}
+fn default_text_workflows() -> Vec<WorkFlow> {
+    vec![WorkFlow {
+        key: 'R',
+        display: " ProofRead".into(),
+        actions: vec![
+            WorkFlowAction::Focus,
+            WorkFlowAction::SelectAll,
+            WorkFlowAction::ShowMenu,
+            WorkFlowAction::Sleep(150),
+            WorkFlowAction::SearchFor(CustomTarget {
+                role: "MenuItem".into(),
+                title: Some("Proofread".into()),
+                ..Default::default()
+            }),
+            WorkFlowAction::Press,
+        ],
+    }]
 }
 fn default_scroll_distance() -> f64 {
     0.05
@@ -306,6 +357,10 @@ fn default_vis_level() -> VisibilityCheckingLevel {
     VisibilityCheckingLevel::Loose
 }
 
+fn default_menu_wait_ms() -> u64 {
+    100
+}
+
 impl Default for GlyphlowConfig {
     fn default() -> Self {
         GlyphlowConfig {
@@ -313,6 +368,7 @@ impl Default for GlyphlowConfig {
             editor: None,
             theme: GlyphlowTheme::default(),
             text_actions: default_text_actions(),
+            text_workflows: default_text_workflows(),
             scroll_distance: default_scroll_distance(),
             element_min_width: default_element_min_width(),
             element_min_height: default_element_min_height(),
@@ -321,6 +377,7 @@ impl Default for GlyphlowConfig {
             ocr_languages: default_ocr_languages(),
             dictionaries: default_dictionaries(),
             visibility_checking_level: default_vis_level(),
+            menu_wait_ms: default_menu_wait_ms(),
         }
     }
 }
