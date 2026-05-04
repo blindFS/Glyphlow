@@ -11,6 +11,7 @@ use std::path::PathBuf;
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum RoleOfInterest {
     Button,
+    CheckBox,
     Generic,
     Empty,
     Image,

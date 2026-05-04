@@ -221,7 +221,7 @@ impl ElementCache {
         let (w, h) = frame.size();
         match role {
             // NOTE: some roles to keep
-            RoleOfInterest::Generic | RoleOfInterest::ScrollBar => {}
+            RoleOfInterest::Generic | RoleOfInterest::ScrollBar | RoleOfInterest::CheckBox => {}
             // HACK: some menu items (like Apple Intelligence writing tools)
             // may have zero sized shadows, skip them to keep the workflow going
             RoleOfInterest::CustomTarget if w != 0.0 && h != 0.0 => {}
@@ -726,7 +726,7 @@ pub fn traverse_elements(
         },
         kAXCheckBoxRole => match target {
             Target::Clickable => {
-                cache.add(element, None, RoleOfInterest::Button, ele_fp.frame);
+                cache.add(element, None, RoleOfInterest::CheckBox, ele_fp.frame);
             }
             Target::Text => {
                 if let Ok(value) = element.description().map(|v| v.to_string()) {
