@@ -8,7 +8,7 @@ use crate::{
     ax_element::{
         ElementCache, ElementOfInterest, GetAttribute, SetAttribute, Target, traverse_elements,
     },
-    config::{GlyphlowConfig, RoleOfInterest, WorkFlow, WorkFlowAction},
+    config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel, WorkFlow, WorkFlowAction},
     drawer::GlyphlowDrawingLayer,
     os_util::get_focused_pid,
     util::{Frame, HintBox, estimate_frame_for_text, hint_boxes_from_frames, select_range_helper},
@@ -321,7 +321,7 @@ impl AppExecutor {
         )
     }
 
-    fn select_app_window(&mut self) -> Option<Frame> {
+    fn select_app_window(&mut self, vis_level: VisibilityCheckingLevel) -> Option<Frame> {
         let (pid, is_electron) = get_focused_pid()?;
         self.is_electron = is_electron;
 
@@ -336,8 +336,8 @@ impl AppExecutor {
         }
         self.last_pid = pid;
 
-        // HACK: some electron apps put right click pop-up menus in different windows
-        let (focused_window, window_frame) = if self.target == Target::MenuItem {
+        // HACK: menu items may go out of focused window
+        let (focused_window, window_frame) = if vis_level == VisibilityCheckingLevel::Loosest {
             (focused_app, screen_frame)
         } else {
             let window = focused_app.focused_window().unwrap_or(focused_app);
@@ -366,8 +366,14 @@ impl AppExecutor {
             _ => target,
         };
 
+        let vis_level = match target {
+            // NOTE: loose visibility checking for specific targets
+            Target::MenuItem | Target::Custom(_) => VisibilityCheckingLevel::Loosest,
+            _ => self.config.visibility_checking_level,
+        };
+
         if self.selected.is_none() {
-            self.select_app_window();
+            self.select_app_window(vis_level);
         }
 
         self.clear_cache();
@@ -384,7 +390,7 @@ impl AppExecutor {
                 frame,
                 &mut self.element_cache,
                 &target,
-                self.config.visibility_checking_level,
+                vis_level,
             );
         }
     }
@@ -1156,7 +1162,7 @@ impl AppExecutor {
                 } else {
                     // Defaults to the window
                     &self
-                        .select_app_window()
+                        .select_app_window(self.config.visibility_checking_level)
                         .unwrap_or_else(|| Frame::from_origion(self.screen_size))
                 };
                 if screen_shot(frame).await {
