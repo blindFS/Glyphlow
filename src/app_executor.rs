@@ -8,7 +8,7 @@ use crate::{
     ax_element::{
         ElementCache, ElementOfInterest, GetAttribute, SetAttribute, Target, traverse_elements,
     },
-    config::{GlyphlowConfig, RoleOfInterest, WorkFlow, WorkFlowAction},
+    config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel, WorkFlow, WorkFlowAction},
     drawer::GlyphlowDrawingLayer,
     os_util::get_focused_pid,
     util::{Frame, HintBox, estimate_frame_for_text, hint_boxes_from_frames, select_range_helper},
@@ -24,6 +24,7 @@ use objc2_core_foundation::CGSize;
 use objc2_quartz_core::CALayer;
 use rdev::{Button, EventType, simulate};
 use std::{
+    collections::VecDeque,
     path::PathBuf,
     sync::{Arc, Mutex},
     time::Duration,
@@ -94,6 +95,8 @@ pub struct AppExecutor {
     last_pid: i32,
     /// For multi-selection
     multi_selection: MultiSeletionState,
+    /// Something to finish after filtering
+    pending_workflow_actions: VecDeque<WorkFlowAction>,
 }
 
 impl AppExecutor {
@@ -131,6 +134,7 @@ impl AppExecutor {
             is_electron: false,
             last_pid: 0,
             multi_selection: MultiSeletionState::default(),
+            pending_workflow_actions: VecDeque::new(),
         }
     }
 
@@ -154,6 +158,7 @@ impl AppExecutor {
         self.clear_cache();
         self.clear_drawing();
         self.selected = None;
+        self.pending_workflow_actions.clear();
         self.set_mode(Mode::Idle);
     }
 
@@ -321,7 +326,7 @@ impl AppExecutor {
         )
     }
 
-    fn select_app_window(&mut self) -> Option<Frame> {
+    fn select_app_window(&mut self, vis_level: VisibilityCheckingLevel) -> Option<Frame> {
         let (pid, is_electron) = get_focused_pid()?;
         self.is_electron = is_electron;
 
@@ -336,12 +341,15 @@ impl AppExecutor {
         }
         self.last_pid = pid;
 
-        // HACK: some electron apps put right click pop-up menus in different windows
-        let (focused_window, window_frame) = if self.target == Target::MenuItem {
+        // HACK: menu items may go out of focused window
+        let (focused_window, window_frame) = if vis_level == VisibilityCheckingLevel::Loosest {
             (focused_app, screen_frame)
         } else {
             let window = focused_app.focused_window().unwrap_or(focused_app);
-            let frame = window.get_frame().unwrap_or(screen_frame);
+            let frame = window
+                .get_frame()
+                .and_then(|f| f.intersect(&screen_frame))
+                .unwrap_or(screen_frame);
             (window, frame)
         };
 
@@ -363,8 +371,14 @@ impl AppExecutor {
             _ => target,
         };
 
+        let vis_level = match target {
+            // NOTE: loose visibility checking for specific targets
+            Target::MenuItem | Target::Custom(_) => VisibilityCheckingLevel::Loosest,
+            _ => self.config.visibility_checking_level,
+        };
+
         if self.selected.is_none() {
-            self.select_app_window();
+            self.select_app_window(vis_level);
         }
 
         self.clear_cache();
@@ -381,7 +395,7 @@ impl AppExecutor {
                 frame,
                 &mut self.element_cache,
                 &target,
-                self.config.visibility_checking_level,
+                vis_level,
             );
         }
     }
@@ -440,34 +454,6 @@ impl AppExecutor {
         Self::simulate_event(&EventType::ButtonPress(button));
         std::thread::sleep(Duration::from_millis(20));
         Self::simulate_event(&EventType::ButtonRelease(button));
-    }
-
-    fn click_on_selected(&self) {
-        if let Some(ElementOfInterest { frame, .. }) = self.selected.as_ref() {
-            let (x, y) = frame.center();
-            Self::simulate_click(x, y, false);
-        }
-    }
-
-    fn right_click_menu_on_selected(&mut self) {
-        if let Some(ElementOfInterest { element, frame, .. }) = self.selected.as_ref() {
-            let center = frame.center();
-            let (x, y) = center;
-            if let Some(element) = element {
-                self.right_click_menu_on_element(element, center)
-            } else {
-                Self::simulate_click(x, y, true);
-            }
-            // HACK: wait for the right click menu to draw.
-            std::thread::sleep(Duration::from_millis(self.config.menu_wait_ms));
-            self.selected = None;
-            self.activate(Target::MenuItem);
-        } else {
-            self.notify(
-                "Trying to perform a right click with nothing selected.",
-                Level::Error,
-            );
-        }
     }
 
     fn focus_on_element(element: &AXUIElement) {
@@ -636,6 +622,7 @@ impl AppExecutor {
                 }
                 Target::Custom(_) => {
                     self.selected = Some(eoi.clone());
+                    self.execute_pending_workflow_actions();
                 }
                 Target::ImageOCR => self.perform_ocr_on_frame(*frame).await,
                 Target::Text => {
@@ -756,7 +743,7 @@ impl AppExecutor {
             .config
             .text_actions
             .get(idx)
-            .expect("Internal Error: text action index: {idx} out of bounds.");
+            .expect("Internal Error: text action index out of bounds.");
         let args = action
             .args
             .iter()
@@ -803,102 +790,110 @@ impl AppExecutor {
     fn is_workflow_valid(&self, wf: &WorkFlow) -> bool {
         match wf.starting_role {
             RoleOfInterest::Empty => self.selected.is_none(),
-            RoleOfInterest::Generic => self.selected.is_some(),
+            RoleOfInterest::Generic => self.selected.as_ref().is_some_and(|s| s.element.is_some()),
             _ => self
                 .selected
                 .as_ref()
-                .is_some_and(|s| s.role == wf.starting_role),
+                .is_some_and(|s| s.element.is_some() && s.role == wf.starting_role),
         }
     }
 
-    async fn execute_workflow(&mut self, idx: usize) {
+    /// Returns true if there're pending actions to finish
+    fn execute_workflow_action(&mut self, act: &WorkFlowAction) -> bool {
+        // Actions don't need a selected element
+        match act {
+            WorkFlowAction::Sleep(ms) => {
+                std::thread::sleep(Duration::from_millis(*ms));
+                return false;
+            }
+            WorkFlowAction::SearchFor(ct) => {
+                self.selected = None;
+                self.activate(Target::Custom(ct.clone()));
+                if self.element_cache.cache.len() == 1 {
+                    self.clear_drawing();
+                    self.selected = Some(self.element_cache.cache[0].clone());
+                } else if self.element_cache.cache.len() > 1 {
+                    return true;
+                }
+                return false;
+            }
+            WorkFlowAction::KeyCombo(kb) => {
+                self.set_simulating_key(true);
+                for k in kb.keys.iter() {
+                    Self::simulate_event(&EventType::KeyPress(*k));
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                for k in kb.keys.iter().rev() {
+                    Self::simulate_event(&EventType::KeyRelease(*k));
+                }
+                self.set_simulating_key(false);
+                return false;
+            }
+            _ => (),
+        }
+
+        // Actions that require a selected element
+        let Some(ElementOfInterest {
+            element: Some(element),
+            context,
+            role,
+            frame,
+            ..
+        }) = self.selected.as_ref()
+        else {
+            self.notify_then_deactivate(
+                &format!("Running a workflow action with no element selected. {act:?}"),
+                Level::Error,
+            );
+            return true;
+        };
+
+        match act {
+            WorkFlowAction::Focus => {
+                Self::focus_on_element(element);
+            }
+            WorkFlowAction::Press => {
+                let center = frame.center();
+                self.press_on_element(element, role, center);
+            }
+            WorkFlowAction::ShowMenu => {
+                let center = frame.center();
+                self.right_click_menu_on_element(element, center);
+            }
+            WorkFlowAction::SelectAll => {
+                let len = context
+                    .clone()
+                    .map(|txt| txt.encode_utf16().count())
+                    .unwrap_or(0) as isize;
+                element.set_selected_range(0, len);
+            }
+            _ => (),
+        }
+        false
+    }
+
+    fn execute_pending_workflow_actions(&mut self) {
+        while let Some(act) = self.pending_workflow_actions.pop_front() {
+            if self.execute_workflow_action(&act) {
+                return;
+            };
+        }
+        self.clear_drawing();
+        self.notify_then_deactivate("Done", Level::Trace);
+    }
+
+    fn execute_workflow(&mut self, idx: usize) {
         let workflow = self
             .config
             .workflows
             .get(idx)
             .cloned()
-            .expect("Internal Error: text workflow index: {idx} out of bounds.");
+            .expect("Internal Error: text workflow index out of bounds.");
 
-        for (act_idx, act) in workflow.actions.iter().enumerate() {
-            // Check starting_role, nothing happens if not match
-            if act_idx == 0 && !self.is_workflow_valid(&workflow) {
-                return;
-            }
-
-            // Actions don't need a selected element
-            match act {
-                WorkFlowAction::Sleep(ms) => {
-                    std::thread::sleep(Duration::from_millis(*ms));
-                    continue;
-                }
-                WorkFlowAction::SearchFor(ct) => {
-                    self.selected = None;
-                    self.activate(Target::Custom(ct.clone()));
-                    if self.element_cache.cache.len() == 1 {
-                        self.quick_follow().await;
-                    } else if self.element_cache.cache.len() > 1 {
-                        self.notify_then_deactivate(
-                            "Multiple elements found.\nOperation canceled.\nPlease run manually",
-                            Level::Warn,
-                        );
-                        return;
-                    } else {
-                        return;
-                    }
-                    continue;
-                }
-                WorkFlowAction::KeyCombo(kb) => {
-                    self.set_simulating_key(true);
-                    for k in kb.keys.iter() {
-                        Self::simulate_event(&EventType::KeyPress(*k));
-                        std::thread::sleep(Duration::from_millis(20));
-                    }
-                    for k in kb.keys.iter().rev() {
-                        Self::simulate_event(&EventType::KeyRelease(*k));
-                    }
-                    self.set_simulating_key(false);
-                    continue;
-                }
-                _ => (),
-            }
-
-            // Actions that require a selected element
-            let Some(ElementOfInterest {
-                element: Some(element),
-                context,
-                role,
-                frame,
-                ..
-            }) = self.selected.as_ref()
-            else {
-                self.notify_then_deactivate(
-                    &format!("Running a workflow action with no element selected. {act:?} at idx {act_idx}"),
-                    Level::Error,
-                );
-                return;
-            };
-
-            match act {
-                WorkFlowAction::Focus => {
-                    Self::focus_on_element(element);
-                }
-                WorkFlowAction::Press => {
-                    let center = frame.center();
-                    self.press_on_element(element, role, center);
-                }
-                WorkFlowAction::ShowMenu => {
-                    let center = frame.center();
-                    self.right_click_menu_on_element(element, center);
-                }
-                WorkFlowAction::SelectAll => {
-                    let len = context
-                        .clone()
-                        .map(|txt| txt.encode_utf16().count())
-                        .unwrap_or(0) as isize;
-                    element.set_selected_range(0, len);
-                }
-                _ => (),
-            }
+        // Silently quit if workflow is not valid for current selected element
+        if self.is_workflow_valid(&workflow) {
+            self.pending_workflow_actions = workflow.actions.into();
+            self.execute_pending_workflow_actions();
         }
     }
 
@@ -943,15 +938,8 @@ impl AppExecutor {
             AppSignal::DeActivate => {
                 self.deactivate();
             }
-            AppSignal::Press => {
-                self.click_on_selected();
-                self.deactivate();
-            }
-            AppSignal::ShowMenu => {
-                self.right_click_menu_on_selected();
-            }
             AppSignal::RunWorkFlow(idx) => {
-                self.execute_workflow(idx).await;
+                self.execute_workflow(idx);
             }
             AppSignal::ToggleMultiSelection => match self.target {
                 Target::Text | Target::ImageOCR => {
@@ -1153,7 +1141,7 @@ impl AppExecutor {
                 } else {
                     // Defaults to the window
                     &self
-                        .select_app_window()
+                        .select_app_window(self.config.visibility_checking_level)
                         .unwrap_or_else(|| Frame::from_origion(self.screen_size))
                 };
                 if screen_shot(frame).await {

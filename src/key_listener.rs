@@ -57,8 +57,6 @@ pub enum AppSignal {
     ReadClipboard,
     ScreenShot,
     FrameOCR,
-    Press,
-    ShowMenu,
 }
 
 #[derive(Debug, PartialEq)]
@@ -84,9 +82,6 @@ impl Display for MenuItem {
     }
 }
 
-// TODO: Config sub-menu to
-// 1. Reload config
-// 2. Toggle aggressive visibility check
 pub const DASH_BOARD_MENU_ITEMS: [MenuItem; 9] = [
     MenuItem::new("󰦨 Text", 'T', AppSignal::Activate(Target::Text)),
     MenuItem::new("󰳽 Press", 'P', AppSignal::Activate(Target::Clickable)),
@@ -122,7 +117,7 @@ pub const SCROLLBAR_MENU_ITEMS: [MenuItem; 4] = [
     ),
 ];
 
-pub const TEXT_ACTION_MENU_ITEMS: [MenuItem; 5] = [
+pub const TEXT_ACTION_MENU_ITEMS: [MenuItem; 3] = [
     MenuItem::new("⮺ Copy", 'C', AppSignal::TextAction(TextAction::Copy)),
     MenuItem::new(
         "◫ Dictionary",
@@ -130,15 +125,10 @@ pub const TEXT_ACTION_MENU_ITEMS: [MenuItem; 5] = [
         AppSignal::TextAction(TextAction::Dictionary),
     ),
     MenuItem::new("󰃻 Split", 'S', AppSignal::TextAction(TextAction::Split)),
-    MenuItem::new("󰳽 Press [Left Click]", 'P', AppSignal::Press),
-    MenuItem::new(" Menu [Right Click]", 'M', AppSignal::ShowMenu),
 ];
 
-pub const IMAGE_ACTION_MENU_ITEMS: [MenuItem; 3] = [
-    MenuItem::new("󱄺 Image OCR", 'O', AppSignal::FrameOCR),
-    MenuItem::new("󰳽 Press [Left Click]", 'P', AppSignal::Press),
-    MenuItem::new(" Menu [Right Click]", 'M', AppSignal::ShowMenu),
-];
+pub const IMAGE_ACTION_MENU_ITEMS: [MenuItem; 1] =
+    [MenuItem::new("󱄺 Image OCR", 'O', AppSignal::FrameOCR)];
 
 #[derive(Debug, PartialEq)]
 pub enum Mode {

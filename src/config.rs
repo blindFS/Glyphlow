@@ -11,6 +11,7 @@ use std::path::PathBuf;
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum RoleOfInterest {
     Button,
+    CheckBox,
     Generic,
     Empty,
     Image,
@@ -223,6 +224,8 @@ impl AlphabeticKey for Key {
             Key::KeyY => 'Y',
             Key::KeyZ => 'Z',
             Key::Backspace | Key::Delete => '-',
+            Key::LeftBracket => '[',
+            Key::RightBracket => ']',
             _ => ' ',
         }
     }
@@ -292,8 +295,15 @@ pub struct KeyBinding {
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Copy)]
 pub enum VisibilityCheckingLevel {
+    /// As long as element frame intersects with whole screen,
+    /// reserved for limited targets
+    Loosest,
+    /// As long as element frame intersects with window frame
     Loose,
+    /// Element frame should intersect with its own parent,
+    /// as well as the window frame
     Medium,
+    /// Element frame should intersect with all its ancestors
     Strict,
 }
 
@@ -379,6 +389,26 @@ fn default_workflows() -> Vec<WorkFlow> {
                 WorkFlowAction::SearchFor(CustomTarget {
                     role: "MenuItem".into(),
                     title: Some("Copy Image Address".into()),
+                    ..Default::default()
+                }),
+                WorkFlowAction::Press,
+            ],
+        },
+        WorkFlow {
+            key: '[',
+            display: "󰳽 Press [Left Click]".into(),
+            starting_role: RoleOfInterest::Generic,
+            actions: vec![WorkFlowAction::Press],
+        },
+        WorkFlow {
+            key: ']',
+            display: " Menu [Right Click]".into(),
+            starting_role: RoleOfInterest::Generic,
+            actions: vec![
+                WorkFlowAction::ShowMenu,
+                WorkFlowAction::Sleep(150),
+                WorkFlowAction::SearchFor(CustomTarget {
+                    role: "MenuItem".into(),
                     ..Default::default()
                 }),
                 WorkFlowAction::Press,

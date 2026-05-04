@@ -7,11 +7,12 @@ use crate::{
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     AXUIElementCopyMultipleAttributeValues, AXValueCreate, AXValueGetValue, AXValueRef,
-    kAXButtonRole, kAXCellRole, kAXCheckBoxRole, kAXComboBoxRole, kAXDescriptionAttribute,
-    kAXErrorSuccess, kAXGroupRole, kAXHiddenAttribute, kAXImageRole, kAXMenuItemRole,
-    kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction, kAXRoleAttribute, kAXRowRole,
-    kAXScrollBarRole, kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole,
-    kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
+    kAXButtonRole, kAXCellRole, kAXCheckBoxRole, kAXComboBoxRole, kAXContentListSubrole,
+    kAXDescriptionAttribute, kAXErrorSuccess, kAXGroupRole, kAXHiddenAttribute, kAXImageRole,
+    kAXListRole, kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction,
+    kAXRoleAttribute, kAXRowRole, kAXScrollAreaRole, kAXScrollBarRole,
+    kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
+    kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
     kAXValueTypeCGPoint, kAXValueTypeCGSize, kAXWindowRole,
 };
 use core_foundation::{
@@ -220,7 +221,10 @@ impl ElementCache {
         let (w, h) = frame.size();
         match role {
             // NOTE: some roles to keep
-            RoleOfInterest::Generic | RoleOfInterest::ScrollBar | RoleOfInterest::CustomTarget => {}
+            RoleOfInterest::Generic | RoleOfInterest::ScrollBar | RoleOfInterest::CheckBox => {}
+            // HACK: some menu items (like Apple Intelligence writing tools)
+            // may have zero sized shadows, skip them to keep the workflow going
+            RoleOfInterest::CustomTarget if w != 0.0 && h != 0.0 => {}
             RoleOfInterest::Image if w.min(h) < self.image_min_size => {
                 return;
             }
@@ -232,6 +236,7 @@ impl ElementCache {
             {
                 return;
             }
+            RoleOfInterest::TextField => (),
             // Check text before size, keep small texts
             _ if context.is_some() => {
                 // Skip elements with empty/nonsense text
@@ -256,10 +261,7 @@ impl ElementCache {
 
         // NOTE: de-duplication for DOM elements
         let new_ele = ElementOfInterest::new(Some(element.clone()), context, role.clone(), frame);
-        // Keep all nodes with Target::ChildElement/GenericNode, as it's basically a debugging mode
-        if role != RoleOfInterest::Generic
-            && let Some(idx) = self.seen_center.get(&center)
-        {
+        if let Some(idx) = self.seen_center.get(&center) {
             self.cache[*idx] = new_ele;
         } else {
             self.seen_center.insert(center, self.cache.len());
@@ -505,79 +507,100 @@ pub fn traverse_elements(
         return;
     };
 
+    // WARN: Performance critical! Exclude electron elements scrolled off y axis,
+    // but should avoid false negatives of ancestors for some menu items,
+    // e.g. (Discord right click menu)
+    if ele_fp.frame.is_some_and(|f| {
+        let (_, h) = f.size();
+        (h == 0.0 && f.bottom_right.y == window_frame.bottom_right.y)
+            || (h == 1.0 && f.top_left.y == window_frame.top_left.y)
+    }) && vis_level != VisibilityCheckingLevel::Loosest
+    {
+        return;
+    }
+
     // Get child elements 1 level lower
     // for false negatives aggressively filtered by the visibility checker
     if *target == Target::ChildElement {
-        cache.clear();
-        if let Ok(children) = element.visible_children().or_else(|_| element.children()) {
-            for child in &children {
-                // NOTE: Some apps, like App Store, have circular referencing
-                if *child == *element {
-                    continue;
-                }
-                if let Some(child_fp) = ElementBasicAttributes::from(&child)
-                    // HACK: exclude electron elements scrolled off y axis
-                    && child_fp.frame.is_some_and(|f| {
-                        let (_, h) = f.size();
-                        h != 1.0 && h != 0.0
-                    })
-                    && child_fp.visible_frame(parent_frame).is_some()
-                {
-                    cache.add(&child, None, RoleOfInterest::Generic, child_fp.frame);
+        let Ok(children) = element.visible_children().or_else(|_| element.children()) else {
+            return;
+        };
+        for child in &children {
+            // NOTE: Some apps, like App Store, have circular referencing
+            if *child == *element {
+                continue;
+            }
+            if let Some(child_fp) = ElementBasicAttributes::from(&child)
+                && let Some(c_f) = child_fp.frame
+                && let Some(inter) = child_fp.visible_frame(window_frame)
+            {
+                // NOTE: recur into temp nodes with nonsense frames,
+                // or dominating child elements, most of the time, they're meaningless.
+                let (c_w, c_h) = c_f.size();
+                if inter.contains(window_frame) || c_w <= 1.0 || c_h <= 1.0 || {
+                    let (i_w, i_h) = inter.size();
+                    let (w_w, w_h) = window_frame.size();
+                    i_w > 0.9 * w_w && i_h > 0.9 * w_h
+                } {
+                    traverse_elements(&child, &c_f, window_frame, cache, target, vis_level);
+                } else {
+                    cache.add(
+                        &child,
+                        None,
+                        RoleOfInterest::Generic,
+                        child_fp.frame.and_then(|f| f.intersect(window_frame)),
+                    );
                 }
             }
         }
+
         // Skip element levels where only 1 item available
-        if cache.cache.len() == 1
-            && let Some(ElementOfInterest {
-                element: Some(element),
-                frame,
-                ..
-            }) = cache.cache.first()
-        {
-            traverse_elements(
-                &element.clone(),
-                &frame.clone(),
-                window_frame,
-                cache,
-                target,
-                vis_level,
-            );
+        if cache.cache.len() == 1 {
+            let temp_eoi = cache.cache[0].clone();
+            cache.clear();
+            if let Some(element) = temp_eoi.element {
+                traverse_elements(
+                    &element,
+                    &temp_eoi
+                        .frame
+                        .intersect(window_frame)
+                        .unwrap_or(*parent_frame),
+                    window_frame,
+                    cache,
+                    target,
+                    vis_level,
+                );
+            }
         }
 
         return;
     }
 
     // If invisible, return early
-    let Some(mut new_frame) = ele_fp.visible_frame(parent_frame) else {
-        return;
-    };
-
-    // HACK: exclude electron elements scrolled off y axis,
-    // but some menu items' ancestors (Discord) are of zero height
-    let vis_level = match target {
-        // NOTE: loose visibility checking for specific targets
-        Target::MenuItem | Target::Custom(_) => VisibilityCheckingLevel::Loose,
-        _ if ele_fp.frame.is_some_and(|f| {
-            let (_, h) = f.size();
-            h == 1.0 || h == 0.0
-        }) =>
-        {
-            return;
+    // NOTE: `parent_frame` should be monotonically decreasing,
+    // and always included in `window_frame`
+    let new_frame = match vis_level {
+        VisibilityCheckingLevel::Loose | VisibilityCheckingLevel::Loosest => {
+            let Some(new_frame) = ele_fp.visible_frame(window_frame) else {
+                return;
+            };
+            new_frame
         }
-        _ => vis_level,
-    };
-
-    match vis_level {
-        VisibilityCheckingLevel::Medium => {
-            new_frame = ele_fp
-                .frame
-                .and_then(|f| f.intersect(window_frame))
-                .unwrap_or(*parent_frame);
+        // Check intersection with parent frame
+        _ => {
+            let Some(new_frame) = ele_fp.visible_frame(parent_frame) else {
+                return;
+            };
+            if vis_level == VisibilityCheckingLevel::Strict {
+                new_frame
+            } else {
+                ele_fp
+                    .frame
+                    .and_then(|f| f.intersect(window_frame))
+                    .unwrap_or(*parent_frame)
+            }
         }
-        VisibilityCheckingLevel::Loose => new_frame = *parent_frame,
-        _ => (),
-    }
+    };
 
     // Try matching custom target first
     if let Target::Custom(ct) = target
@@ -587,7 +610,8 @@ pub fn traverse_elements(
         cache.add(element, None, RoleOfInterest::CustomTarget, ele_fp.frame);
     };
 
-    // TODO: Fine-grained control
+    let mut window_frame = *window_frame;
+
     #[allow(non_upper_case_globals)]
     match ele_fp.role.as_str() {
         // TODO: DOM Class List based image searching for icon button
@@ -658,11 +682,19 @@ pub fn traverse_elements(
             }
             _ => (),
         },
-        kAXWindowRole => {
-            // NOTE: For AXApplication the frame is usually None, defaults to full screen.
-            // Need to narrow down to window frame at this place.
-            if let Some(win_frame) = ele_fp.frame {
-                new_frame = win_frame;
+        // NOTE: narrow down to window frame at "Window-ish" nodes.
+        // This is useful for y axis scroll-off detection of electron apps
+        kAXWindowRole | kAXScrollAreaRole | "AXWebArea"
+            if vis_level != VisibilityCheckingLevel::Loosest =>
+        {
+            if let Some(area_frame) = ele_fp.frame.and_then(|f| f.intersect(&window_frame)) {
+                window_frame = area_frame;
+            };
+        }
+        // NOTE: don't do it for AXSectionList, e.g. Apple Music
+        kAXListRole if element.subrole().is_ok_and(|r| r == kAXContentListSubrole) => {
+            if let Some(area_frame) = ele_fp.frame.and_then(|f| f.intersect(&window_frame)) {
+                window_frame = area_frame;
             };
         }
         kAXComboBoxRole | kAXTextFieldRole | kAXTextAreaRole => match target {
@@ -675,7 +707,9 @@ pub fn traverse_elements(
                 );
             }
             Target::Text => {
-                if let Some(value) = element.get_attribute_string(kAXValueAttribute) {
+                if let Some(value) = element.get_attribute_string(kAXValueAttribute)
+                    && !value.is_empty()
+                {
                     cache.add(
                         element,
                         Some(value),
@@ -692,7 +726,7 @@ pub fn traverse_elements(
         },
         kAXCheckBoxRole => match target {
             Target::Clickable => {
-                cache.add(element, None, RoleOfInterest::Button, ele_fp.frame);
+                cache.add(element, None, RoleOfInterest::CheckBox, ele_fp.frame);
             }
             Target::Text => {
                 if let Ok(value) = element.description().map(|v| v.to_string()) {
@@ -761,7 +795,7 @@ pub fn traverse_elements(
             if *child == *element {
                 continue;
             }
-            traverse_elements(&child, &new_frame, window_frame, cache, target, vis_level);
+            traverse_elements(&child, &new_frame, &window_frame, cache, target, vis_level);
         }
     }
 }
