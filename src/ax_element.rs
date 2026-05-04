@@ -257,10 +257,7 @@ impl ElementCache {
 
         // NOTE: de-duplication for DOM elements
         let new_ele = ElementOfInterest::new(Some(element.clone()), context, role.clone(), frame);
-        // Keep all nodes with Target::ChildElement/GenericNode, as it's basically a debugging mode
-        if role != RoleOfInterest::Generic
-            && let Some(idx) = self.seen_center.get(&center)
-        {
+        if let Some(idx) = self.seen_center.get(&center) {
             self.cache[*idx] = new_ele;
         } else {
             self.seen_center.insert(center, self.cache.len());
