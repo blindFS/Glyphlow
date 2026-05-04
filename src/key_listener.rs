@@ -84,9 +84,6 @@ impl Display for MenuItem {
     }
 }
 
-// TODO: Config sub-menu to
-// 1. Reload config
-// 2. Toggle aggressive visibility check
 pub const DASH_BOARD_MENU_ITEMS: [MenuItem; 9] = [
     MenuItem::new("󰦨 Text", 'T', AppSignal::Activate(Target::Text)),
     MenuItem::new("󰳽 Press", 'P', AppSignal::Activate(Target::Clickable)),

@@ -341,7 +341,10 @@ impl AppExecutor {
             (focused_app, screen_frame)
         } else {
             let window = focused_app.focused_window().unwrap_or(focused_app);
-            let frame = window.get_frame().unwrap_or(screen_frame);
+            let frame = window
+                .get_frame()
+                .and_then(|f| f.intersect(&screen_frame))
+                .unwrap_or(screen_frame);
             (window, frame)
         };
 

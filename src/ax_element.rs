@@ -232,6 +232,7 @@ impl ElementCache {
             {
                 return;
             }
+            RoleOfInterest::TextField => (),
             // Check text before size, keep small texts
             _ if context.is_some() => {
                 // Skip elements with empty/nonsense text
@@ -508,7 +509,6 @@ pub fn traverse_elements(
     // Get child elements 1 level lower
     // for false negatives aggressively filtered by the visibility checker
     if *target == Target::ChildElement {
-        cache.clear();
         if let Ok(children) = element.visible_children().or_else(|_| element.children()) {
             for child in &children {
                 // NOTE: Some apps, like App Store, have circular referencing
@@ -516,33 +516,56 @@ pub fn traverse_elements(
                     continue;
                 }
                 if let Some(child_fp) = ElementBasicAttributes::from(&child)
-                    // HACK: exclude electron elements scrolled off y axis
-                    && child_fp.frame.is_some_and(|f| {
-                        let (_, h) = f.size();
-                        h != 1.0 && h != 0.0
-                    })
-                    && child_fp.visible_frame(parent_frame).is_some()
+                    && let Some(c_f) = child_fp.frame
+                    && let Some(inter) = child_fp.visible_frame(window_frame)
                 {
-                    cache.add(&child, None, RoleOfInterest::Generic, child_fp.frame);
+                    // HACK: exclude electron elements scrolled off y axis
+                    let (c_w, c_h) = c_f.size();
+                    if c_h == 1.0 || c_h == 0.0 {
+                        continue;
+                    }
+
+                    // NOTE: recur into temp nodes with nonsense frames,
+                    // or dominating child elements, most of the time,
+                    // they're meaningless.
+                    if inter.contains(window_frame) || c_w <= 1.0 || c_h <= 1.0 || {
+                        let (i_w, i_h) = inter.size();
+                        let (w_w, w_h) = window_frame.size();
+                        i_w > 0.9 * w_w && i_h > 0.9 * w_h
+                    } {
+                        traverse_elements(
+                            &child,
+                            parent_frame,
+                            window_frame,
+                            cache,
+                            target,
+                            vis_level,
+                        );
+                    } else {
+                        cache.add(
+                            &child,
+                            None,
+                            RoleOfInterest::Generic,
+                            child_fp.frame.and_then(|f| f.intersect(window_frame)),
+                        );
+                    }
                 }
             }
         }
         // Skip element levels where only 1 item available
-        if cache.cache.len() == 1
-            && let Some(ElementOfInterest {
-                element: Some(element),
-                frame,
-                ..
-            }) = cache.cache.first()
-        {
-            traverse_elements(
-                &element.clone(),
-                &frame.clone(),
-                window_frame,
-                cache,
-                target,
-                vis_level,
-            );
+        if cache.cache.len() == 1 {
+            let temp_eoi = cache.cache[0].clone();
+            cache.clear();
+            if let Some(element) = temp_eoi.element {
+                traverse_elements(
+                    &element,
+                    &temp_eoi.frame,
+                    window_frame,
+                    cache,
+                    target,
+                    vis_level,
+                );
+            }
         }
 
         return;
@@ -675,7 +698,9 @@ pub fn traverse_elements(
                 );
             }
             Target::Text => {
-                if let Some(value) = element.get_attribute_string(kAXValueAttribute) {
+                if let Some(value) = element.get_attribute_string(kAXValueAttribute)
+                    && !value.is_empty()
+                {
                     cache.add(
                         element,
                         Some(value),

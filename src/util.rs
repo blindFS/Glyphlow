@@ -174,6 +174,13 @@ impl Frame {
             self.bottom_right.y.max(other.bottom_right.y),
         )
     }
+
+    pub fn contains(&self, other: &Frame) -> bool {
+        self.top_left.x <= other.top_left.x
+            && self.top_left.y <= other.top_left.y
+            && self.bottom_right.x >= other.bottom_right.x
+            && self.bottom_right.y >= other.bottom_right.y
+    }
 }
 
 fn estimate_font_height(s: &str, frame: &Frame) -> f64 {
