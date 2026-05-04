@@ -7,12 +7,13 @@ use crate::{
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     AXUIElementCopyMultipleAttributeValues, AXValueCreate, AXValueGetValue, AXValueRef,
-    kAXButtonRole, kAXCellRole, kAXCheckBoxRole, kAXComboBoxRole, kAXDescriptionAttribute,
-    kAXErrorSuccess, kAXGroupRole, kAXHiddenAttribute, kAXImageRole, kAXListRole, kAXMenuItemRole,
-    kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction, kAXRoleAttribute, kAXRowRole,
-    kAXScrollAreaRole, kAXScrollBarRole, kAXSelectedTextRangeAttribute, kAXSizeAttribute,
-    kAXStaticTextRole, kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute,
-    kAXValueTypeCFRange, kAXValueTypeCGPoint, kAXValueTypeCGSize, kAXWindowRole,
+    kAXButtonRole, kAXCellRole, kAXCheckBoxRole, kAXComboBoxRole, kAXContentListSubrole,
+    kAXDescriptionAttribute, kAXErrorSuccess, kAXGroupRole, kAXHiddenAttribute, kAXImageRole,
+    kAXListRole, kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction,
+    kAXRoleAttribute, kAXRowRole, kAXScrollAreaRole, kAXScrollBarRole,
+    kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
+    kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
+    kAXValueTypeCGPoint, kAXValueTypeCGSize, kAXWindowRole,
 };
 use core_foundation::{
     array::{CFArray, CFArrayRef},
@@ -511,8 +512,8 @@ pub fn traverse_elements(
     // e.g. (Discord right click menu)
     if ele_fp.frame.is_some_and(|f| {
         let (_, h) = f.size();
-        (h == 0.0 && f.bottom_right.y == parent_frame.bottom_right.y)
-            || (h == 1.0 && f.top_left.y == parent_frame.top_left.y)
+        (h == 0.0 && f.bottom_right.y == window_frame.bottom_right.y)
+            || (h == 1.0 && f.top_left.y == window_frame.top_left.y)
     }) && vis_level != VisibilityCheckingLevel::Loosest
     {
         return;
@@ -541,7 +542,7 @@ pub fn traverse_elements(
                     let (w_w, w_h) = window_frame.size();
                     i_w > 0.9 * w_w && i_h > 0.9 * w_h
                 } {
-                    traverse_elements(&child, parent_frame, window_frame, cache, target, vis_level);
+                    traverse_elements(&child, &c_f, window_frame, cache, target, vis_level);
                 } else {
                     cache.add(
                         &child,
@@ -560,7 +561,10 @@ pub fn traverse_elements(
             if let Some(element) = temp_eoi.element {
                 traverse_elements(
                     &element,
-                    parent_frame,
+                    &temp_eoi
+                        .frame
+                        .intersect(window_frame)
+                        .unwrap_or(*parent_frame),
                     window_frame,
                     cache,
                     target,
@@ -573,24 +577,30 @@ pub fn traverse_elements(
     }
 
     // If invisible, return early
-    let Some(mut new_frame) = ele_fp.visible_frame(parent_frame) else {
-        return;
-    };
-
-    match vis_level {
-        VisibilityCheckingLevel::Medium => {
-            // NOTE: `parent_frame` should be monotonically decreasing,
-            // and always included in `window_frame`
-            new_frame = ele_fp
-                .frame
-                .and_then(|f| f.intersect(window_frame))
-                .unwrap_or(*parent_frame);
-        }
+    // NOTE: `parent_frame` should be monotonically decreasing,
+    // and always included in `window_frame`
+    let new_frame = match vis_level {
         VisibilityCheckingLevel::Loose | VisibilityCheckingLevel::Loosest => {
-            new_frame = *parent_frame
+            let Some(new_frame) = ele_fp.visible_frame(window_frame) else {
+                return;
+            };
+            new_frame
         }
-        _ => (),
-    }
+        // Check intersection with parent frame
+        _ => {
+            let Some(new_frame) = ele_fp.visible_frame(parent_frame) else {
+                return;
+            };
+            if vis_level == VisibilityCheckingLevel::Strict {
+                new_frame
+            } else {
+                ele_fp
+                    .frame
+                    .and_then(|f| f.intersect(window_frame))
+                    .unwrap_or(*parent_frame)
+            }
+        }
+    };
 
     // Try matching custom target first
     if let Target::Custom(ct) = target
@@ -599,6 +609,8 @@ pub fn traverse_elements(
     {
         cache.add(element, None, RoleOfInterest::CustomTarget, ele_fp.frame);
     };
+
+    let mut window_frame = *window_frame;
 
     #[allow(non_upper_case_globals)]
     match ele_fp.role.as_str() {
@@ -670,13 +682,19 @@ pub fn traverse_elements(
             }
             _ => (),
         },
-        kAXWindowRole | kAXListRole | kAXScrollAreaRole | "AXWebArea"
+        // NOTE: narrow down to window frame at "Window-ish" nodes.
+        // This is useful for y axis scroll-off detection of electron apps
+        kAXWindowRole | kAXScrollAreaRole | "AXWebArea"
             if vis_level != VisibilityCheckingLevel::Loosest =>
         {
-            // NOTE: For AXApplication the frame is usually None, defaults to full screen.
-            // Need to narrow down to window frame at this place.
-            if let Some(area_frame) = ele_fp.frame {
-                new_frame = area_frame.intersect(parent_frame).unwrap_or(*parent_frame);
+            if let Some(area_frame) = ele_fp.frame.and_then(|f| f.intersect(&window_frame)) {
+                window_frame = area_frame;
+            };
+        }
+        // NOTE: don't do it for AXSectionList, e.g. Apple Music
+        kAXListRole if element.subrole().is_ok_and(|r| r == kAXContentListSubrole) => {
+            if let Some(area_frame) = ele_fp.frame.and_then(|f| f.intersect(&window_frame)) {
+                window_frame = area_frame;
             };
         }
         kAXComboBoxRole | kAXTextFieldRole | kAXTextAreaRole => match target {
@@ -777,7 +795,7 @@ pub fn traverse_elements(
             if *child == *element {
                 continue;
             }
-            traverse_elements(&child, &new_frame, window_frame, cache, target, vis_level);
+            traverse_elements(&child, &new_frame, &window_frame, cache, target, vis_level);
         }
     }
 }
