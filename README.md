@@ -52,7 +52,7 @@ you can
 
 ### Workflow
 
-Users can define their own workflows (currently text only) in terms of sequences
+Users can define their own workflows in terms of sequences
 of primitive actions.
 
 For instance, with the following configuration snippet,
@@ -64,6 +64,7 @@ we can swiftly execute the utilities of the apple intelligence writing tool.
 [[text_workflows]]
 display = " Rewrite"
 key = "R"
+starting_role = "TextField"
 actions = [
   "Focus",
   "SelectAll",

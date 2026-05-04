@@ -1,15 +1,14 @@
 use crate::{
-    AppSignal, DASH_BOARD_MENU_ITEMS, FilterMode, MenuItem, Mode, SCROLLBAR_MENU_ITEMS,
-    ScrollAction, TEXT_ACTION_MENU_ITEMS, TextAction,
+    AppSignal, DASH_BOARD_MENU_ITEMS, FilterMode, IMAGE_ACTION_MENU_ITEMS, MenuItem, Mode,
+    SCROLLBAR_MENU_ITEMS, ScrollAction, TEXT_ACTION_MENU_ITEMS, TextAction,
     action::{
         OCRResult, WordPicker, get_dictionary_attributed_string, perform_ocr, screen_shot,
         text_from_clipboard, text_to_clipboard,
     },
     ax_element::{
-        ElementCache, ElementOfInterest, GetAttribute, RoleOfInterest, SetAttribute, Target,
-        traverse_elements,
+        ElementCache, ElementOfInterest, GetAttribute, SetAttribute, Target, traverse_elements,
     },
-    config::{GlyphlowConfig, VisibilityCheckingLevel, WorkFlowAction},
+    config::{GlyphlowConfig, RoleOfInterest, WorkFlow, WorkFlowAction},
     drawer::GlyphlowDrawingLayer,
     os_util::get_focused_pid,
     util::{Frame, HintBox, estimate_frame_for_text, hint_boxes_from_frames, select_range_helper},
@@ -206,6 +205,17 @@ impl AppExecutor {
         self.draw_selected_frame();
     }
 
+    fn draw_image_action_menu(&self) {
+        let mut msg = "Pick an Action for Image".to_string();
+        msg.push_str(&Self::menu_string(&IMAGE_ACTION_MENU_ITEMS));
+        for workflow in self.config.workflows.iter() {
+            if self.is_workflow_valid(workflow) {
+                msg.push_str(&format!("\n({}) {}", workflow.key, workflow.display));
+            }
+        }
+        self.draw_menu(&msg);
+    }
+
     fn draw_text_action_menu(&self, text: &str) {
         // Truncate long text
         let text = if text.len() > MAX_TEXT_DISPLAY_LEN {
@@ -222,8 +232,10 @@ impl AppExecutor {
         for action in self.config.text_actions.iter() {
             msg.push_str(&format!("\n({}) {}", action.key, action.display));
         }
-        for workflow in self.config.text_workflows.iter() {
-            msg.push_str(&format!("\n({}) {}", workflow.key, workflow.display));
+        for workflow in self.config.workflows.iter() {
+            if self.is_workflow_valid(workflow) {
+                msg.push_str(&format!("\n({}) {}", workflow.key, workflow.display));
+            }
         }
         self.draw_menu(&msg);
     }
@@ -239,6 +251,12 @@ impl AppExecutor {
         msg.push_str(&Self::menu_string(&DASH_BOARD_MENU_ITEMS));
         if let Some(editor) = self.config.editor.as_ref() {
             msg.push_str(&format!("\n({}) {}", editor.key, editor.display));
+        }
+        // Workflows for current selected element
+        for workflow in self.config.workflows.iter() {
+            if self.is_workflow_valid(workflow) {
+                msg.push_str(&format!("\n({}) {}", workflow.key, workflow.display));
+            }
         }
         self.clear_drawing();
         self.draw_selected_frame();
@@ -330,7 +348,7 @@ impl AppExecutor {
         self.selected = Some(ElementOfInterest::new(
             Some(focused_window),
             None,
-            RoleOfInterest::GenericNode,
+            RoleOfInterest::Generic,
             window_frame,
         ));
 
@@ -356,12 +374,6 @@ impl AppExecutor {
             ..
         }) = self.selected.as_ref()
         {
-            let vis_level = if target == Target::MenuItem {
-                VisibilityCheckingLevel::Loose
-            } else {
-                self.config.visibility_checking_level
-            };
-
             traverse_elements(
                 element,
                 // Very loose visibility constraint
@@ -369,7 +381,7 @@ impl AppExecutor {
                 frame,
                 &mut self.element_cache,
                 &target,
-                vis_level,
+                self.config.visibility_checking_level,
             );
         }
     }
@@ -619,7 +631,8 @@ impl AppExecutor {
                 }
                 Target::Image => {
                     self.selected = Some(eoi.clone());
-                    self.right_click_menu_on_selected();
+                    self.set_mode(Mode::ImageActionMenu);
+                    self.draw_image_action_menu();
                 }
                 Target::Custom(_) => {
                     self.selected = Some(eoi.clone());
@@ -786,43 +799,37 @@ impl AppExecutor {
         }
     }
 
+    /// Check if a workflow's starting_role matches current selected element
+    fn is_workflow_valid(&self, wf: &WorkFlow) -> bool {
+        match wf.starting_role {
+            RoleOfInterest::Empty => self.selected.is_none(),
+            RoleOfInterest::Generic => self.selected.is_some(),
+            _ => self
+                .selected
+                .as_ref()
+                .is_some_and(|s| s.role == wf.starting_role),
+        }
+    }
+
     async fn execute_workflow(&mut self, idx: usize) {
         let workflow = self
             .config
-            .text_workflows
+            .workflows
             .get(idx)
             .cloned()
             .expect("Internal Error: text workflow index: {idx} out of bounds.");
 
-        for act in workflow.actions.iter() {
-            let Some(ElementOfInterest {
-                element: Some(element),
-                context,
-                role,
-                frame,
-                ..
-            }) = self.selected.as_ref()
-            else {
-                self.notify_then_deactivate(
-                    "Running workflow without any selected element.",
-                    Level::Error,
-                );
+        for (act_idx, act) in workflow.actions.iter().enumerate() {
+            // Check starting_role, nothing happens if not match
+            if act_idx == 0 && !self.is_workflow_valid(&workflow) {
                 return;
-            };
+            }
+
+            // Actions don't need a selected element
             match act {
-                WorkFlowAction::Focus => {
-                    Self::focus_on_element(element);
-                }
-                WorkFlowAction::Press => {
-                    let center = frame.center();
-                    self.press_on_element(element, role, center);
-                }
-                WorkFlowAction::ShowMenu => {
-                    let center = frame.center();
-                    self.right_click_menu_on_element(element, center);
-                }
                 WorkFlowAction::Sleep(ms) => {
                     std::thread::sleep(Duration::from_millis(*ms));
+                    continue;
                 }
                 WorkFlowAction::SearchFor(ct) => {
                     self.selected = None;
@@ -838,15 +845,9 @@ impl AppExecutor {
                     } else {
                         return;
                     }
+                    continue;
                 }
-                WorkFlowAction::SelectAll => {
-                    let len = context
-                        .clone()
-                        .map(|txt| txt.encode_utf16().count())
-                        .unwrap_or(0) as isize;
-                    element.set_selected_range(0, len);
-                }
-                WorkFlowAction::ComboKey(kb) => {
+                WorkFlowAction::KeyCombo(kb) => {
                     self.set_simulating_key(true);
                     for k in kb.keys.iter() {
                         Self::simulate_event(&EventType::KeyPress(*k));
@@ -856,7 +857,47 @@ impl AppExecutor {
                         Self::simulate_event(&EventType::KeyRelease(*k));
                     }
                     self.set_simulating_key(false);
+                    continue;
                 }
+                _ => (),
+            }
+
+            // Actions that require a selected element
+            let Some(ElementOfInterest {
+                element: Some(element),
+                context,
+                role,
+                frame,
+                ..
+            }) = self.selected.as_ref()
+            else {
+                self.notify_then_deactivate(
+                    &format!("Running a workflow action with no element selected. {act:?} at idx {act_idx}"),
+                    Level::Error,
+                );
+                return;
+            };
+
+            match act {
+                WorkFlowAction::Focus => {
+                    Self::focus_on_element(element);
+                }
+                WorkFlowAction::Press => {
+                    let center = frame.center();
+                    self.press_on_element(element, role, center);
+                }
+                WorkFlowAction::ShowMenu => {
+                    let center = frame.center();
+                    self.right_click_menu_on_element(element, center);
+                }
+                WorkFlowAction::SelectAll => {
+                    let len = context
+                        .clone()
+                        .map(|txt| txt.encode_utf16().count())
+                        .unwrap_or(0) as isize;
+                    element.set_selected_range(0, len);
+                }
+                _ => (),
             }
         }
     }
@@ -901,6 +942,16 @@ impl AppExecutor {
             }
             AppSignal::DeActivate => {
                 self.deactivate();
+            }
+            AppSignal::Press => {
+                self.click_on_selected();
+                self.deactivate();
+            }
+            AppSignal::ShowMenu => {
+                self.right_click_menu_on_selected();
+            }
+            AppSignal::RunWorkFlow(idx) => {
+                self.execute_workflow(idx).await;
             }
             AppSignal::ToggleMultiSelection => match self.target {
                 Target::Text | Target::ImageOCR => {
@@ -1039,14 +1090,6 @@ impl AppExecutor {
                 // TODO:
                 // 1. URL handling
                 let keep_drawing = match ta {
-                    TextAction::Press => {
-                        self.click_on_selected();
-                        false
-                    }
-                    TextAction::ShowMenu => {
-                        self.right_click_menu_on_selected();
-                        true
-                    }
                     TextAction::Copy => {
                         text_to_clipboard(&text);
                         self.notify_then_deactivate("Copied to clipboard.", Level::Info);
@@ -1095,10 +1138,6 @@ impl AppExecutor {
                     }
                     TextAction::UserDefined(idx) => {
                         self.take_external_action(idx, &text);
-                        true
-                    }
-                    TextAction::WorkFlow(idx) => {
-                        self.execute_workflow(idx).await;
                         true
                     }
                 };

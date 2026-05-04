@@ -1,5 +1,7 @@
 use crate::{
-    config::{CustomTarget, GlyphlowConfig, GlyphlowTheme, VisibilityCheckingLevel},
+    config::{
+        CustomTarget, GlyphlowConfig, GlyphlowTheme, RoleOfInterest, VisibilityCheckingLevel,
+    },
     util::{Frame, HintBox, hint_boxes_from_frames, select_range_helper},
 };
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
@@ -20,19 +22,6 @@ use core_foundation::{
 };
 use objc2_core_foundation::{CGPoint, CGSize};
 use std::collections::HashMap;
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum RoleOfInterest {
-    Button,
-    GenericNode,
-    Image,
-    MenuItem,
-    ScrollBar,
-    StaticText,
-    TextField,
-    Cell,
-    CustomTarget,
-}
 
 const BASIC_ATTRIBUTES: [&str; 4] = [
     kAXRoleAttribute,
@@ -165,7 +154,7 @@ impl ElementOfInterest {
         Self {
             element: None,
             context,
-            role: RoleOfInterest::GenericNode,
+            role: RoleOfInterest::Generic,
             frame,
         }
     }
@@ -231,15 +220,18 @@ impl ElementCache {
         let (w, h) = frame.size();
         match role {
             // NOTE: some roles to keep
-            RoleOfInterest::GenericNode
-            | RoleOfInterest::ScrollBar
-            | RoleOfInterest::TextField
-            | RoleOfInterest::CustomTarget => {}
+            RoleOfInterest::Generic | RoleOfInterest::ScrollBar | RoleOfInterest::CustomTarget => {}
             RoleOfInterest::Image if w.min(h) < self.image_min_size => {
                 return;
             }
             // Keep large enough images
             RoleOfInterest::Image => (),
+            // Keep large enough text fields even if the text can be empty
+            RoleOfInterest::TextField
+                if (w < self.element_min_width || h < self.element_min_height) =>
+            {
+                return;
+            }
             // Check text before size, keep small texts
             _ if context.is_some() => {
                 // Skip elements with empty/nonsense text
@@ -265,7 +257,7 @@ impl ElementCache {
         // NOTE: de-duplication for DOM elements
         let new_ele = ElementOfInterest::new(Some(element.clone()), context, role.clone(), frame);
         // Keep all nodes with Target::ChildElement/GenericNode, as it's basically a debugging mode
-        if role != RoleOfInterest::GenericNode
+        if role != RoleOfInterest::Generic
             && let Some(idx) = self.seen_center.get(&center)
         {
             self.cache[*idx] = new_ele;
@@ -531,7 +523,7 @@ pub fn traverse_elements(
                     })
                     && child_fp.visible_frame(parent_frame).is_some()
                 {
-                    cache.add(&child, None, RoleOfInterest::GenericNode, child_fp.frame);
+                    cache.add(&child, None, RoleOfInterest::Generic, child_fp.frame);
                 }
             }
         }
@@ -563,14 +555,18 @@ pub fn traverse_elements(
 
     // HACK: exclude electron elements scrolled off y axis,
     // but some menu items' ancestors (Discord) are of zero height
-    if *target != Target::MenuItem
-        && ele_fp.frame.is_some_and(|f| {
+    let vis_level = match target {
+        // NOTE: loose visibility checking for specific targets
+        Target::MenuItem | Target::Custom(_) => VisibilityCheckingLevel::Loose,
+        _ if ele_fp.frame.is_some_and(|f| {
             let (_, h) = f.size();
             h == 1.0 || h == 0.0
-        })
-    {
-        return;
-    }
+        }) =>
+        {
+            return;
+        }
+        _ => vis_level,
+    };
 
     match vis_level {
         VisibilityCheckingLevel::Medium => {
@@ -683,7 +679,7 @@ pub fn traverse_elements(
                     cache.add(
                         element,
                         Some(value),
-                        RoleOfInterest::StaticText,
+                        RoleOfInterest::TextField,
                         ele_fp.frame,
                     );
                 }
