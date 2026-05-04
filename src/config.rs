@@ -35,7 +35,6 @@ pub struct CustomTarget {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum WorkFlowAction {
-    Done,
     SelectAll,
     Focus,
     Press,
@@ -224,6 +223,8 @@ impl AlphabeticKey for Key {
             Key::KeyY => 'Y',
             Key::KeyZ => 'Z',
             Key::Backspace | Key::Delete => '-',
+            Key::LeftBracket => '[',
+            Key::RightBracket => ']',
             _ => ' ',
         }
     }
@@ -387,6 +388,26 @@ fn default_workflows() -> Vec<WorkFlow> {
                 WorkFlowAction::SearchFor(CustomTarget {
                     role: "MenuItem".into(),
                     title: Some("Copy Image Address".into()),
+                    ..Default::default()
+                }),
+                WorkFlowAction::Press,
+            ],
+        },
+        WorkFlow {
+            key: '[',
+            display: "󰳽 Press [Left Click]".into(),
+            starting_role: RoleOfInterest::Generic,
+            actions: vec![WorkFlowAction::Press],
+        },
+        WorkFlow {
+            key: ']',
+            display: " Menu [Right Click]".into(),
+            starting_role: RoleOfInterest::Generic,
+            actions: vec![
+                WorkFlowAction::ShowMenu,
+                WorkFlowAction::Sleep(150),
+                WorkFlowAction::SearchFor(CustomTarget {
+                    role: "MenuItem".into(),
                     ..Default::default()
                 }),
                 WorkFlowAction::Press,
