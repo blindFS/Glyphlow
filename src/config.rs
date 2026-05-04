@@ -35,6 +35,7 @@ pub struct CustomTarget {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum WorkFlowAction {
+    Done,
     SelectAll,
     Focus,
     Press,

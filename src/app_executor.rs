@@ -765,7 +765,7 @@ impl AppExecutor {
             .config
             .text_actions
             .get(idx)
-            .expect("Internal Error: text action index: {idx} out of bounds.");
+            .expect("Internal Error: text action index out of bounds.");
         let args = action
             .args
             .iter()
@@ -826,7 +826,7 @@ impl AppExecutor {
             .workflows
             .get(idx)
             .cloned()
-            .expect("Internal Error: text workflow index: {idx} out of bounds.");
+            .expect("Internal Error: text workflow index out of bounds.");
 
         for (act_idx, act) in workflow.actions.iter().enumerate() {
             // Check starting_role, nothing happens if not match
@@ -836,6 +836,10 @@ impl AppExecutor {
 
             // Actions don't need a selected element
             match act {
+                WorkFlowAction::Done => {
+                    self.deactivate();
+                    continue;
+                }
                 WorkFlowAction::Sleep(ms) => {
                     std::thread::sleep(Duration::from_millis(*ms));
                     continue;
