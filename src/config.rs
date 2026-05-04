@@ -293,7 +293,7 @@ pub struct KeyBinding {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Copy)]
 pub enum VisibilityCheckingLevel {
     /// As long as element frame intersects with whole screen,
-    /// served for limited targets
+    /// reserved for limited targets
     Loosest,
     /// As long as element frame intersects with window frame
     Loose,

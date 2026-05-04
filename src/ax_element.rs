@@ -220,7 +220,10 @@ impl ElementCache {
         let (w, h) = frame.size();
         match role {
             // NOTE: some roles to keep
-            RoleOfInterest::Generic | RoleOfInterest::ScrollBar | RoleOfInterest::CustomTarget => {}
+            RoleOfInterest::Generic | RoleOfInterest::ScrollBar => {}
+            // HACK: some menu items (like Apple Intelligence writing tools)
+            // may have zero sized shadows, skip them to keep the workflow going
+            RoleOfInterest::CustomTarget if w != 0.0 && h != 0.0 => {}
             RoleOfInterest::Image if w.min(h) < self.image_min_size => {
                 return;
             }
@@ -503,7 +506,7 @@ pub fn traverse_elements(
         return;
     };
 
-    // HACK: Performance critical! Exclude electron elements scrolled off y axis,
+    // WARN: Performance critical! Exclude electron elements scrolled off y axis,
     // but should avoid false negatives of ancestors for some menu items,
     // e.g. (Discord right click menu)
     if ele_fp.frame.is_some_and(|f| {
@@ -597,7 +600,6 @@ pub fn traverse_elements(
         cache.add(element, None, RoleOfInterest::CustomTarget, ele_fp.frame);
     };
 
-    // TODO: Fine-grained control
     #[allow(non_upper_case_globals)]
     match ele_fp.role.as_str() {
         // TODO: DOM Class List based image searching for icon button
