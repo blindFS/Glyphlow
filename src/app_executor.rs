@@ -814,6 +814,9 @@ impl AppExecutor {
                     self.selected = Some(self.element_cache.cache[0].clone());
                 } else if self.element_cache.cache.len() > 1 {
                     return true;
+                } else {
+                    // Stop on empty result
+                    return true;
                 }
                 return false;
             }
