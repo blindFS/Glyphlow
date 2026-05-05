@@ -229,6 +229,7 @@ impl AppExecutor {
         head: &str,
         builtin_menu_items: &[MenuItem],
         need_editor: bool,
+        need_action: bool,
         need_workflow: bool,
         key_prefix: &str,
     ) -> String {
@@ -252,6 +253,16 @@ impl AppExecutor {
         {
             max_key_len = max_key_len.max(editor.key.chars().count());
             menu_itmes.push((&editor.key, &editor.display));
+        }
+
+        // TODO: refactor this if we introduce actions for elements other than text
+        if need_action {
+            for action in self.config.text_actions.iter() {
+                if action.key.starts_with(key_prefix) {
+                    max_key_len = max_key_len.max(action.key.chars().count());
+                    menu_itmes.push((&action.key, &action.display));
+                }
+            }
         }
 
         // Workflows valid for current selected element
@@ -287,6 +298,7 @@ impl AppExecutor {
             "Pick a Target:",
             &DASH_BOARD_MENU_ITEMS,
             true,
+            false,
             true,
             key_prefix,
         );
@@ -300,6 +312,7 @@ impl AppExecutor {
         let msg = self.menu_msg_alignment_helper(
             "Pick an Action for Image:",
             &IMAGE_ACTION_MENU_ITEMS,
+            false,
             false,
             true,
             key_prefix,
@@ -321,6 +334,7 @@ impl AppExecutor {
             &TEXT_ACTION_MENU_ITEMS,
             true,
             true,
+            true,
             key_prefix,
         );
 
@@ -331,6 +345,7 @@ impl AppExecutor {
         let msg = self.menu_msg_alignment_helper(
             "Pick a Scrolling Action:",
             &SCROLLBAR_MENU_ITEMS,
+            false,
             false,
             false,
             key_prefix,
