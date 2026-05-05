@@ -1,6 +1,6 @@
 use crate::{
-    AppSignal, DASH_BOARD_MENU_ITEMS, FilterMode, IMAGE_ACTION_MENU_ITEMS, MenuItem, Mode,
-    SCROLLBAR_MENU_ITEMS, ScrollAction, TEXT_ACTION_MENU_ITEMS, TextAction,
+    AppSignal, DASH_BOARD_MENU_ITEMS, FilterMode, IMAGE_ACTION_MENU_ITEMS, KeyState, MenuItem,
+    Mode, SCROLLBAR_MENU_ITEMS, ScrollAction, TEXT_ACTION_MENU_ITEMS, TextAction,
     action::{
         OCRResult, WordPicker, get_dictionary_attributed_string, perform_ocr, screen_shot,
         text_from_clipboard, text_to_clipboard,
@@ -67,7 +67,7 @@ impl MultiSeletionState {
 /// mainly cached UI elements, and some related drawings
 pub struct AppExecutor {
     state: Arc<Mutex<Mode>>,
-    simulating_keys: Arc<Mutex<bool>>,
+    key_state: Arc<Mutex<KeyState>>,
     /// Used for drawing hint boxes on screen
     hint_boxes: Vec<HintBox>,
     element_cache: ElementCache,
@@ -102,7 +102,7 @@ pub struct AppExecutor {
 impl AppExecutor {
     pub fn new(
         state: Arc<Mutex<Mode>>,
-        simulating_keys: Arc<Mutex<bool>>,
+        key_state: Arc<Mutex<KeyState>>,
         config: GlyphlowConfig,
         window: Retained<CALayer>,
         screen_size: CGSize,
@@ -111,7 +111,7 @@ impl AppExecutor {
     ) -> Self {
         Self {
             state,
-            simulating_keys,
+            key_state,
             hint_boxes: vec![],
             element_cache: ElementCache::new(
                 config.element_min_width as f64,
@@ -145,8 +145,8 @@ impl AppExecutor {
     }
 
     fn set_simulating_key(&self, flag: bool) {
-        if let Ok(mut is_sim) = self.simulating_keys.lock() {
-            *is_sim = flag;
+        if let Ok(mut ks) = self.key_state.lock() {
+            ks.is_simulating = flag;
         }
     }
 
@@ -210,61 +210,146 @@ impl AppExecutor {
         self.draw_selected_frame();
     }
 
-    fn draw_image_action_menu(&self) {
-        let mut msg = "Pick an Action for Image".to_string();
-        msg.push_str(&Self::menu_string(&IMAGE_ACTION_MENU_ITEMS));
-        for workflow in self.config.workflows.iter() {
-            if self.is_workflow_valid(workflow) {
-                msg.push_str(&format!("\n({}) {}", workflow.key, workflow.display));
+    fn menu_format_helper(
+        key: &str,
+        display: &str,
+        prefix_len: usize,
+        max_key_len: usize,
+    ) -> String {
+        let padding = " ".repeat(max_key_len - key.chars().count());
+        let filling = "_".repeat(prefix_len);
+        format!(
+            "\n{padding}({filling}{}) {display}",
+            key.chars().skip(prefix_len).collect::<String>(),
+        )
+    }
+
+    fn menu_msg_alignment_helper(
+        &self,
+        head: &str,
+        builtin_menu_items: &[MenuItem],
+        need_editor: bool,
+        need_action: bool,
+        need_workflow: bool,
+        key_prefix: &str,
+    ) -> String {
+        let prefix_len = key_prefix.chars().count();
+        let mut max_key_len = 1;
+        let mut menu_itmes = Vec::new();
+
+        // Skip static single key menu items
+        // when searching for multi-key actions
+        for it in builtin_menu_items {
+            if it.key.starts_with(key_prefix) {
+                max_key_len = max_key_len.max(it.key.chars().count());
+                menu_itmes.push((it.key, it.description));
             }
         }
+
+        // Editor entry
+        if need_editor
+            && let Some(editor) = self.config.editor.as_ref()
+            && editor.key.starts_with(key_prefix)
+        {
+            max_key_len = max_key_len.max(editor.key.chars().count());
+            menu_itmes.push((&editor.key, &editor.display));
+        }
+
+        // TODO: refactor this if we introduce actions for elements other than text
+        if need_action {
+            for action in self.config.text_actions.iter() {
+                if action.key.starts_with(key_prefix) {
+                    max_key_len = max_key_len.max(action.key.chars().count());
+                    menu_itmes.push((&action.key, &action.display));
+                }
+            }
+        }
+
+        // Workflows valid for current selected element
+        if need_workflow {
+            for workflow in self.config.workflows.iter() {
+                if workflow.key.starts_with(key_prefix) && self.is_workflow_valid(workflow) {
+                    max_key_len = max_key_len.max(workflow.key.chars().count());
+                    menu_itmes.push((&workflow.key, &workflow.display));
+                }
+            }
+        }
+
+        if menu_itmes.is_empty() {
+            return "Wrong key sequence\nPress Backspace to go back".to_string();
+        }
+
+        // Aligned
+        let mut msg = head.to_string();
+        for (key, display) in menu_itmes {
+            msg.push_str(&Self::menu_format_helper(
+                key,
+                display,
+                prefix_len,
+                max_key_len,
+            ));
+        }
+
+        msg
+    }
+
+    fn draw_dashboard(&self, key_prefix: &str) {
+        let msg = self.menu_msg_alignment_helper(
+            "Pick a Target:",
+            &DASH_BOARD_MENU_ITEMS,
+            true,
+            false,
+            true,
+            key_prefix,
+        );
+
+        self.clear_drawing();
+        self.draw_selected_frame();
         self.draw_menu(&msg);
     }
 
-    fn draw_text_action_menu(&self, text: &str) {
+    fn draw_image_action_menu(&self, key_prefix: &str) {
+        let msg = self.menu_msg_alignment_helper(
+            "Pick an Action for Image:",
+            &IMAGE_ACTION_MENU_ITEMS,
+            false,
+            false,
+            true,
+            key_prefix,
+        );
+
+        self.draw_menu(&msg);
+    }
+
+    fn draw_text_action_menu(&self, text: &str, key_prefix: &str) {
         // Truncate long text
         let text = if text.len() > MAX_TEXT_DISPLAY_LEN {
             &format!("{:.max_len$}...", text, max_len = MAX_TEXT_DISPLAY_LEN)
         } else {
             text
         };
-        let mut msg = "Pick an Action for Text".to_string();
-        msg.push_str(&format!("\n\n{}\n", text));
-        msg.push_str(&Self::menu_string(&TEXT_ACTION_MENU_ITEMS));
-        if let Some(editor) = self.config.editor.as_ref() {
-            msg.push_str(&format!("\n({}) {}", editor.key, editor.display));
-        }
-        for action in self.config.text_actions.iter() {
-            msg.push_str(&format!("\n({}) {}", action.key, action.display));
-        }
-        for workflow in self.config.workflows.iter() {
-            if self.is_workflow_valid(workflow) {
-                msg.push_str(&format!("\n({}) {}", workflow.key, workflow.display));
-            }
-        }
+        let header = format!("Pick an Action for Text:\n\n{}\n", text);
+        let msg = self.menu_msg_alignment_helper(
+            &header,
+            &TEXT_ACTION_MENU_ITEMS,
+            true,
+            true,
+            true,
+            key_prefix,
+        );
+
         self.draw_menu(&msg);
     }
 
-    fn draw_scroll_bar_menu(&self) {
-        let mut msg = "Pick a Scrolling Action:".to_string();
-        msg.push_str(&Self::menu_string(&SCROLLBAR_MENU_ITEMS));
-        self.draw_menu(&msg);
-    }
-
-    fn draw_dash_board(&self) {
-        let mut msg = "Pick a Target:".to_string();
-        msg.push_str(&Self::menu_string(&DASH_BOARD_MENU_ITEMS));
-        if let Some(editor) = self.config.editor.as_ref() {
-            msg.push_str(&format!("\n({}) {}", editor.key, editor.display));
-        }
-        // Workflows for current selected element
-        for workflow in self.config.workflows.iter() {
-            if self.is_workflow_valid(workflow) {
-                msg.push_str(&format!("\n({}) {}", workflow.key, workflow.display));
-            }
-        }
-        self.clear_drawing();
-        self.draw_selected_frame();
+    fn draw_scrolling_menu(&self, key_prefix: &str) {
+        let msg = self.menu_msg_alignment_helper(
+            "Pick a Scrolling Action:",
+            &SCROLLBAR_MENU_ITEMS,
+            false,
+            false,
+            false,
+            key_prefix,
+        );
         self.draw_menu(&msg);
     }
 
@@ -290,15 +375,6 @@ impl AppExecutor {
         self.notification_layers.push(self.draw_menu(msg));
         let sender = self.timeout_sender.clone();
         tokio::spawn(async move { delay_and_deactivate(sender, timeout_secs).await });
-    }
-
-    fn menu_string(items: &[MenuItem]) -> String {
-        let mut res = String::new();
-        for item in items {
-            res.push('\n');
-            res.push_str(&item.to_string());
-        }
-        res
     }
 
     fn draw_word_picker(&self) -> (Vec<(usize, String)>, u32) {
@@ -337,7 +413,7 @@ impl AppExecutor {
         // e.g. Discord
         if is_electron && pid != self.last_pid {
             let _ = focused_app.role();
-            std::thread::sleep(Duration::from_millis(self.config.menu_wait_ms));
+            std::thread::sleep(Duration::from_millis(self.config.electron_initial_wait_ms));
         }
         self.last_pid = pid;
 
@@ -431,7 +507,7 @@ impl AppExecutor {
             self.clear_cache();
             self.set_mode(Mode::Scrolling);
             self.clear_drawing();
-            self.draw_scroll_bar_menu();
+            self.draw_scrolling_menu("");
         } else {
             self.clear_drawing();
             self.notify_then_deactivate("No relevant UI elements found.", Level::Warn);
@@ -618,7 +694,7 @@ impl AppExecutor {
                 Target::Image => {
                     self.selected = Some(eoi.clone());
                     self.set_mode(Mode::ImageActionMenu);
-                    self.draw_image_action_menu();
+                    self.draw_image_action_menu("");
                 }
                 Target::Custom(_) => {
                     self.selected = Some(eoi.clone());
@@ -653,7 +729,7 @@ impl AppExecutor {
                     } else if let Some(text) = context {
                         self.selected = Some(eoi.clone());
                         self.set_mode(Mode::TextActionMenu);
-                        self.draw_text_action_menu(text);
+                        self.draw_text_action_menu(text, "");
                     }
                 }
                 Target::ChildElement => {
@@ -662,7 +738,7 @@ impl AppExecutor {
                     // Actions for current selected element
                     if self.element_cache.cache.is_empty() {
                         self.set_mode(Mode::DashBoard);
-                        self.draw_dash_board();
+                        self.draw_dashboard("");
                     } else {
                         self.draw_hints_from_cache();
                     }
@@ -671,7 +747,7 @@ impl AppExecutor {
                     self.selected = Some(eoi.clone());
                     self.clear_cache();
                     self.set_mode(Mode::Scrolling);
-                    self.draw_scroll_bar_menu();
+                    self.draw_scrolling_menu("");
                 }
                 Target::Editable => {
                     self.selected = Some(eoi.clone());
@@ -686,6 +762,7 @@ impl AppExecutor {
                     match self.open_editor(&text) {
                         Ok(_) => {
                             self.set_mode(Mode::Editing);
+                            self.selected = None;
                         }
                         Err(e) => {
                             self.notify_then_deactivate(
@@ -859,6 +936,10 @@ impl AppExecutor {
                 let center = frame.center();
                 self.press_on_element(element, role, center);
             }
+            WorkFlowAction::Click => {
+                let (x, y) = frame.center();
+                Self::simulate_click(x, y, false);
+            }
             WorkFlowAction::ShowMenu => {
                 let center = frame.center();
                 self.right_click_menu_on_element(element, center);
@@ -920,14 +1001,14 @@ impl AppExecutor {
 
     fn update_selected_text_and_show_menu(&mut self, new_text: String) {
         self.set_mode(Mode::TextActionMenu);
-        self.draw_text_action_menu(&new_text);
+        self.draw_text_action_menu(&new_text, "");
         self.update_selected_text(new_text);
     }
 
     pub async fn handle_signal(&mut self, signal: AppSignal) {
         match signal {
             AppSignal::DashBoard => {
-                self.draw_dash_board();
+                self.draw_dashboard("");
             }
             AppSignal::Activate(target) => {
                 let quick_follow = target == Target::Scrollable
@@ -943,6 +1024,27 @@ impl AppExecutor {
             }
             AppSignal::RunWorkFlow(idx) => {
                 self.execute_workflow(idx);
+            }
+            AppSignal::MenuRefresh(key_prefix, menu_mode) => {
+                self.clear_drawing();
+                match menu_mode {
+                    Mode::DashBoard => {
+                        self.draw_dashboard(&key_prefix);
+                    }
+                    Mode::TextActionMenu => {
+                        self
+                            .draw_text_action_menu(&self.selected.as_ref().and_then(|eoi| eoi.context.clone()).expect(
+                            "Internal Error: selected text should be kept during menu refreshing.",
+                        ), &key_prefix);
+                    }
+                    Mode::Scrolling => {
+                        self.draw_scrolling_menu(&key_prefix);
+                    }
+                    Mode::ImageActionMenu => {
+                        self.draw_image_action_menu(&key_prefix);
+                    }
+                    _ => (),
+                }
             }
             AppSignal::ToggleMultiSelection => match self.target {
                 Target::Text | Target::ImageOCR => {
@@ -1039,6 +1141,14 @@ impl AppExecutor {
                         ScrollAction::DecreaseDistance => {
                             self.config.scroll_distance /= 1.5;
                         }
+                        ScrollAction::Top => {
+                            Self::scroll_to_value(element, 0.0);
+                            self.draw_scrolling_menu("");
+                        }
+                        ScrollAction::Bottom => {
+                            Self::scroll_to_value(element, 1.0);
+                            self.draw_scrolling_menu("");
+                        }
                     }
                 } else {
                     let distance = (frame.size().1 * self.config.scroll_distance).max(1.0) as i64;
@@ -1060,6 +1170,20 @@ impl AppExecutor {
                         }
                         ScrollAction::DecreaseDistance => {
                             self.config.scroll_distance /= 1.5;
+                        }
+                        ScrollAction::Top => {
+                            Self::simulate_event(&EventType::Wheel {
+                                delta_x: 0,
+                                delta_y: 999999,
+                            });
+                            self.draw_scrolling_menu("");
+                        }
+                        ScrollAction::Bottom => {
+                            Self::simulate_event(&EventType::Wheel {
+                                delta_x: 0,
+                                delta_y: -999999,
+                            });
+                            self.draw_scrolling_menu("");
                         }
                     }
                 }
@@ -1169,10 +1293,19 @@ impl AppExecutor {
                     self.update_editing_text(new_text);
                 } else if pb != self.temp_file {
                     match GlyphlowConfig::load_config(&pb) {
-                        Ok(new_config) => {
+                        Ok(mut new_config) => {
                             self.element_cache.reload_config(&new_config);
+                            let need_warning = !self.config.safe_reload(&mut new_config);
                             self.config = new_config;
-                            self.notify_then_deactivate("Configuration reloaded.\nKeybinding changes won't be applied until next launch.", Level::Warn);
+
+                            if need_warning {
+                                self.notify_then_deactivate(
+                                    "Restart the app to apply full changes",
+                                    Level::Warn,
+                                );
+                            } else {
+                                self.notify_then_deactivate("Configuration reloaded", Level::Info);
+                            }
                         }
                         Err(msg) => {
                             self.notify_then_deactivate(&msg, Level::Error);

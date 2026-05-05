@@ -29,6 +29,8 @@ pub enum ScrollAction {
     DownRight,
     IncreaseDistance,
     DecreaseDistance,
+    Top,
+    Bottom,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -45,6 +47,7 @@ pub enum AppSignal {
     Activate(Target),
     DeActivate,
     Filter(char, FilterMode),
+    MenuRefresh(String, Mode),
     // Sub state signals
     FileUpdate(PathBuf),
     ClearNotification,
@@ -62,17 +65,28 @@ pub enum AppSignal {
 #[derive(Debug, PartialEq)]
 pub struct MenuItem {
     pub description: &'static str,
-    pub key: char,
+    pub key: &'static str,
     pub action: AppSignal,
 }
 
 impl MenuItem {
-    pub const fn new(description: &'static str, key: char, action: AppSignal) -> MenuItem {
+    pub const fn new(description: &'static str, key: &'static str, action: AppSignal) -> MenuItem {
         MenuItem {
             description,
             key,
             action,
         }
+    }
+}
+
+impl MenuItem {
+    pub fn pretty_print(&self, prefix_len: usize) -> String {
+        let prefix = "_".repeat(prefix_len);
+        format!(
+            "({prefix}{}) {}",
+            self.key.chars().skip(prefix_len).collect::<String>(),
+            self.description
+        )
     }
 }
 
@@ -83,54 +97,64 @@ impl Display for MenuItem {
 }
 
 pub const DASH_BOARD_MENU_ITEMS: [MenuItem; 9] = [
-    MenuItem::new("󰦨 Text", 'T', AppSignal::Activate(Target::Text)),
-    MenuItem::new("󰳽 Press", 'P', AppSignal::Activate(Target::Clickable)),
-    MenuItem::new("󱕒 ScrollBar", 'S', AppSignal::Activate(Target::Scrollable)),
-    MenuItem::new("󰊄 Input", 'I', AppSignal::Activate(Target::Editable)),
-    MenuItem::new(" Image", 'M', AppSignal::Activate(Target::Image)),
-    MenuItem::new("󰙅 Element", 'E', AppSignal::Activate(Target::ChildElement)),
-    MenuItem::new("󰆟 ScreenShot", 'R', AppSignal::ScreenShot),
-    MenuItem::new("󱄺 Image OCR", 'O', AppSignal::FrameOCR),
-    MenuItem::new(" Read Clipboard", 'C', AppSignal::ReadClipboard),
+    MenuItem::new("󰦨 Text", "T", AppSignal::Activate(Target::Text)),
+    MenuItem::new("󰳽 Press", "P", AppSignal::Activate(Target::Clickable)),
+    MenuItem::new("󱕒 ScrollBar", "S", AppSignal::Activate(Target::Scrollable)),
+    MenuItem::new("󰊄 Input", "I", AppSignal::Activate(Target::Editable)),
+    MenuItem::new(" Image", "M", AppSignal::Activate(Target::Image)),
+    MenuItem::new(
+        "󰙅 Element Explorer",
+        "E",
+        AppSignal::Activate(Target::ChildElement),
+    ),
+    MenuItem::new("󰆟 ScreenShot", "R", AppSignal::ScreenShot),
+    MenuItem::new("󱄺 Image OCR", "O", AppSignal::FrameOCR),
+    MenuItem::new(" Read Clipboard", "C", AppSignal::ReadClipboard),
 ];
 
-pub const SCROLLBAR_MENU_ITEMS: [MenuItem; 4] = [
+pub const SCROLLBAR_MENU_ITEMS: [MenuItem; 6] = [
     MenuItem::new(
         "> Down/Right",
-        'J',
+        "J",
         AppSignal::ScrollAction(ScrollAction::DownRight),
     ),
     MenuItem::new(
         "< Up/Left",
-        'K',
+        "K",
         AppSignal::ScrollAction(ScrollAction::UpLeft),
     ),
     MenuItem::new(
         "+ Distance Increase",
-        'I',
+        "I",
         AppSignal::ScrollAction(ScrollAction::IncreaseDistance),
     ),
     MenuItem::new(
         "- Distance Decrease",
-        'D',
+        "D",
         AppSignal::ScrollAction(ScrollAction::DecreaseDistance),
+    ),
+    MenuItem::new("󰢦 Top", "GG", AppSignal::ScrollAction(ScrollAction::Top)),
+    MenuItem::new(
+        "󰢢 Bottom",
+        "󰘶G",
+        AppSignal::ScrollAction(ScrollAction::Bottom),
     ),
 ];
 
 pub const TEXT_ACTION_MENU_ITEMS: [MenuItem; 3] = [
-    MenuItem::new("⮺ Copy", 'C', AppSignal::TextAction(TextAction::Copy)),
+    MenuItem::new("⮺ Copy", "C", AppSignal::TextAction(TextAction::Copy)),
     MenuItem::new(
         "◫ Dictionary",
-        'D',
+        "D",
         AppSignal::TextAction(TextAction::Dictionary),
     ),
-    MenuItem::new("󰃻 Split", 'S', AppSignal::TextAction(TextAction::Split)),
+    MenuItem::new("󰃻 Split", "S", AppSignal::TextAction(TextAction::Split)),
 ];
 
 pub const IMAGE_ACTION_MENU_ITEMS: [MenuItem; 1] =
-    [MenuItem::new("󱄺 Image OCR", 'O', AppSignal::FrameOCR)];
+    [MenuItem::new("󱄺 Image OCR", "O", AppSignal::FrameOCR)];
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Mode {
     DashBoard,
     Filtering,
@@ -146,17 +170,19 @@ pub enum Mode {
 
 #[derive(Debug)]
 pub struct KeyListener {
-    pub text_actions: HashMap<char, AppSignal>,
-    pub image_actions: HashMap<char, AppSignal>,
-    pub dashboard_actions: HashMap<char, AppSignal>,
-    pub scroll_actions: HashMap<char, AppSignal>,
+    pub text_actions: HashMap<String, AppSignal>,
+    pub image_actions: HashMap<String, AppSignal>,
+    pub dashboard_actions: HashMap<String, AppSignal>,
+    pub scroll_actions: HashMap<String, AppSignal>,
     sender: Sender<AppSignal>,
     global_key_binding: KeyBinding,
 }
 
 impl KeyListener {
-    fn iter_from<const N: usize>(items: [MenuItem; N]) -> impl Iterator<Item = (char, AppSignal)> {
-        items.into_iter().map(|it| (it.key, it.action))
+    fn iter_from<const N: usize>(
+        items: [MenuItem; N],
+    ) -> impl Iterator<Item = (String, AppSignal)> {
+        items.into_iter().map(|it| (it.key.to_string(), it.action))
     }
 
     pub fn new(sender: Sender<AppSignal>, config: &GlyphlowConfig) -> KeyListener {
@@ -166,10 +192,10 @@ impl KeyListener {
                 .workflows
                 .iter()
                 .enumerate()
-                .map(|(idx, wf)| (wf.key, AppSignal::RunWorkFlow(idx)))
+                .map(|(idx, wf)| (wf.key.clone(), AppSignal::RunWorkFlow(idx)))
                 .chain(
                     config.text_actions.iter().enumerate().map(|(idx, ca)| {
-                        (ca.key, AppSignal::TextAction(TextAction::UserDefined(idx)))
+                        (ca.key.clone(), AppSignal::TextAction(TextAction::UserDefined(idx)))
                     }),
                 )
                 .chain(Self::iter_from(TEXT_ACTION_MENU_ITEMS))
@@ -179,7 +205,7 @@ impl KeyListener {
             .workflows
             .iter()
             .enumerate()
-            .map(|(idx, wf)| (wf.key, AppSignal::RunWorkFlow(idx)))
+            .map(|(idx, wf)| (wf.key.clone(), AppSignal::RunWorkFlow(idx)))
             .chain(Self::iter_from(DASH_BOARD_MENU_ITEMS))
             .collect::<HashMap<_, _>>();
 
@@ -187,7 +213,7 @@ impl KeyListener {
             .workflows
             .iter()
             .enumerate()
-            .map(|(idx, wf)| (wf.key, AppSignal::RunWorkFlow(idx)))
+            .map(|(idx, wf)| (wf.key.clone(), AppSignal::RunWorkFlow(idx)))
             .chain(Self::iter_from(IMAGE_ACTION_MENU_ITEMS))
             .collect::<HashMap<_, _>>();
 
@@ -195,10 +221,13 @@ impl KeyListener {
 
         if let Some(editor_command) = config.editor.as_ref() {
             text_actions.insert(
-                editor_command.key,
+                editor_command.key.clone(),
                 AppSignal::TextAction(TextAction::Editor),
             );
-            dashboard_actions.insert(editor_command.key, AppSignal::Activate(Target::Edit));
+            dashboard_actions.insert(
+                editor_command.key.clone(),
+                AppSignal::Activate(Target::Edit),
+            );
         }
 
         KeyListener {
@@ -217,18 +246,31 @@ impl KeyListener {
         }
     }
 
-    fn helper(
+    fn menu_helper(
         &self,
         key: &Key,
-        key_signals: &HashMap<char, AppSignal>,
+        key_signals: &HashMap<String, AppSignal>,
         mut state: MutexGuard<'_, Mode>,
+        key_state: &mut KeyState,
     ) -> bool {
         let key_char = key.to_char();
-        if let Some(signal) = key_signals.get(&key_char) {
+        if key_char == '-' {
+            key_state.pop();
+        } else {
+            key_state.push(key_char);
+        }
+        if let Some(signal) = key_signals.get(&key_state.prefix) {
             self.send(signal.clone());
+            key_state.clear_prefix();
         } else if key_char == ' ' {
-            self.send(AppSignal::DeActivate);
             *state = Mode::Idle;
+            self.send(AppSignal::DeActivate);
+            key_state.clear_prefix();
+        } else {
+            self.send(AppSignal::MenuRefresh(
+                key_state.prefix.clone(),
+                state.clone(),
+            ));
         }
         true
     }
@@ -245,7 +287,7 @@ impl KeyListener {
     }
 
     /// Returns true if key is effective, and should be swallowed by this app
-    pub fn key_down(&self, key: Key, state: &Mutex<Mode>, pressed_keys: &HashSet<Key>) -> bool {
+    pub fn key_down(&self, key: Key, state: &Mutex<Mode>, key_state: &mut KeyState) -> bool {
         let Ok(mut state) = state.try_lock() else {
             return false;
         };
@@ -254,9 +296,9 @@ impl KeyListener {
             Mode::Editing | Mode::Idle => {
                 if self.global_key_binding.keys.iter().all(|k| {
                     k == &key
-                        || pressed_keys.contains(k)
+                        || key_state.pressed_keys.contains(k)
                         || k.right_alternative()
-                            .is_some_and(|r| *k == r || pressed_keys.contains(&r))
+                            .is_some_and(|r| *k == r || key_state.pressed_keys.contains(&r))
                 }) {
                     self.send(AppSignal::DashBoard);
                     *state = Mode::DashBoard;
@@ -265,7 +307,7 @@ impl KeyListener {
                     false
                 }
             }
-            Mode::DashBoard => self.helper(&key, &self.dashboard_actions, state),
+            Mode::DashBoard => self.menu_helper(&key, &self.dashboard_actions, state, key_state),
             // To act on selected parent node
             Mode::Filtering if key == Key::Return => {
                 self.send(AppSignal::DashBoard);
@@ -281,14 +323,43 @@ impl KeyListener {
             Mode::WordPicking => self.filter_helper(&key, state, FilterMode::WordPicking),
             Mode::Filtering => self.filter_helper(&key, state, FilterMode::Generic),
             Mode::OCRResultFiltering => self.filter_helper(&key, state, FilterMode::OCR),
-            Mode::TextActionMenu => self.helper(&key, &self.text_actions, state),
-            Mode::ImageActionMenu => self.helper(&key, &self.image_actions, state),
-            Mode::Scrolling => self.helper(&key, &self.scroll_actions, state),
+            Mode::TextActionMenu => self.menu_helper(&key, &self.text_actions, state, key_state),
+            Mode::ImageActionMenu => self.menu_helper(&key, &self.image_actions, state, key_state),
+            Mode::Scrolling => self.menu_helper(&key, &self.scroll_actions, state, key_state),
             Mode::WaitAndDeactivate => {
                 self.send(AppSignal::DeActivate);
                 *state = Mode::Idle;
                 true
             }
         }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct KeyState {
+    pub pressed_keys: HashSet<Key>,
+    pub prefix: String,
+    pub is_simulating: bool,
+}
+
+impl KeyState {
+    pub fn key_down(&mut self, key: &Key) {
+        self.pressed_keys.insert(*key);
+    }
+
+    pub fn key_up(&mut self, key: &Key) {
+        self.pressed_keys.remove(key);
+    }
+
+    pub fn clear_prefix(&mut self) {
+        self.prefix.clear();
+    }
+
+    pub fn push(&mut self, key_char: char) {
+        self.prefix.push(key_char);
+    }
+
+    pub fn pop(&mut self) {
+        self.prefix.pop();
     }
 }

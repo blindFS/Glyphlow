@@ -3,7 +3,7 @@ use core_foundation::{
     runloop::{CFRunLoopRunInMode, kCFRunLoopDefaultMode},
 };
 use glyphlow::{
-    AppExecutor, AppSignal, KeyListener, Mode,
+    AppExecutor, AppSignal, KeyListener, KeyState, Mode,
     config::{GlyphlowConfig, get_config_path},
     drawer::{GlyphlowDrawingLayer, create_overlay_window, get_main_screen_size},
     os_util::check_accessibility_permissions,
@@ -52,8 +52,8 @@ async fn main() {
     let key_listener = KeyListener::new(tx, &config);
 
     let state = Arc::new(Mutex::new(Mode::Idle));
-    let pressed_keys = Arc::new(Mutex::new(HashSet::new()));
-    let simulating_keys = Arc::new(Mutex::new(false));
+    // Need this because rdev::grab takes a Fn not FnMut
+    let key_state = Arc::new(Mutex::new(KeyState::default()));
 
     let mtm = MainThreadMarker::new().expect("Not on main thread");
     let screen_size = get_main_screen_size(mtm);
@@ -102,7 +102,7 @@ async fn main() {
     let (ttx, mut trx) = mpsc::channel::<()>(100);
     let mut app_executor = AppExecutor::new(
         state.clone(),
-        simulating_keys.clone(),
+        key_state.clone(),
         config,
         window,
         screen_size,
@@ -111,23 +111,22 @@ async fn main() {
     );
 
     thread::spawn(move || {
-        let pressed_keys = pressed_keys.clone();
-        let simulating = simulating_keys.clone();
+        let key_state = key_state.clone();
         let state = state.clone();
         let _ = grab(move |event| {
-            let Ok(mut keys) = pressed_keys.lock() else {
+            let Ok(mut k_s) = key_state.lock() else {
                 return Some(event);
             };
-            if !simulating.lock().is_ok_and(|s| !*s) {
+            if k_s.is_simulating {
                 return Some(event);
             }
             let swallow = match event.event_type {
                 EventType::KeyPress(key) => {
-                    keys.insert(key);
-                    key_listener.key_down(key, &state, &keys)
+                    k_s.key_down(&key);
+                    key_listener.key_down(key, &state, &mut k_s)
                 }
                 EventType::KeyRelease(key) => {
-                    keys.remove(&key);
+                    k_s.key_up(&key);
                     false
                 }
                 _ => false,
@@ -144,7 +143,7 @@ async fn main() {
             _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
                 // NOTE: necessary for up-to-date get_focused_pid and UI drawing
                 unsafe {
-                    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, Boolean::from(false));
+                    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, Boolean::from(false));
                 }
             }
         }

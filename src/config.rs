@@ -34,21 +34,22 @@ pub struct CustomTarget {
     pub size: Option<(f64, f64)>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum WorkFlowAction {
     SelectAll,
     Focus,
     Press,
+    Click,
     ShowMenu,
     KeyCombo(KeyBinding),
     SearchFor(CustomTarget),
     Sleep(u64),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct WorkFlow {
     pub display: String,
-    pub key: char,
+    pub key: String,
     #[serde(default = "default_starting_role")]
     pub starting_role: RoleOfInterest,
     pub actions: Vec<WorkFlowAction>,
@@ -58,12 +59,12 @@ fn default_starting_role() -> RoleOfInterest {
     RoleOfInterest::Generic
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct CommandAction {
     pub command: String,
     pub args: Vec<String>,
     pub display: String,
-    pub key: char,
+    pub key: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -226,6 +227,7 @@ impl AlphabeticKey for Key {
             Key::Backspace | Key::Delete => '-',
             Key::LeftBracket => '[',
             Key::RightBracket => ']',
+            Key::ShiftLeft | Key::ShiftRight => '󰘶',
             _ => ' ',
         }
     }
@@ -287,7 +289,7 @@ impl AlphabeticKey for Key {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct KeyBinding {
     #[serde(with = "key_combo_format")]
     pub keys: Vec<Key>,
@@ -333,8 +335,54 @@ pub struct GlyphlowConfig {
     pub dictionaries: Vec<String>,
     #[serde(default = "default_vis_level")]
     pub visibility_checking_level: VisibilityCheckingLevel,
-    #[serde(default = "default_menu_wait_ms")]
-    pub menu_wait_ms: u64,
+    #[serde(default = "default_wait_ms")]
+    pub electron_initial_wait_ms: u64,
+}
+
+impl GlyphlowConfig {
+    pub fn safe_reload(&self, other: &mut GlyphlowConfig) -> bool {
+        let mut compatible = true;
+
+        if self.global_trigger_key != other.global_trigger_key {
+            compatible = false;
+            other.global_trigger_key = self.global_trigger_key.clone();
+        }
+
+        match (self.editor.as_ref(), other.editor.as_ref()) {
+            (Some(e1), Some(e2)) if e1.key != e2.key => {
+                compatible = false;
+                other.editor = self.editor.clone();
+            }
+            (None, Some(_)) | (Some(_), None) => {
+                compatible = false;
+                other.editor = self.editor.clone();
+            }
+            _ => (),
+        }
+
+        if self.text_actions.len() != other.text_actions.len()
+            || self
+                .text_actions
+                .iter()
+                .zip(other.text_actions.iter())
+                .any(|(a1, a2)| a1.key != a2.key)
+        {
+            compatible = false;
+            other.text_actions = self.text_actions.clone();
+        }
+
+        if self.workflows.len() != other.workflows.len()
+            || self
+                .workflows
+                .iter()
+                .zip(other.workflows.iter())
+                .any(|(w1, w2)| w1.key != w2.key)
+        {
+            compatible = false;
+            other.workflows = self.workflows.clone();
+        }
+        compatible
+    }
 }
 
 fn default_global_keybinding() -> KeyBinding {
@@ -348,7 +396,7 @@ fn default_text_actions() -> Vec<CommandAction> {
 fn default_workflows() -> Vec<WorkFlow> {
     vec![
         WorkFlow {
-            key: 'R',
+            key: "R".into(),
             display: " ProofRead".into(),
             starting_role: RoleOfInterest::TextField,
             actions: vec![
@@ -365,7 +413,7 @@ fn default_workflows() -> Vec<WorkFlow> {
             ],
         },
         WorkFlow {
-            key: 'C',
+            key: "C".into(),
             display: "⮺ Copy".into(),
             starting_role: RoleOfInterest::Image,
             actions: vec![
@@ -380,7 +428,7 @@ fn default_workflows() -> Vec<WorkFlow> {
             ],
         },
         WorkFlow {
-            key: 'L',
+            key: "L".into(),
             display: " Copy Link".into(),
             starting_role: RoleOfInterest::Image,
             actions: vec![
@@ -395,13 +443,13 @@ fn default_workflows() -> Vec<WorkFlow> {
             ],
         },
         WorkFlow {
-            key: '[',
+            key: "[".into(),
             display: "󰳽 Press [Left Click]".into(),
             starting_role: RoleOfInterest::Generic,
             actions: vec![WorkFlowAction::Press],
         },
         WorkFlow {
-            key: ']',
+            key: "]".into(),
             display: " Menu [Right Click]".into(),
             starting_role: RoleOfInterest::Generic,
             actions: vec![
@@ -441,7 +489,7 @@ fn default_vis_level() -> VisibilityCheckingLevel {
     VisibilityCheckingLevel::Loose
 }
 
-fn default_menu_wait_ms() -> u64 {
+fn default_wait_ms() -> u64 {
     100
 }
 
@@ -461,7 +509,7 @@ impl Default for GlyphlowConfig {
             ocr_languages: default_ocr_languages(),
             dictionaries: default_dictionaries(),
             visibility_checking_level: default_vis_level(),
-            menu_wait_ms: default_menu_wait_ms(),
+            electron_initial_wait_ms: default_wait_ms(),
         }
     }
 }
@@ -725,5 +773,84 @@ mod tests {
         // Check defaulted values
         assert_eq!(config.scroll_distance, 0.05);
         assert_eq!(config.ocr_languages, vec!["en-US".to_string()]);
+    }
+
+    #[test]
+    fn test_safe_reload_compatibility() {
+        let mut old_config = GlyphlowConfig::default();
+        let mut new_config = GlyphlowConfig::default();
+
+        assert!(new_config.safe_reload(&mut old_config));
+
+        new_config.scroll_distance = 99.9;
+        assert!(
+            new_config.safe_reload(&mut old_config),
+            "Minor settings should be compatible"
+        );
+
+        new_config.global_trigger_key = KeyBinding {
+            keys: vec![Key::ControlLeft, Key::KeyX],
+        };
+        assert!(
+            !new_config.safe_reload(&mut old_config),
+            "Hotkey change should be incompatible"
+        );
+        assert_eq!(
+            old_config.global_trigger_key, new_config.global_trigger_key,
+            "Should sync value"
+        );
+
+        new_config.editor = Some(CommandAction {
+            command: "code".into(),
+            args: vec![],
+            display: "VSCode".into(),
+            key: "E".into(),
+        });
+        assert!(
+            !new_config.safe_reload(&mut old_config),
+            "Adding editor should be incompatible"
+        );
+
+        // 5. Test change in workflow keys
+        new_config.workflows[0].key = "X".into();
+        assert!(
+            !new_config.safe_reload(&mut old_config),
+            "Workflow key change should be incompatible"
+        );
+    }
+
+    #[test]
+    fn test_safe_reload_workflow_len_mismatch() {
+        let mut old_config = GlyphlowConfig::default();
+        let mut new_config = GlyphlowConfig::default();
+
+        new_config.workflows.pop();
+
+        let compatible = new_config.safe_reload(&mut old_config);
+        assert!(!compatible, "Changing workflow count must be incompatible");
+        assert_eq!(
+            old_config.workflows.len(),
+            new_config.workflows.len(),
+            "Workflow list should sync"
+        );
+    }
+
+    #[test]
+    fn test_safe_reload_text_actions() {
+        let mut old_config = GlyphlowConfig::default();
+        let mut new_config = GlyphlowConfig::default();
+
+        new_config.text_actions.push(CommandAction {
+            command: "echo".into(),
+            args: vec![],
+            display: "Echo".into(),
+            key: "E".into(),
+        });
+
+        assert!(
+            !new_config.safe_reload(&mut old_config),
+            "New text action should be incompatible"
+        );
+        assert_eq!(old_config.text_actions.len(), 1);
     }
 }
