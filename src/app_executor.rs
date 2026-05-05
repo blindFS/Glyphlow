@@ -1,6 +1,6 @@
 use crate::{
-    AppSignal, DASH_BOARD_MENU_ITEMS, FilterMode, IMAGE_ACTION_MENU_ITEMS, MenuItem, Mode,
-    SCROLLBAR_MENU_ITEMS, ScrollAction, TEXT_ACTION_MENU_ITEMS, TextAction,
+    AppSignal, DASH_BOARD_MENU_ITEMS, FilterMode, IMAGE_ACTION_MENU_ITEMS, KeyState, MenuItem,
+    Mode, SCROLLBAR_MENU_ITEMS, ScrollAction, TEXT_ACTION_MENU_ITEMS, TextAction,
     action::{
         OCRResult, WordPicker, get_dictionary_attributed_string, perform_ocr, screen_shot,
         text_from_clipboard, text_to_clipboard,
@@ -67,7 +67,7 @@ impl MultiSeletionState {
 /// mainly cached UI elements, and some related drawings
 pub struct AppExecutor {
     state: Arc<Mutex<Mode>>,
-    simulating_keys: Arc<Mutex<bool>>,
+    key_state: Arc<Mutex<KeyState>>,
     /// Used for drawing hint boxes on screen
     hint_boxes: Vec<HintBox>,
     element_cache: ElementCache,
@@ -102,7 +102,7 @@ pub struct AppExecutor {
 impl AppExecutor {
     pub fn new(
         state: Arc<Mutex<Mode>>,
-        simulating_keys: Arc<Mutex<bool>>,
+        key_state: Arc<Mutex<KeyState>>,
         config: GlyphlowConfig,
         window: Retained<CALayer>,
         screen_size: CGSize,
@@ -111,7 +111,7 @@ impl AppExecutor {
     ) -> Self {
         Self {
             state,
-            simulating_keys,
+            key_state,
             hint_boxes: vec![],
             element_cache: ElementCache::new(
                 config.element_min_width as f64,
@@ -145,8 +145,8 @@ impl AppExecutor {
     }
 
     fn set_simulating_key(&self, flag: bool) {
-        if let Ok(mut is_sim) = self.simulating_keys.lock() {
-            *is_sim = flag;
+        if let Ok(mut ks) = self.key_state.lock() {
+            ks.is_simulating = flag;
         }
     }
 
@@ -337,7 +337,7 @@ impl AppExecutor {
         // e.g. Discord
         if is_electron && pid != self.last_pid {
             let _ = focused_app.role();
-            std::thread::sleep(Duration::from_millis(self.config.menu_wait_ms));
+            std::thread::sleep(Duration::from_millis(self.config.electron_initial_wait_ms));
         }
         self.last_pid = pid;
 

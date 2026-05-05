@@ -48,7 +48,7 @@ pub enum WorkFlowAction {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct WorkFlow {
     pub display: String,
-    pub key: char,
+    pub key: String,
     #[serde(default = "default_starting_role")]
     pub starting_role: RoleOfInterest,
     pub actions: Vec<WorkFlowAction>,
@@ -63,7 +63,7 @@ pub struct CommandAction {
     pub command: String,
     pub args: Vec<String>,
     pub display: String,
-    pub key: char,
+    pub key: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -333,8 +333,8 @@ pub struct GlyphlowConfig {
     pub dictionaries: Vec<String>,
     #[serde(default = "default_vis_level")]
     pub visibility_checking_level: VisibilityCheckingLevel,
-    #[serde(default = "default_menu_wait_ms")]
-    pub menu_wait_ms: u64,
+    #[serde(default = "default_wait_ms")]
+    pub electron_initial_wait_ms: u64,
 }
 
 fn default_global_keybinding() -> KeyBinding {
@@ -348,7 +348,7 @@ fn default_text_actions() -> Vec<CommandAction> {
 fn default_workflows() -> Vec<WorkFlow> {
     vec![
         WorkFlow {
-            key: 'R',
+            key: "R".into(),
             display: " ProofRead".into(),
             starting_role: RoleOfInterest::TextField,
             actions: vec![
@@ -365,7 +365,7 @@ fn default_workflows() -> Vec<WorkFlow> {
             ],
         },
         WorkFlow {
-            key: 'C',
+            key: "C".into(),
             display: "⮺ Copy".into(),
             starting_role: RoleOfInterest::Image,
             actions: vec![
@@ -380,7 +380,7 @@ fn default_workflows() -> Vec<WorkFlow> {
             ],
         },
         WorkFlow {
-            key: 'L',
+            key: "L".into(),
             display: " Copy Link".into(),
             starting_role: RoleOfInterest::Image,
             actions: vec![
@@ -395,13 +395,13 @@ fn default_workflows() -> Vec<WorkFlow> {
             ],
         },
         WorkFlow {
-            key: '[',
+            key: "[".into(),
             display: "󰳽 Press [Left Click]".into(),
             starting_role: RoleOfInterest::Generic,
             actions: vec![WorkFlowAction::Press],
         },
         WorkFlow {
-            key: ']',
+            key: "]".into(),
             display: " Menu [Right Click]".into(),
             starting_role: RoleOfInterest::Generic,
             actions: vec![
@@ -441,7 +441,7 @@ fn default_vis_level() -> VisibilityCheckingLevel {
     VisibilityCheckingLevel::Loose
 }
 
-fn default_menu_wait_ms() -> u64 {
+fn default_wait_ms() -> u64 {
     100
 }
 
@@ -461,7 +461,7 @@ impl Default for GlyphlowConfig {
             ocr_languages: default_ocr_languages(),
             dictionaries: default_dictionaries(),
             visibility_checking_level: default_vis_level(),
-            menu_wait_ms: default_menu_wait_ms(),
+            electron_initial_wait_ms: default_wait_ms(),
         }
     }
 }
