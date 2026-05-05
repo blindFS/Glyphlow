@@ -1015,18 +1015,17 @@ impl AppExecutor {
                     self.multi_selection.clear_one_side();
                     self.draw_word_picker();
                 } else {
+                    // Go back to text action menu
                     self.word_picker = None;
                     self.set_mode(Mode::TextActionMenu);
-                    self.draw_text_action_menu(
-                            &self
-                                .selected
-                                .as_ref()
-                                .and_then(|eoi| eoi.context.clone())
-                                .expect(
-                                    "Internal Error: selected text should be kept during menu refreshing.",
-                                ),
-                            "",
+                    let text = self
+                        .selected
+                        .as_ref()
+                        .and_then(|eoi| eoi.context.clone())
+                        .expect(
+                            "Internal Error: selected text should be kept during menu refreshing.",
                         );
+                    self.draw_text_action_menu(&text, "");
                 }
             }
             FilterMode::Generic if self.multi_selection.is_on => {
