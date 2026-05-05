@@ -53,6 +53,10 @@ impl MultiSeletionState {
         self.role = None;
     }
 
+    fn clear_one_side(&mut self) {
+        self.one_side_idex = None;
+    }
+
     fn set_one_side(&mut self, other: usize) -> Option<(usize, usize)> {
         if let Some(one) = self.one_side_idex {
             Some((one, other))
@@ -981,12 +985,9 @@ impl AppExecutor {
         }
     }
 
-    async fn perform_filtering(&mut self, key_char: char, mode: FilterMode) {
-        if key_char == '-' {
-            if self.key_prefix.is_empty()
-                && mode == FilterMode::Generic
-                && self.target == Target::ChildElement
-            {
+    async fn go_back_in_filtering(&mut self, mode: FilterMode) {
+        match mode {
+            FilterMode::Generic if self.target == Target::ChildElement => {
                 // Go back 1 level in element explorer
                 if let Some(parent_element) = self
                     .selected
@@ -1007,21 +1008,43 @@ impl AppExecutor {
                     });
                     self.activate(Target::ChildElement);
                 }
-                return;
-            } else if self.key_prefix.is_empty() && mode == FilterMode::WordPicking {
+            }
+            FilterMode::WordPicking => {
                 self.clear_drawing();
-                self.word_picker = None;
-                self.set_mode(Mode::TextActionMenu);
-                self.draw_text_action_menu(
-                    &self
-                        .selected
-                        .as_ref()
-                        .and_then(|eoi| eoi.context.clone())
-                        .expect(
-                            "Internal Error: selected text should be kept during menu refreshing.",
-                        ),
-                    "",
-                );
+                if self.multi_selection.is_on {
+                    self.multi_selection.clear_one_side();
+                    self.draw_word_picker();
+                } else {
+                    self.word_picker = None;
+                    self.set_mode(Mode::TextActionMenu);
+                    self.draw_text_action_menu(
+                            &self
+                                .selected
+                                .as_ref()
+                                .and_then(|eoi| eoi.context.clone())
+                                .expect(
+                                    "Internal Error: selected text should be kept during menu refreshing.",
+                                ),
+                            "",
+                        );
+                }
+            }
+            FilterMode::Generic if self.multi_selection.is_on => {
+                self.multi_selection.clear_one_side();
+                self.filter_by_key().await;
+            }
+            FilterMode::OCR if self.multi_selection.is_on => {
+                self.multi_selection.clear_one_side();
+                self.ocr_res_filtering();
+            }
+            _ => (),
+        }
+    }
+
+    async fn perform_filtering(&mut self, key_char: char, mode: FilterMode) {
+        if key_char == '-' {
+            if self.key_prefix.is_empty() {
+                self.go_back_in_filtering(mode).await;
                 return;
             } else {
                 self.key_prefix.pop();
