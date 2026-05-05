@@ -226,6 +226,7 @@ impl AlphabeticKey for Key {
             Key::Backspace | Key::Delete => '-',
             Key::LeftBracket => '[',
             Key::RightBracket => ']',
+            Key::ShiftLeft | Key::ShiftRight => '󰘶',
             _ => ' ',
         }
     }

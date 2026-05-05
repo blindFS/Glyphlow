@@ -123,7 +123,7 @@ async fn main() {
             let swallow = match event.event_type {
                 EventType::KeyPress(key) => {
                     k_s.key_down(&key);
-                    key_listener.key_down(key, &state, &k_s)
+                    key_listener.key_down(key, &state, &mut k_s)
                 }
                 EventType::KeyRelease(key) => {
                     k_s.key_up(&key);

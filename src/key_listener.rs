@@ -29,6 +29,8 @@ pub enum ScrollAction {
     DownRight,
     IncreaseDistance,
     DecreaseDistance,
+    Top,
+    Bottom,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -45,6 +47,7 @@ pub enum AppSignal {
     Activate(Target),
     DeActivate,
     Filter(char, FilterMode),
+    MenuRefresh(String, Mode),
     // Sub state signals
     FileUpdate(PathBuf),
     ClearNotification,
@@ -76,6 +79,17 @@ impl MenuItem {
     }
 }
 
+impl MenuItem {
+    pub fn pretty_print(&self, prefix_len: usize) -> String {
+        let prefix = "_".repeat(prefix_len);
+        format!(
+            "({prefix}{}) {}",
+            self.key.chars().skip(prefix_len).collect::<String>(),
+            self.description
+        )
+    }
+}
+
 impl Display for MenuItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "({}) {}", self.key, self.description)
@@ -98,7 +112,7 @@ pub const DASH_BOARD_MENU_ITEMS: [MenuItem; 9] = [
     MenuItem::new(" Read Clipboard", "C", AppSignal::ReadClipboard),
 ];
 
-pub const SCROLLBAR_MENU_ITEMS: [MenuItem; 4] = [
+pub const SCROLLBAR_MENU_ITEMS: [MenuItem; 6] = [
     MenuItem::new(
         "> Down/Right",
         "J",
@@ -119,6 +133,12 @@ pub const SCROLLBAR_MENU_ITEMS: [MenuItem; 4] = [
         "D",
         AppSignal::ScrollAction(ScrollAction::DecreaseDistance),
     ),
+    MenuItem::new("󰢦 Top", "GG", AppSignal::ScrollAction(ScrollAction::Top)),
+    MenuItem::new(
+        "󰢢 Bottom",
+        "󰘶G",
+        AppSignal::ScrollAction(ScrollAction::Bottom),
+    ),
 ];
 
 pub const TEXT_ACTION_MENU_ITEMS: [MenuItem; 3] = [
@@ -134,7 +154,7 @@ pub const TEXT_ACTION_MENU_ITEMS: [MenuItem; 3] = [
 pub const IMAGE_ACTION_MENU_ITEMS: [MenuItem; 1] =
     [MenuItem::new("󱄺 Image OCR", "O", AppSignal::FrameOCR)];
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Mode {
     DashBoard,
     Filtering,
@@ -226,18 +246,31 @@ impl KeyListener {
         }
     }
 
-    fn helper(
+    fn menu_helper(
         &self,
         key: &Key,
         key_signals: &HashMap<String, AppSignal>,
         mut state: MutexGuard<'_, Mode>,
+        key_state: &mut KeyState,
     ) -> bool {
-        let key_char = key.to_char().to_string();
-        if let Some(signal) = key_signals.get(&key_char) {
+        let key_char = key.to_char();
+        if key_char == '-' {
+            key_state.pop();
+        } else {
+            key_state.push(key_char);
+        }
+        if let Some(signal) = key_signals.get(&key_state.prefix) {
             self.send(signal.clone());
-        } else if key_char == " " {
-            self.send(AppSignal::DeActivate);
+            key_state.clear_prefix();
+        } else if key_char == ' ' {
             *state = Mode::Idle;
+            self.send(AppSignal::DeActivate);
+            key_state.clear_prefix();
+        } else {
+            self.send(AppSignal::MenuRefresh(
+                key_state.prefix.clone(),
+                state.clone(),
+            ));
         }
         true
     }
@@ -254,7 +287,7 @@ impl KeyListener {
     }
 
     /// Returns true if key is effective, and should be swallowed by this app
-    pub fn key_down(&self, key: Key, state: &Mutex<Mode>, key_state: &KeyState) -> bool {
+    pub fn key_down(&self, key: Key, state: &Mutex<Mode>, key_state: &mut KeyState) -> bool {
         let Ok(mut state) = state.try_lock() else {
             return false;
         };
@@ -274,7 +307,7 @@ impl KeyListener {
                     false
                 }
             }
-            Mode::DashBoard => self.helper(&key, &self.dashboard_actions, state),
+            Mode::DashBoard => self.menu_helper(&key, &self.dashboard_actions, state, key_state),
             // To act on selected parent node
             Mode::Filtering if key == Key::Return => {
                 self.send(AppSignal::DashBoard);
@@ -290,9 +323,9 @@ impl KeyListener {
             Mode::WordPicking => self.filter_helper(&key, state, FilterMode::WordPicking),
             Mode::Filtering => self.filter_helper(&key, state, FilterMode::Generic),
             Mode::OCRResultFiltering => self.filter_helper(&key, state, FilterMode::OCR),
-            Mode::TextActionMenu => self.helper(&key, &self.text_actions, state),
-            Mode::ImageActionMenu => self.helper(&key, &self.image_actions, state),
-            Mode::Scrolling => self.helper(&key, &self.scroll_actions, state),
+            Mode::TextActionMenu => self.menu_helper(&key, &self.text_actions, state, key_state),
+            Mode::ImageActionMenu => self.menu_helper(&key, &self.image_actions, state, key_state),
+            Mode::Scrolling => self.menu_helper(&key, &self.scroll_actions, state, key_state),
             Mode::WaitAndDeactivate => {
                 self.send(AppSignal::DeActivate);
                 *state = Mode::Idle;
