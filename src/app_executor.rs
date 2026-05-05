@@ -1289,10 +1289,19 @@ impl AppExecutor {
                     self.update_editing_text(new_text);
                 } else if pb != self.temp_file {
                     match GlyphlowConfig::load_config(&pb) {
-                        Ok(new_config) => {
+                        Ok(mut new_config) => {
                             self.element_cache.reload_config(&new_config);
+                            let need_warning = !self.config.safe_reload(&mut new_config);
                             self.config = new_config;
-                            self.notify_then_deactivate("Configuration reloaded.\nKeybinding changes won't be applied until next launch.", Level::Warn);
+
+                            if need_warning {
+                                self.notify_then_deactivate(
+                                    "Restart the app to apply full changes",
+                                    Level::Warn,
+                                );
+                            } else {
+                                self.notify_then_deactivate("Configuration reloaded", Level::Info);
+                            }
                         }
                         Err(msg) => {
                             self.notify_then_deactivate(&msg, Level::Error);
