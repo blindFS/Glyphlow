@@ -489,7 +489,7 @@ impl AppExecutor {
 
     /// Activates the app and caches UI elements
     fn activate(&mut self, target: Target) {
-        let need_help_msg = target == Target::ChildElement;
+        let need_help_msg = target == Target::ChildElement && self.selected.is_none();
         self.ui_element_traverse_on_activation(target);
 
         if !self.element_cache.cache.is_empty() {
@@ -983,10 +983,35 @@ impl AppExecutor {
 
     async fn perform_filtering(&mut self, key_char: char, mode: FilterMode) {
         if key_char == '-' {
-            self.key_prefix.pop();
+            if self.key_prefix.is_empty() && self.target == Target::ChildElement {
+                // Go back 1 level in element explorer
+                if let Some(parent_element) = self
+                    .selected
+                    .as_ref()
+                    .and_then(|eoi| eoi.element.as_ref())
+                    .and_then(|ele| ele.parent().ok())
+                {
+                    let screen_frame = Frame::from_origion(self.screen_size);
+                    let frame = parent_element
+                        .get_frame()
+                        .and_then(|f| f.intersect(&screen_frame))
+                        .unwrap_or(screen_frame);
+                    self.selected = Some(ElementOfInterest {
+                        element: Some(parent_element),
+                        context: None,
+                        role: RoleOfInterest::Generic,
+                        frame,
+                    });
+                }
+                self.activate(Target::ChildElement);
+                return;
+            } else {
+                self.key_prefix.pop();
+            }
         } else if self.key_prefix.len() < self.hint_width as usize {
             self.key_prefix.push(key_char);
         }
+
         match mode {
             FilterMode::OCR => {
                 self.ocr_res_filtering();
