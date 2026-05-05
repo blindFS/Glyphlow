@@ -53,6 +53,10 @@ impl MultiSeletionState {
         self.role = None;
     }
 
+    fn clear_one_side(&mut self) {
+        self.one_side_idex = None;
+    }
+
     fn set_one_side(&mut self, other: usize) -> Option<(usize, usize)> {
         if let Some(one) = self.one_side_idex {
             Some((one, other))
@@ -489,7 +493,7 @@ impl AppExecutor {
 
     /// Activates the app and caches UI elements
     fn activate(&mut self, target: Target) {
-        let need_help_msg = target == Target::ChildElement;
+        let need_help_msg = target == Target::ChildElement && self.selected.is_none();
         self.ui_element_traverse_on_activation(target);
 
         if !self.element_cache.cache.is_empty() {
@@ -981,6 +985,298 @@ impl AppExecutor {
         }
     }
 
+    async fn go_back_in_filtering(&mut self, mode: FilterMode) {
+        match mode {
+            FilterMode::Generic if self.target == Target::ChildElement => {
+                // Go back 1 level in element explorer
+                if let Some(parent_element) = self
+                    .selected
+                    .as_ref()
+                    .and_then(|eoi| eoi.element.as_ref())
+                    .and_then(|ele| ele.parent().ok())
+                {
+                    let screen_frame = Frame::from_origion(self.screen_size);
+                    let frame = parent_element
+                        .get_frame()
+                        .and_then(|f| f.intersect(&screen_frame))
+                        .unwrap_or(screen_frame);
+                    self.selected = Some(ElementOfInterest {
+                        element: Some(parent_element),
+                        context: None,
+                        role: RoleOfInterest::Generic,
+                        frame,
+                    });
+                    self.activate(Target::ChildElement);
+                }
+            }
+            FilterMode::WordPicking => {
+                self.clear_drawing();
+                if self.multi_selection.is_on {
+                    self.multi_selection.clear_one_side();
+                    self.draw_word_picker();
+                } else {
+                    self.word_picker = None;
+                    self.set_mode(Mode::TextActionMenu);
+                    self.draw_text_action_menu(
+                            &self
+                                .selected
+                                .as_ref()
+                                .and_then(|eoi| eoi.context.clone())
+                                .expect(
+                                    "Internal Error: selected text should be kept during menu refreshing.",
+                                ),
+                            "",
+                        );
+                }
+            }
+            FilterMode::Generic if self.multi_selection.is_on => {
+                self.multi_selection.clear_one_side();
+                self.filter_by_key().await;
+            }
+            FilterMode::OCR if self.multi_selection.is_on => {
+                self.multi_selection.clear_one_side();
+                self.ocr_res_filtering();
+            }
+            _ => (),
+        }
+    }
+
+    async fn perform_filtering(&mut self, key_char: char, mode: FilterMode) {
+        if key_char == '-' {
+            if self.key_prefix.is_empty() {
+                self.go_back_in_filtering(mode).await;
+                return;
+            } else {
+                self.key_prefix.pop();
+            }
+        } else if self.key_prefix.len() < self.hint_width as usize {
+            self.key_prefix.push(key_char);
+        }
+
+        match mode {
+            FilterMode::OCR => {
+                self.ocr_res_filtering();
+            }
+            FilterMode::Generic => {
+                self.filter_by_key().await;
+            }
+            FilterMode::WordPicking => {
+                self.clear_drawing();
+                let (matched_words, digits) = self.draw_word_picker();
+                self.hint_width = digits;
+
+                if self.key_prefix.len() == digits as usize
+                    && matched_words.len() == 1
+                    && let Some((idx, text)) = matched_words.first()
+                {
+                    if self.multi_selection.is_on {
+                        if let Some((idx1, idx2)) = self.multi_selection.set_one_side(*idx) {
+                            let text = self
+                                .word_picker
+                                .as_ref()
+                                .expect("Internal Error: no word picker set yet.")
+                                .select_range(idx1, idx2)
+                                .expect("Internal Error: wrong word picker indexing.");
+                            self.clear_drawing();
+                            self.update_selected_text_and_show_menu(text.clone())
+                        } else {
+                            self.key_prefix.clear();
+                            self.draw_word_picker();
+                        }
+                    } else {
+                        self.clear_drawing();
+                        self.update_selected_text_and_show_menu(text.clone())
+                    }
+                }
+            }
+        }
+    }
+
+    fn perform_text_action(&mut self, ta: TextAction) {
+        let Some(ElementOfInterest {
+            context: Some(text),
+            ..
+        }) = self.selected.as_ref()
+        else {
+            panic!("Internal Error: No selected text in Mode::TextActionMenu.");
+        };
+
+        let text = text.clone();
+
+        // Clear old menu no matter which action is taken
+        self.clear_drawing();
+
+        // TODO:
+        // 1. URL handling
+        let keep_drawing = match ta {
+            TextAction::Copy => {
+                text_to_clipboard(&text);
+                self.notify_then_deactivate("Copied to clipboard.", Level::Info);
+                true
+            }
+            TextAction::Dictionary => {
+                log::trace!("Looking up `{text}` in Apple Dictionary.");
+                if let Some(attr_string) = get_dictionary_attributed_string(
+                    &text,
+                    &self.config.dictionaries,
+                    &self.config.theme,
+                ) {
+                    let CGSize { width, height } = self.screen_size;
+                    let (text_size, _) = estimate_frame_for_text(&attr_string, (width, height));
+                    self.window.draw_attributed_string(
+                        attr_string,
+                        self.screen_size,
+                        text_size,
+                        &self.config.theme,
+                    );
+                } else {
+                    self.notify_then_deactivate("No definition found.", Level::Warn);
+                }
+                true
+            }
+            TextAction::Split => {
+                let word_picker = WordPicker::new(text);
+
+                self.clear_cache();
+                self.word_picker = Some(word_picker);
+                self.set_mode(Mode::WordPicking);
+                self.draw_word_picker();
+                true
+            }
+            TextAction::Editor => {
+                if let Err(e) = self.open_editor(&text) {
+                    self.notify_then_deactivate(
+                        &format!("Failed to open editor: {e}"),
+                        Level::Error,
+                    );
+                    true
+                } else {
+                    false
+                }
+            }
+            TextAction::UserDefined(idx) => {
+                self.take_external_action(idx, &text);
+                true
+            }
+        };
+
+        if !keep_drawing {
+            self.deactivate();
+        }
+    }
+
+    fn perform_scroll_action(&mut self, sa: ScrollAction) {
+        let Some(ElementOfInterest {
+            element: Some(element),
+            role,
+            frame,
+            ..
+        }) = self.selected.as_ref()
+        else {
+            panic!("An element is supposed to be selected before entering Mode::Scrolling!")
+        };
+
+        if *role == RoleOfInterest::ScrollBar {
+            let Some(old_val) = element
+                .value()
+                .ok()
+                .and_then(|v| v.downcast::<CFNumber>())
+                .and_then(|f| f.to_f64())
+            else {
+                self.deactivate();
+                return;
+            };
+
+            let scroll_unit = self.config.scroll_distance;
+            match sa {
+                ScrollAction::DownRight => {
+                    Self::scroll_to_value(element, old_val + scroll_unit);
+                }
+                ScrollAction::UpLeft => {
+                    Self::scroll_to_value(element, old_val - scroll_unit);
+                }
+                ScrollAction::IncreaseDistance => {
+                    self.config.scroll_distance *= 1.5;
+                }
+                ScrollAction::DecreaseDistance => {
+                    self.config.scroll_distance /= 1.5;
+                }
+                ScrollAction::Top => {
+                    Self::scroll_to_value(element, 0.0);
+                    self.draw_scrolling_menu("");
+                }
+                ScrollAction::Bottom => {
+                    Self::scroll_to_value(element, 1.0);
+                    self.draw_scrolling_menu("");
+                }
+            }
+        } else {
+            let distance = (frame.size().1 * self.config.scroll_distance).max(1.0) as i64;
+            match sa {
+                ScrollAction::DownRight => {
+                    Self::simulate_event(&EventType::Wheel {
+                        delta_x: 0,
+                        delta_y: -distance,
+                    });
+                }
+                ScrollAction::UpLeft => {
+                    Self::simulate_event(&EventType::Wheel {
+                        delta_x: 0,
+                        delta_y: distance,
+                    });
+                }
+                ScrollAction::IncreaseDistance => {
+                    self.config.scroll_distance *= 1.5;
+                }
+                ScrollAction::DecreaseDistance => {
+                    self.config.scroll_distance /= 1.5;
+                }
+                ScrollAction::Top => {
+                    Self::simulate_event(&EventType::Wheel {
+                        delta_x: 0,
+                        delta_y: 999999,
+                    });
+                    self.draw_scrolling_menu("");
+                }
+                ScrollAction::Bottom => {
+                    Self::simulate_event(&EventType::Wheel {
+                        delta_x: 0,
+                        delta_y: -999999,
+                    });
+                    self.draw_scrolling_menu("");
+                }
+            }
+        }
+    }
+
+    fn handle_file_update(&mut self, pb: PathBuf) {
+        if pb == self.temp_file
+            && let Ok(new_text) = std::fs::read_to_string(&self.temp_file)
+        {
+            self.update_editing_text(new_text);
+        } else if pb != self.temp_file {
+            match GlyphlowConfig::load_config(&pb) {
+                Ok(mut new_config) => {
+                    self.element_cache.reload_config(&new_config);
+                    let need_warning = !self.config.safe_reload(&mut new_config);
+                    self.config = new_config;
+
+                    if need_warning {
+                        self.notify_then_deactivate(
+                            "Restart the app to apply full changes",
+                            Level::Warn,
+                        );
+                    } else {
+                        self.notify_then_deactivate("Configuration reloaded", Level::Info);
+                    }
+                }
+                Err(msg) => {
+                    self.notify_then_deactivate(&msg, Level::Error);
+                }
+            };
+        }
+    }
+
     fn update_selected_text(&mut self, new_text: String) {
         if let Some(ElementOfInterest { context, .. }) = self.selected.as_mut() {
             *context = Some(new_text);
@@ -1061,206 +1357,12 @@ impl AppExecutor {
                 }
             },
             AppSignal::Filter(key_char, mode) => {
-                if key_char == '-' {
-                    self.key_prefix.pop();
-                } else if self.key_prefix.len() < self.hint_width as usize {
-                    self.key_prefix.push(key_char);
-                }
-                match mode {
-                    FilterMode::OCR => {
-                        self.ocr_res_filtering();
-                    }
-                    FilterMode::Generic => {
-                        self.filter_by_key().await;
-                    }
-                    FilterMode::WordPicking => {
-                        self.clear_drawing();
-                        let (matched_words, digits) = self.draw_word_picker();
-                        self.hint_width = digits;
-
-                        if self.key_prefix.len() == digits as usize
-                            && matched_words.len() == 1
-                            && let Some((idx, text)) = matched_words.first()
-                        {
-                            if self.multi_selection.is_on {
-                                if let Some((idx1, idx2)) = self.multi_selection.set_one_side(*idx)
-                                {
-                                    let text = self
-                                        .word_picker
-                                        .as_ref()
-                                        .expect("Internal Error: no word picker set yet.")
-                                        .select_range(idx1, idx2)
-                                        .expect("Internal Error: wrong word picker indexing.");
-                                    self.clear_drawing();
-                                    self.update_selected_text_and_show_menu(text.clone())
-                                } else {
-                                    self.key_prefix.clear();
-                                    self.draw_word_picker();
-                                }
-                            } else {
-                                self.clear_drawing();
-                                self.update_selected_text_and_show_menu(text.clone())
-                            }
-                        }
-                    }
-                }
+                self.perform_filtering(key_char, mode).await;
             }
             AppSignal::ScrollAction(sa) => {
-                let Some(ElementOfInterest {
-                    element: Some(element),
-                    role,
-                    frame,
-                    ..
-                }) = self.selected.as_ref()
-                else {
-                    panic!("An element is supposed to be selected before entering Mode::Scrolling!")
-                };
-
-                if *role == RoleOfInterest::ScrollBar {
-                    let Some(old_val) = element
-                        .value()
-                        .ok()
-                        .and_then(|v| v.downcast::<CFNumber>())
-                        .and_then(|f| f.to_f64())
-                    else {
-                        self.deactivate();
-                        return;
-                    };
-
-                    let scroll_unit = self.config.scroll_distance;
-                    match sa {
-                        ScrollAction::DownRight => {
-                            Self::scroll_to_value(element, old_val + scroll_unit);
-                        }
-                        ScrollAction::UpLeft => {
-                            Self::scroll_to_value(element, old_val - scroll_unit);
-                        }
-                        ScrollAction::IncreaseDistance => {
-                            self.config.scroll_distance *= 1.5;
-                        }
-                        ScrollAction::DecreaseDistance => {
-                            self.config.scroll_distance /= 1.5;
-                        }
-                        ScrollAction::Top => {
-                            Self::scroll_to_value(element, 0.0);
-                            self.draw_scrolling_menu("");
-                        }
-                        ScrollAction::Bottom => {
-                            Self::scroll_to_value(element, 1.0);
-                            self.draw_scrolling_menu("");
-                        }
-                    }
-                } else {
-                    let distance = (frame.size().1 * self.config.scroll_distance).max(1.0) as i64;
-                    match sa {
-                        ScrollAction::DownRight => {
-                            Self::simulate_event(&EventType::Wheel {
-                                delta_x: 0,
-                                delta_y: -distance,
-                            });
-                        }
-                        ScrollAction::UpLeft => {
-                            Self::simulate_event(&EventType::Wheel {
-                                delta_x: 0,
-                                delta_y: distance,
-                            });
-                        }
-                        ScrollAction::IncreaseDistance => {
-                            self.config.scroll_distance *= 1.5;
-                        }
-                        ScrollAction::DecreaseDistance => {
-                            self.config.scroll_distance /= 1.5;
-                        }
-                        ScrollAction::Top => {
-                            Self::simulate_event(&EventType::Wheel {
-                                delta_x: 0,
-                                delta_y: 999999,
-                            });
-                            self.draw_scrolling_menu("");
-                        }
-                        ScrollAction::Bottom => {
-                            Self::simulate_event(&EventType::Wheel {
-                                delta_x: 0,
-                                delta_y: -999999,
-                            });
-                            self.draw_scrolling_menu("");
-                        }
-                    }
-                }
+                self.perform_scroll_action(sa);
             }
-            AppSignal::TextAction(ta) => {
-                let Some(ElementOfInterest {
-                    context: Some(text),
-                    ..
-                }) = self.selected.as_ref()
-                else {
-                    panic!("Internal Error: No selected text in Mode::TextActionMenu.");
-                };
-
-                let text = text.clone();
-
-                // Clear old menu no matter which action is taken
-                self.clear_drawing();
-
-                // TODO:
-                // 1. URL handling
-                let keep_drawing = match ta {
-                    TextAction::Copy => {
-                        text_to_clipboard(&text);
-                        self.notify_then_deactivate("Copied to clipboard.", Level::Info);
-                        true
-                    }
-                    TextAction::Dictionary => {
-                        log::trace!("Looking up `{text}` in Apple Dictionary.");
-                        if let Some(attr_string) = get_dictionary_attributed_string(
-                            &text,
-                            &self.config.dictionaries,
-                            &self.config.theme,
-                        ) {
-                            let CGSize { width, height } = self.screen_size;
-                            let (text_size, _) =
-                                estimate_frame_for_text(&attr_string, (width, height));
-                            self.window.draw_attributed_string(
-                                attr_string,
-                                self.screen_size,
-                                text_size,
-                                &self.config.theme,
-                            );
-                        } else {
-                            self.notify_then_deactivate("No definition found.", Level::Warn);
-                        }
-                        true
-                    }
-                    TextAction::Split => {
-                        let word_picker = WordPicker::new(text);
-
-                        self.clear_cache();
-                        self.word_picker = Some(word_picker);
-                        self.set_mode(Mode::WordPicking);
-                        self.draw_word_picker();
-                        true
-                    }
-                    TextAction::Editor => {
-                        if let Err(e) = self.open_editor(&text) {
-                            self.notify_then_deactivate(
-                                &format!("Failed to open editor: {e}"),
-                                Level::Error,
-                            );
-                            true
-                        } else {
-                            false
-                        }
-                    }
-                    TextAction::UserDefined(idx) => {
-                        self.take_external_action(idx, &text);
-                        true
-                    }
-                };
-
-                if !keep_drawing {
-                    self.deactivate();
-                }
-            }
+            AppSignal::TextAction(ta) => self.perform_text_action(ta),
             AppSignal::ScreenShot => {
                 self.clear_drawing();
                 let frame = if let Some(eoi) = self.selected.as_ref() {
@@ -1286,33 +1388,7 @@ impl AppExecutor {
                     self.activate(Target::ImageOCR);
                 }
             }
-            AppSignal::FileUpdate(pb) => {
-                if pb == self.temp_file
-                    && let Ok(new_text) = std::fs::read_to_string(&self.temp_file)
-                {
-                    self.update_editing_text(new_text);
-                } else if pb != self.temp_file {
-                    match GlyphlowConfig::load_config(&pb) {
-                        Ok(mut new_config) => {
-                            self.element_cache.reload_config(&new_config);
-                            let need_warning = !self.config.safe_reload(&mut new_config);
-                            self.config = new_config;
-
-                            if need_warning {
-                                self.notify_then_deactivate(
-                                    "Restart the app to apply full changes",
-                                    Level::Warn,
-                                );
-                            } else {
-                                self.notify_then_deactivate("Configuration reloaded", Level::Info);
-                            }
-                        }
-                        Err(msg) => {
-                            self.notify_then_deactivate(&msg, Level::Error);
-                        }
-                    };
-                }
-            }
+            AppSignal::FileUpdate(pb) => self.handle_file_update(pb),
             AppSignal::ReadClipboard => {
                 self.clear_drawing();
                 if let Some(text) = text_from_clipboard() {

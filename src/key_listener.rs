@@ -168,12 +168,18 @@ pub enum Mode {
     WaitAndDeactivate,
 }
 
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+enum MenuType {
+    Dashboard,
+    TextAction,
+    ImageAction,
+    Scroll,
+}
+
 #[derive(Debug)]
 pub struct KeyListener {
-    pub text_actions: HashMap<String, AppSignal>,
-    pub image_actions: HashMap<String, AppSignal>,
-    pub dashboard_actions: HashMap<String, AppSignal>,
-    pub scroll_actions: HashMap<String, AppSignal>,
+    menu_actions: HashMap<MenuType, HashMap<String, AppSignal>>,
+    menu_action_max_key_len: HashMap<MenuType, usize>,
     sender: Sender<AppSignal>,
     global_key_binding: KeyBinding,
 }
@@ -185,56 +191,88 @@ impl KeyListener {
         items.into_iter().map(|it| (it.key.to_string(), it.action))
     }
 
+    fn menu_action_helper(
+        menu_type: MenuType,
+        config: &GlyphlowConfig,
+    ) -> (HashMap<String, AppSignal>, usize) {
+        let (base_items, need_workflow, need_text_action, editor_signal) = match menu_type {
+            MenuType::Dashboard => (
+                Self::iter_from(DASH_BOARD_MENU_ITEMS).collect::<HashMap<_, _>>(),
+                true,
+                false,
+                Some(AppSignal::Activate(Target::Edit)),
+            ),
+            MenuType::TextAction => (
+                Self::iter_from(TEXT_ACTION_MENU_ITEMS).collect::<HashMap<_, _>>(),
+                true,
+                true,
+                Some(AppSignal::TextAction(TextAction::Editor)),
+            ),
+            MenuType::ImageAction => (
+                Self::iter_from(IMAGE_ACTION_MENU_ITEMS).collect::<HashMap<_, _>>(),
+                true,
+                false,
+                None,
+            ),
+            MenuType::Scroll => (
+                Self::iter_from(SCROLLBAR_MENU_ITEMS).collect::<HashMap<_, _>>(),
+                false,
+                false,
+                None,
+            ),
+        };
+
+        let mut items = HashMap::new();
+        // Order matters!
+        if need_workflow {
+            for (idx, wf) in config.workflows.iter().enumerate() {
+                items.insert(wf.key.clone(), AppSignal::RunWorkFlow(idx));
+            }
+        }
+
+        if need_text_action {
+            for (idx, act) in config.text_actions.iter().enumerate() {
+                items.insert(
+                    act.key.clone(),
+                    AppSignal::TextAction(TextAction::UserDefined(idx)),
+                );
+            }
+        }
+
+        if let Some(sig) = editor_signal
+            && let Some(editor) = config.editor.as_ref()
+        {
+            items.insert(editor.key.clone(), sig);
+        }
+
+        for (key, sig) in base_items {
+            items.insert(key, sig);
+        }
+
+        let max_key_len = items.keys().map(|k| k.chars().count()).max().unwrap_or(0);
+        (items, max_key_len)
+    }
+
     pub fn new(sender: Sender<AppSignal>, config: &GlyphlowConfig) -> KeyListener {
-        let mut text_actions =
-            // Order matters!
-            config
-                .workflows
-                .iter()
-                .enumerate()
-                .map(|(idx, wf)| (wf.key.clone(), AppSignal::RunWorkFlow(idx)))
-                .chain(
-                    config.text_actions.iter().enumerate().map(|(idx, ca)| {
-                        (ca.key.clone(), AppSignal::TextAction(TextAction::UserDefined(idx)))
-                    }),
-                )
-                .chain(Self::iter_from(TEXT_ACTION_MENU_ITEMS))
-                .collect::<HashMap<_, _>>();
+        let mut menu_actions = HashMap::new();
+        let mut menu_action_max_key_len = HashMap::new();
 
-        let mut dashboard_actions = config
-            .workflows
-            .iter()
-            .enumerate()
-            .map(|(idx, wf)| (wf.key.clone(), AppSignal::RunWorkFlow(idx)))
-            .chain(Self::iter_from(DASH_BOARD_MENU_ITEMS))
-            .collect::<HashMap<_, _>>();
-
-        let image_actions = config
-            .workflows
-            .iter()
-            .enumerate()
-            .map(|(idx, wf)| (wf.key.clone(), AppSignal::RunWorkFlow(idx)))
-            .chain(Self::iter_from(IMAGE_ACTION_MENU_ITEMS))
-            .collect::<HashMap<_, _>>();
-
-        let scroll_actions = Self::iter_from(SCROLLBAR_MENU_ITEMS).collect::<HashMap<_, _>>();
-
-        if let Some(editor_command) = config.editor.as_ref() {
-            text_actions.insert(
-                editor_command.key.clone(),
-                AppSignal::TextAction(TextAction::Editor),
-            );
-            dashboard_actions.insert(
-                editor_command.key.clone(),
-                AppSignal::Activate(Target::Edit),
-            );
+        for menu_type in [
+            MenuType::Dashboard,
+            MenuType::TextAction,
+            MenuType::ImageAction,
+            MenuType::Scroll,
+        ]
+        .into_iter()
+        {
+            let (items, max_key_len) = Self::menu_action_helper(menu_type, config);
+            menu_actions.insert(menu_type, items);
+            menu_action_max_key_len.insert(menu_type, max_key_len);
         }
 
         KeyListener {
-            text_actions,
-            image_actions,
-            dashboard_actions,
-            scroll_actions,
+            menu_actions,
+            menu_action_max_key_len,
             sender,
             global_key_binding: config.global_trigger_key.clone(),
         }
@@ -249,17 +287,22 @@ impl KeyListener {
     fn menu_helper(
         &self,
         key: &Key,
-        key_signals: &HashMap<String, AppSignal>,
+        menu_type: MenuType,
         mut state: MutexGuard<'_, Mode>,
         key_state: &mut KeyState,
     ) -> bool {
         let key_char = key.to_char();
         if key_char == '-' {
             key_state.pop();
-        } else {
+        } else if key_state.prefix.chars().count() < self.menu_action_max_key_len[&menu_type] {
             key_state.push(key_char);
         }
-        if let Some(signal) = key_signals.get(&key_state.prefix) {
+
+        if let Some(signal) = self
+            .menu_actions
+            .get(&menu_type)
+            .and_then(|m| m.get(&key_state.prefix))
+        {
             self.send(signal.clone());
             key_state.clear_prefix();
         } else if key_char == ' ' {
@@ -307,7 +350,7 @@ impl KeyListener {
                     false
                 }
             }
-            Mode::DashBoard => self.menu_helper(&key, &self.dashboard_actions, state, key_state),
+            Mode::DashBoard => self.menu_helper(&key, MenuType::Dashboard, state, key_state),
             // To act on selected parent node
             Mode::Filtering if key == Key::Return => {
                 self.send(AppSignal::DashBoard);
@@ -323,9 +366,11 @@ impl KeyListener {
             Mode::WordPicking => self.filter_helper(&key, state, FilterMode::WordPicking),
             Mode::Filtering => self.filter_helper(&key, state, FilterMode::Generic),
             Mode::OCRResultFiltering => self.filter_helper(&key, state, FilterMode::OCR),
-            Mode::TextActionMenu => self.menu_helper(&key, &self.text_actions, state, key_state),
-            Mode::ImageActionMenu => self.menu_helper(&key, &self.image_actions, state, key_state),
-            Mode::Scrolling => self.menu_helper(&key, &self.scroll_actions, state, key_state),
+            Mode::TextActionMenu => self.menu_helper(&key, MenuType::TextAction, state, key_state),
+            Mode::ImageActionMenu => {
+                self.menu_helper(&key, MenuType::ImageAction, state, key_state)
+            }
+            Mode::Scrolling => self.menu_helper(&key, MenuType::Scroll, state, key_state),
             Mode::WaitAndDeactivate => {
                 self.send(AppSignal::DeActivate);
                 *state = Mode::Idle;
