@@ -983,7 +983,10 @@ impl AppExecutor {
 
     async fn perform_filtering(&mut self, key_char: char, mode: FilterMode) {
         if key_char == '-' {
-            if self.key_prefix.is_empty() && self.target == Target::ChildElement {
+            if self.key_prefix.is_empty()
+                && mode == FilterMode::Generic
+                && self.target == Target::ChildElement
+            {
                 // Go back 1 level in element explorer
                 if let Some(parent_element) = self
                     .selected
@@ -1002,8 +1005,23 @@ impl AppExecutor {
                         role: RoleOfInterest::Generic,
                         frame,
                     });
+                    self.activate(Target::ChildElement);
                 }
-                self.activate(Target::ChildElement);
+                return;
+            } else if self.key_prefix.is_empty() && mode == FilterMode::WordPicking {
+                self.clear_drawing();
+                self.word_picker = None;
+                self.set_mode(Mode::TextActionMenu);
+                self.draw_text_action_menu(
+                    &self
+                        .selected
+                        .as_ref()
+                        .and_then(|eoi| eoi.context.clone())
+                        .expect(
+                            "Internal Error: selected text should be kept during menu refreshing.",
+                        ),
+                    "",
+                );
                 return;
             } else {
                 self.key_prefix.pop();
