@@ -39,6 +39,7 @@ pub enum WorkFlowAction {
     SelectAll,
     Focus,
     Press,
+    Click,
     ShowMenu,
     KeyCombo(KeyBinding),
     SearchFor(CustomTarget),

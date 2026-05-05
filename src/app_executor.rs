@@ -936,6 +936,10 @@ impl AppExecutor {
                 let center = frame.center();
                 self.press_on_element(element, role, center);
             }
+            WorkFlowAction::Click => {
+                let (x, y) = frame.center();
+                Self::simulate_click(x, y, false);
+            }
             WorkFlowAction::ShowMenu => {
                 let center = frame.center();
                 self.right_click_menu_on_element(element, center);
