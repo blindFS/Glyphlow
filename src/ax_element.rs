@@ -342,7 +342,7 @@ pub trait GetAttribute {
     fn get_string_value_or_description(&self) -> Option<String>;
     fn get_frame(&self) -> Option<Frame>;
     fn get_dom_classes(&self) -> Option<Vec<String>>;
-    fn inspect(&self);
+    fn inspect(&self) -> String;
     fn is_clickable(&self) -> bool;
     fn has_children(&self) -> bool;
     fn match_custom_target(&self, target: &CustomTarget) -> bool;
@@ -407,15 +407,36 @@ impl GetAttribute for AXUIElement {
         }
     }
 
-    fn inspect(&self) {
-        let role = self.role();
-        println!("{role:?} ==== {:?}", self.action_names());
-        for attr in &self.attribute_names().unwrap() {
-            println!(
-                "{role:?} - {attr:?} - {:?}",
-                self.get_attribute(attr.to_string().as_str()),
-            );
+    fn inspect(&self) -> String {
+        let mut msg = String::new();
+
+        if let Ok(r) = self.role() {
+            msg.push_str(&format!("Role: {}\n", r));
         }
+
+        if let Ok(t) = self.title() {
+            msg.push_str(&format!("title: {}\n", t));
+        }
+
+        if let Ok(l) = self.label_value() {
+            msg.push_str(&format!("label: {}\n", l));
+        }
+
+        if let Ok(d) = self.description() {
+            msg.push_str(&format!("description: {}\n", d));
+        }
+
+        if let Ok(v) = self.value() {
+            msg.push_str(&format!("value: {:?}\n", v));
+        }
+
+        msg
+        // for attr in &self.attribute_names().unwrap() {
+        //     println!(
+        //         "{role:?} - {attr:?} - {:?}",
+        //         self.get_attribute(attr.to_string().as_str()),
+        //     );
+        // }
     }
 
     fn is_clickable(&self) -> bool {
@@ -589,7 +610,14 @@ pub fn traverse_elements(
                         i_w > 0.9 * w_w && i_h > 0.9 * w_h
                     })
                 {
-                    traverse_elements(&child, &c_f, window_frame, cache, target, vis_level);
+                    traverse_elements(
+                        &child,
+                        &child_fp.frame.unwrap_or(*parent_frame),
+                        window_frame,
+                        cache,
+                        target,
+                        vis_level,
+                    );
                 } else {
                     let roi = role_to_interest(&child_fp.role);
                     let context = match roi {

@@ -97,6 +97,7 @@ pub struct AppExecutor {
     /// Like simulate mouse clicking instead of `element.press()`
     is_electron: bool,
     last_pid: i32,
+    last_window_frame: Frame,
     /// For multi-selection
     multi_selection: MultiSeletionState,
     /// Something to finish after filtering
@@ -137,6 +138,7 @@ impl AppExecutor {
             ocr_cache: None,
             is_electron: false,
             last_pid: 0,
+            last_window_frame: Frame::from_origion(screen_size),
             multi_selection: MultiSeletionState::default(),
             pending_workflow_actions: VecDeque::new(),
         }
@@ -368,25 +370,31 @@ impl AppExecutor {
         if set_mode {
             match role {
                 RoleOfInterest::Image => self.set_mode(Mode::ImageActionMenu),
+                RoleOfInterest::ScrollBar => self.set_mode(Mode::Scrolling),
                 RoleOfInterest::TextField
                 | RoleOfInterest::StaticText
                 | RoleOfInterest::PseudoText => self.set_mode(Mode::TextActionMenu),
-                RoleOfInterest::ScrollBar => self.set_mode(Mode::Scrolling),
+                _ if self.target == Target::Text => self.set_mode(Mode::TextActionMenu),
                 _ => self.set_mode(Mode::DashBoard),
             }
         }
 
+        let text_action_helper = || {
+            let text = self
+                .selected
+                .as_ref()
+                .and_then(|eoi| eoi.context.as_ref())
+                .expect("Internal Error: selected text should be ready for text action menu");
+            self.draw_text_action_menu(text, key_prefix);
+        };
+
         match role {
             RoleOfInterest::Image => self.draw_image_action_menu(key_prefix),
-            RoleOfInterest::TextField | RoleOfInterest::StaticText | RoleOfInterest::PseudoText => {
-                let text = self
-                    .selected
-                    .as_ref()
-                    .and_then(|eoi| eoi.context.as_ref())
-                    .expect("Internal Error: selected text should be ready for text action menu");
-                self.draw_text_action_menu(text, key_prefix);
-            }
             RoleOfInterest::ScrollBar => self.draw_scrolling_menu(key_prefix),
+            RoleOfInterest::TextField | RoleOfInterest::StaticText | RoleOfInterest::PseudoText => {
+                text_action_helper();
+            }
+            _ if self.target == Target::Text => text_action_helper(),
             _ => self.draw_dashboard(key_prefix),
         }
     }
@@ -463,6 +471,7 @@ impl AppExecutor {
                 .unwrap_or(screen_frame);
             (window, frame)
         };
+        self.last_window_frame = window_frame;
 
         self.selected = Some(ElementOfInterest::new(
             Some(focused_window),
@@ -503,7 +512,7 @@ impl AppExecutor {
                 element,
                 // Very loose visibility constraint
                 frame,
-                frame,
+                &self.last_window_frame,
                 &mut self.element_cache,
                 &target,
                 vis_level,
@@ -985,10 +994,10 @@ impl AppExecutor {
                 self.right_click_menu_on_element(element, center);
             }
             WorkFlowAction::Debug => {
-                // TODO: go back to previous menu
                 self.clear_drawing();
-                self.notify("Hello", Level::Debug);
+                self.notify(&element.inspect(), Level::Debug);
                 // HACK: break the loop so the notification will be kept
+                self.pending_workflow_actions.clear();
                 return true;
             }
             WorkFlowAction::SelectAll => {
