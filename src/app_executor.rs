@@ -455,11 +455,29 @@ impl AppExecutor {
     }
 
     fn select_app_window(&mut self, vis_level: VisibilityCheckingLevel) -> Option<Frame> {
+        let screen_frame = Frame::from_origion(self.screen_size);
+
+        // NOTE: prioritize system alarms
+        if let Ok(app) = AXUIElement::application_with_bundle("com.apple.coreservices.uiagent")
+            && let Ok(window) = app.focused_window()
+        {
+            let frame = window.get_frame(screen_frame);
+            self.last_window_frame = frame;
+            self.is_electron = false;
+
+            self.selected = Some(ElementOfInterest::new(
+                Some(window),
+                None,
+                RoleOfInterest::Generic,
+                frame,
+            ));
+
+            return Some(frame);
+        }
+
         let (pid, is_electron) = get_focused_pid()?;
         self.is_electron = is_electron;
-
         let focused_app = AXUIElement::application(pid);
-        let screen_frame = Frame::from_origion(self.screen_size);
 
         // HACK: need this to bootstrap UI tree generation for some electron apps,
         // e.g. Discord
@@ -486,10 +504,7 @@ impl AppExecutor {
                 }
             }
             let window = window.unwrap_or(focused_app);
-            let frame = window
-                .get_frame()
-                .and_then(|f| f.intersect(&screen_frame))
-                .unwrap_or(screen_frame);
+            let frame = window.get_frame(screen_frame);
             (window, frame)
         };
         self.last_window_frame = window_frame;
@@ -1083,10 +1098,7 @@ impl AppExecutor {
             .and_then(|ele| ele.parent().ok())
         {
             let screen_frame = Frame::from_origion(self.screen_size);
-            let frame = parent_element
-                .get_frame()
-                .and_then(|f| f.intersect(&screen_frame))
-                .unwrap_or(screen_frame);
+            let frame = parent_element.get_frame(screen_frame);
             self.selected = Some(ElementOfInterest {
                 element: Some(parent_element),
                 context: None,

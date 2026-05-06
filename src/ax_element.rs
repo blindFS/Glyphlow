@@ -340,7 +340,7 @@ pub trait GetAttribute {
     fn get_attribute(&self, attribute_name: &str) -> Option<CFType>;
     fn get_attribute_string(&self, attribute_name: &str) -> Option<String>;
     fn get_string_value_or_description(&self) -> Option<String>;
-    fn get_frame(&self) -> Option<Frame>;
+    fn get_frame(&self, default: Frame) -> Frame;
     fn get_dom_classes(&self) -> Option<Vec<String>>;
     fn inspect(&self) -> String;
     fn is_clickable(&self) -> bool;
@@ -368,7 +368,7 @@ impl GetAttribute for AXUIElement {
             .map(|cf| cf.to_string())
     }
 
-    fn get_frame(&self) -> Option<Frame> {
+    fn get_frame(&self, default_frame: Frame) -> Frame {
         let cf_array_in = CFArray::from_CFTypes(&[
             CFString::new(kAXPositionAttribute),
             CFString::new(kAXSizeAttribute),
@@ -385,7 +385,7 @@ impl GetAttribute for AXUIElement {
             )
         };
 
-        if err != kAXErrorSuccess || values_ref.is_null() {
+        let frame = if err != kAXErrorSuccess || values_ref.is_null() {
             None
         } else {
             let values_array: CFArray<CFType> =
@@ -401,10 +401,13 @@ impl GetAttribute for AXUIElement {
                 .and_then(|size_ptr| cftype_to_rust_type::<CGSize>(*size_ptr, kAXValueTypeCGSize));
 
             match (pos, size) {
-                (Some(p), Some(s)) => Some(Frame::new(p.x, p.y, p.x + s.width, p.y + s.height)),
+                (Some(p), Some(s)) => {
+                    Frame::new(p.x, p.y, p.x + s.width, p.y + s.height).intersect(&default_frame)
+                }
                 _ => None,
             }
-        }
+        };
+        frame.unwrap_or(default_frame)
     }
 
     fn inspect(&self) -> String {
