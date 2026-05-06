@@ -8,10 +8,11 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub enum RoleOfInterest {
     Button,
     CheckBox,
+    #[default]
     Generic,
     Empty,
     Image,
@@ -19,6 +20,7 @@ pub enum RoleOfInterest {
     ScrollBar,
     StaticText,
     TextField,
+    PseudoText,
     Cell,
     CustomTarget,
 }
@@ -36,11 +38,14 @@ pub struct CustomTarget {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum WorkFlowAction {
+    Debug,
     SelectAll,
+    GoParent,
     Focus,
     Press,
     Click,
     ShowMenu,
+    GlyphlowMenu,
     KeyCombo(KeyBinding),
     SearchFor(CustomTarget),
     Sleep(u64),
@@ -488,7 +493,6 @@ fn default_dictionaries() -> Vec<String> {
 fn default_vis_level() -> VisibilityCheckingLevel {
     VisibilityCheckingLevel::Loose
 }
-
 fn default_wait_ms() -> u64 {
     100
 }

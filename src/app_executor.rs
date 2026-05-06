@@ -97,6 +97,7 @@ pub struct AppExecutor {
     /// Like simulate mouse clicking instead of `element.press()`
     is_electron: bool,
     last_pid: i32,
+    last_window_frame: Frame,
     /// For multi-selection
     multi_selection: MultiSeletionState,
     /// Something to finish after filtering
@@ -137,6 +138,7 @@ impl AppExecutor {
             ocr_cache: None,
             is_electron: false,
             last_pid: 0,
+            last_window_frame: Frame::from_origion(screen_size),
             multi_selection: MultiSeletionState::default(),
             pending_workflow_actions: VecDeque::new(),
         }
@@ -297,6 +299,11 @@ impl AppExecutor {
         msg
     }
 
+    fn draw_menu(&self, msg: &str) -> Retained<CALayer> {
+        self.window
+            .draw_menu(msg, self.screen_size, &self.config.theme)
+    }
+
     fn draw_dashboard(&self, key_prefix: &str) {
         let msg = self.menu_msg_alignment_helper(
             "Pick a Target:",
@@ -357,13 +364,53 @@ impl AppExecutor {
         self.draw_menu(&msg);
     }
 
-    fn draw_menu(&self, msg: &str) -> Retained<CALayer> {
-        self.window
-            .draw_menu(msg, self.screen_size, &self.config.theme)
+    fn draw_element_menu(&self, key_prefix: &str, role: &RoleOfInterest, set_mode: bool) {
+        self.clear_drawing();
+        // Set mode before drawing to make it more responsive
+        if set_mode {
+            match role {
+                RoleOfInterest::Image => self.set_mode(Mode::ImageActionMenu),
+                RoleOfInterest::ScrollBar => self.set_mode(Mode::Scrolling),
+                RoleOfInterest::TextField
+                | RoleOfInterest::StaticText
+                | RoleOfInterest::PseudoText => self.set_mode(Mode::TextActionMenu),
+                _ if self.target == Target::Text => self.set_mode(Mode::TextActionMenu),
+                _ => self.set_mode(Mode::DashBoard),
+            }
+        }
+
+        let text_action_helper = || {
+            let text = self
+                .selected
+                .as_ref()
+                .and_then(|eoi| eoi.context.as_ref())
+                .expect("Internal Error: selected text should be ready for text action menu");
+            self.draw_text_action_menu(text, key_prefix);
+        };
+
+        match role {
+            RoleOfInterest::Image => self.draw_image_action_menu(key_prefix),
+            RoleOfInterest::ScrollBar => self.draw_scrolling_menu(key_prefix),
+            RoleOfInterest::TextField | RoleOfInterest::StaticText | RoleOfInterest::PseudoText => {
+                text_action_helper();
+            }
+            _ if self.target == Target::Text => text_action_helper(),
+            _ => self.draw_dashboard(key_prefix),
+        }
+    }
+
+    fn menu_refresh(&self, key_prefix: &str, set_mode: bool) {
+        if let Some(eoi) = self.selected.as_ref() {
+            self.draw_element_menu(key_prefix, &eoi.role, set_mode);
+        } else {
+            self.clear_drawing();
+            self.draw_dashboard(key_prefix);
+        }
     }
 
     const SHORT_TIMEOUT: u64 = 1;
     const LONG_TIMEOUT: u64 = 2;
+    const DEBUG_TIMEOUT: u64 = 5;
 
     fn notify_then_deactivate(&mut self, msg: &str, log_level: Level) {
         self.set_mode(Mode::WaitAndDeactivate);
@@ -373,12 +420,13 @@ impl AppExecutor {
     fn notify(&mut self, msg: &str, log_level: Level) {
         let timeout_secs = match log_level {
             Level::Trace | Level::Info => Self::SHORT_TIMEOUT,
+            Level::Debug => Self::DEBUG_TIMEOUT,
             _ => Self::LONG_TIMEOUT,
         };
         log::log!(log_level, "{msg}");
         self.notification_layers.push(self.draw_menu(msg));
         let sender = self.timeout_sender.clone();
-        tokio::spawn(async move { delay_and_deactivate(sender, timeout_secs).await });
+        tokio::spawn(async move { delay(sender, timeout_secs).await });
     }
 
     fn draw_word_picker(&self) -> (Vec<(usize, String)>, u32) {
@@ -432,6 +480,7 @@ impl AppExecutor {
                 .unwrap_or(screen_frame);
             (window, frame)
         };
+        self.last_window_frame = window_frame;
 
         self.selected = Some(ElementOfInterest::new(
             Some(focused_window),
@@ -472,7 +521,7 @@ impl AppExecutor {
                 element,
                 // Very loose visibility constraint
                 frame,
-                frame,
+                &self.last_window_frame,
                 &mut self.element_cache,
                 &target,
                 vis_level,
@@ -505,13 +554,11 @@ impl AppExecutor {
         } else if self.target == Target::Scrollable
             && let Some(eoi) = self.selected.as_ref()
         {
-            // Fallback to mouse scroll
+            // Fallback to mouse scroll if no scrollbar found
             let (x, y) = eoi.frame.center();
             Self::simulate_event(&EventType::MouseMove { x, y });
             self.clear_cache();
-            self.set_mode(Mode::Scrolling);
-            self.clear_drawing();
-            self.draw_scrolling_menu("");
+            self.draw_element_menu("", &RoleOfInterest::ScrollBar, true);
         } else {
             self.clear_drawing();
             self.notify_then_deactivate("No relevant UI elements found.", Level::Warn);
@@ -622,7 +669,6 @@ impl AppExecutor {
                         .collect::<Vec<_>>();
                     let (text, frame) = select_range_helper(&choices, idx1, idx2)
                         .expect("Internal Error: wrong ocr hint indexing.");
-                    self.clear_drawing();
                     self.selected = Some(ElementOfInterest::pseudo(None, frame));
                     self.update_selected_text_and_show_menu(text.clone());
                 } else {
@@ -633,7 +679,6 @@ impl AppExecutor {
                 let (selected_text, cg_rect) = ocr_res
                     .get(hb.idx)
                     .expect("Internal Error: wrong ocr hint indexing.");
-                self.clear_drawing();
                 // Context initialized as None, but updated right after
                 self.selected = Some(ElementOfInterest::pseudo(None, Frame::from_cgrect(cg_rect)));
                 self.update_selected_text_and_show_menu(selected_text.clone());
@@ -644,6 +689,7 @@ impl AppExecutor {
     }
 
     async fn perform_ocr_on_frame(&mut self, frame: Frame) {
+        self.clear_drawing();
         // NOTE: for images with parts out of sight
         let frame = frame
             .intersect(&Frame::from_origion(self.screen_size))
@@ -687,8 +733,6 @@ impl AppExecutor {
                 },
             ) = self.element_cache.cache.get(*idx)
         {
-            // element.inspect();
-            self.clear_drawing();
             match self.target {
                 Target::MenuItem | Target::Clickable => {
                     let center = frame.center();
@@ -697,8 +741,7 @@ impl AppExecutor {
                 }
                 Target::Image => {
                     self.selected = Some(eoi.clone());
-                    self.set_mode(Mode::ImageActionMenu);
-                    self.draw_image_action_menu("");
+                    self.draw_element_menu("", role, true);
                 }
                 Target::Custom(_) => {
                     self.selected = Some(eoi.clone());
@@ -726,23 +769,35 @@ impl AppExecutor {
                             self.selected = Some(ElementOfInterest::pseudo(None, frame));
                             self.update_selected_text_and_show_menu(text);
                         } else {
-                            self.multi_selection.role = Some(role.clone());
+                            self.multi_selection.role = Some(*role);
                             self.key_prefix.clear();
                             self.draw_hints(&self.hint_boxes);
                         }
-                    } else if let Some(text) = context {
+                    } else if context.is_some() {
                         self.selected = Some(eoi.clone());
-                        self.set_mode(Mode::TextActionMenu);
-                        self.draw_text_action_menu(text, "");
+                        self.draw_element_menu("", role, true);
                     }
                 }
                 Target::ChildElement => {
                     self.selected = Some(eoi.clone());
                     self.ui_element_traverse_on_activation(Target::ChildElement);
+                    // Quick follow if only 1 element remaining
+                    // NOTE: use count to avoid circular pointer
+                    let mut count = 0;
+                    while self.element_cache.cache.len() == 1 && count < 10 {
+                        count += 1;
+                        self.selected = Some(self.element_cache.cache[0].clone());
+                        self.ui_element_traverse_on_activation(Target::ChildElement);
+                    }
+
                     // Actions for current selected element
                     if self.element_cache.cache.is_empty() {
-                        self.set_mode(Mode::DashBoard);
-                        self.draw_dashboard("");
+                        let role = self
+                            .selected
+                            .as_ref()
+                            .map(|eoi| eoi.role)
+                            .unwrap_or_default();
+                        self.draw_element_menu("", &role, true);
                     } else {
                         self.draw_hints_from_cache();
                     }
@@ -750,8 +805,7 @@ impl AppExecutor {
                 Target::Scrollable => {
                     self.selected = Some(eoi.clone());
                     self.clear_cache();
-                    self.set_mode(Mode::Scrolling);
-                    self.draw_scrolling_menu("");
+                    self.draw_element_menu("", &RoleOfInterest::ScrollBar, true);
                 }
                 Target::Editable => {
                     self.selected = Some(eoi.clone());
@@ -775,6 +829,7 @@ impl AppExecutor {
                             );
                         }
                     }
+                    self.clear_drawing();
                 }
             }
         } else {
@@ -852,7 +907,6 @@ impl AppExecutor {
                     let new_text = String::from_utf8_lossy(&o.stdout)
                         .trim_end_matches('\n')
                         .to_string();
-                    self.clear_drawing();
                     self.update_selected_text_and_show_menu(new_text);
                 } else if !o.stderr.is_empty() {
                     self.notify_then_deactivate(
@@ -883,6 +937,13 @@ impl AppExecutor {
     fn execute_workflow_action(&mut self, act: &WorkFlowAction) -> bool {
         // Actions don't need a selected element
         match act {
+            WorkFlowAction::GlyphlowMenu => {
+                self.menu_refresh("", true);
+                // HACK: break the loop so the notification will be kept,
+                // basically `GlyphlowMenu` should be a terminal op
+                self.pending_workflow_actions.clear();
+                return true;
+            }
             WorkFlowAction::Sleep(ms) => {
                 std::thread::sleep(Duration::from_millis(*ms));
                 return false;
@@ -948,6 +1009,19 @@ impl AppExecutor {
                 let center = frame.center();
                 self.right_click_menu_on_element(element, center);
             }
+            WorkFlowAction::GoParent => {
+                if self.select_parent() {
+                    self.target = Target::ChildElement;
+                };
+            }
+            WorkFlowAction::Debug => {
+                self.clear_drawing();
+                self.notify(&element.inspect(), Level::Debug);
+                // HACK: break the loop so the notification will be kept,
+                // basically `Debug` should be a terminal op
+                self.pending_workflow_actions.clear();
+                return true;
+            }
             WorkFlowAction::SelectAll => {
                 let len = context
                     .clone()
@@ -961,13 +1035,16 @@ impl AppExecutor {
     }
 
     fn execute_pending_workflow_actions(&mut self) {
+        self.clear_drawing();
         while let Some(act) = self.pending_workflow_actions.pop_front() {
             if self.execute_workflow_action(&act) {
                 return;
             };
         }
         self.clear_drawing();
-        self.notify_then_deactivate("Done", Level::Trace);
+        if self.notification_layers.is_empty() {
+            self.notify_then_deactivate("Done", Level::Trace);
+        }
     }
 
     fn execute_workflow(&mut self, idx: usize) {
@@ -985,48 +1062,47 @@ impl AppExecutor {
         }
     }
 
+    /// Select the parent of the currently selected element
+    fn select_parent(&mut self) -> bool {
+        if let Some(parent_element) = self
+            .selected
+            .as_ref()
+            .and_then(|eoi| eoi.element.as_ref())
+            .and_then(|ele| ele.parent().ok())
+        {
+            let screen_frame = Frame::from_origion(self.screen_size);
+            let frame = parent_element
+                .get_frame()
+                .and_then(|f| f.intersect(&screen_frame))
+                .unwrap_or(screen_frame);
+            self.selected = Some(ElementOfInterest {
+                element: Some(parent_element),
+                context: None,
+                role: RoleOfInterest::Generic,
+                frame,
+            });
+            return true;
+        }
+        false
+    }
+
     async fn go_back_in_filtering(&mut self, mode: FilterMode) {
         match mode {
+            // Go back 1 level in element explorer
             FilterMode::Generic if self.target == Target::ChildElement => {
-                // Go back 1 level in element explorer
-                if let Some(parent_element) = self
-                    .selected
-                    .as_ref()
-                    .and_then(|eoi| eoi.element.as_ref())
-                    .and_then(|ele| ele.parent().ok())
-                {
-                    let screen_frame = Frame::from_origion(self.screen_size);
-                    let frame = parent_element
-                        .get_frame()
-                        .and_then(|f| f.intersect(&screen_frame))
-                        .unwrap_or(screen_frame);
-                    self.selected = Some(ElementOfInterest {
-                        element: Some(parent_element),
-                        context: None,
-                        role: RoleOfInterest::Generic,
-                        frame,
-                    });
+                if self.select_parent() {
                     self.activate(Target::ChildElement);
                 }
             }
             FilterMode::WordPicking => {
-                self.clear_drawing();
-                if self.multi_selection.is_on {
+                if !self.multi_selection.is_on || self.multi_selection.one_side_idex.is_none() {
+                    // Go back to text action menu
+                    self.word_picker = None;
+                    self.draw_element_menu("", &RoleOfInterest::PseudoText, true);
+                } else {
+                    self.clear_drawing();
                     self.multi_selection.clear_one_side();
                     self.draw_word_picker();
-                } else {
-                    self.word_picker = None;
-                    self.set_mode(Mode::TextActionMenu);
-                    self.draw_text_action_menu(
-                            &self
-                                .selected
-                                .as_ref()
-                                .and_then(|eoi| eoi.context.clone())
-                                .expect(
-                                    "Internal Error: selected text should be kept during menu refreshing.",
-                                ),
-                            "",
-                        );
                 }
             }
             FilterMode::Generic if self.multi_selection.is_on => {
@@ -1077,14 +1153,12 @@ impl AppExecutor {
                                 .expect("Internal Error: no word picker set yet.")
                                 .select_range(idx1, idx2)
                                 .expect("Internal Error: wrong word picker indexing.");
-                            self.clear_drawing();
                             self.update_selected_text_and_show_menu(text.clone())
                         } else {
                             self.key_prefix.clear();
                             self.draw_word_picker();
                         }
                     } else {
-                        self.clear_drawing();
                         self.update_selected_text_and_show_menu(text.clone())
                     }
                 }
@@ -1203,11 +1277,11 @@ impl AppExecutor {
                 }
                 ScrollAction::Top => {
                     Self::scroll_to_value(element, 0.0);
-                    self.draw_scrolling_menu("");
+                    self.draw_element_menu("", &RoleOfInterest::ScrollBar, false);
                 }
                 ScrollAction::Bottom => {
                     Self::scroll_to_value(element, 1.0);
-                    self.draw_scrolling_menu("");
+                    self.draw_element_menu("", &RoleOfInterest::ScrollBar, false);
                 }
             }
         } else {
@@ -1236,14 +1310,14 @@ impl AppExecutor {
                         delta_x: 0,
                         delta_y: 999999,
                     });
-                    self.draw_scrolling_menu("");
+                    self.draw_element_menu("", &RoleOfInterest::ScrollBar, false);
                 }
                 ScrollAction::Bottom => {
                     Self::simulate_event(&EventType::Wheel {
                         delta_x: 0,
                         delta_y: -999999,
                     });
-                    self.draw_scrolling_menu("");
+                    self.draw_element_menu("", &RoleOfInterest::ScrollBar, false);
                 }
             }
         }
@@ -1296,16 +1370,22 @@ impl AppExecutor {
     }
 
     fn update_selected_text_and_show_menu(&mut self, new_text: String) {
-        self.set_mode(Mode::TextActionMenu);
-        self.draw_text_action_menu(&new_text, "");
         self.update_selected_text(new_text);
+        self.draw_element_menu("", &RoleOfInterest::PseudoText, true);
+    }
+
+    fn toggle_multiselection(&mut self) {
+        self.multi_selection.toggle();
+        let on_off = if self.multi_selection.is_on {
+            "on"
+        } else {
+            "off"
+        };
+        self.notify(&format!("Multi-selection is now {on_off}."), Level::Info);
     }
 
     pub async fn handle_signal(&mut self, signal: AppSignal) {
         match signal {
-            AppSignal::DashBoard => {
-                self.draw_dashboard("");
-            }
             AppSignal::Activate(target) => {
                 let quick_follow = target == Target::Scrollable
                     || target == Target::Editable
@@ -1321,36 +1401,15 @@ impl AppExecutor {
             AppSignal::RunWorkFlow(idx) => {
                 self.execute_workflow(idx);
             }
-            AppSignal::MenuRefresh(key_prefix, menu_mode) => {
-                self.clear_drawing();
-                match menu_mode {
-                    Mode::DashBoard => {
-                        self.draw_dashboard(&key_prefix);
-                    }
-                    Mode::TextActionMenu => {
-                        self
-                            .draw_text_action_menu(&self.selected.as_ref().and_then(|eoi| eoi.context.clone()).expect(
-                            "Internal Error: selected text should be kept during menu refreshing.",
-                        ), &key_prefix);
-                    }
-                    Mode::Scrolling => {
-                        self.draw_scrolling_menu(&key_prefix);
-                    }
-                    Mode::ImageActionMenu => {
-                        self.draw_image_action_menu(&key_prefix);
-                    }
-                    _ => (),
-                }
+            AppSignal::MenuRefresh(key_prefix) => {
+                self.menu_refresh(&key_prefix, false);
             }
             AppSignal::ToggleMultiSelection => match self.target {
                 Target::Text | Target::ImageOCR => {
-                    self.multi_selection.toggle();
-                    let on_off = if self.multi_selection.is_on {
-                        "on"
-                    } else {
-                        "off"
-                    };
-                    self.notify(&format!("Multi-selection is now {on_off}."), Level::Info);
+                    self.toggle_multiselection();
+                }
+                _ if self.word_picker.is_some() => {
+                    self.toggle_multiselection();
                 }
                 _ => {
                     self.notify("Multi selection only works for text.", Level::Warn);
@@ -1380,11 +1439,11 @@ impl AppExecutor {
                 };
             }
             AppSignal::FrameOCR => {
-                self.clear_drawing();
                 if let Some(ElementOfInterest { frame, .. }) = self.selected.as_ref() {
                     self.target = Target::ImageOCR;
                     self.perform_ocr_on_frame(*frame).await;
                 } else {
+                    self.clear_drawing();
                     self.activate(Target::ImageOCR);
                 }
             }
@@ -1415,7 +1474,7 @@ impl AppExecutor {
     }
 }
 
-async fn delay_and_deactivate(sender: Sender<()>, timeout_secs: u64) {
+async fn delay(sender: Sender<()>, timeout_secs: u64) {
     tokio::time::sleep(Duration::from_secs(timeout_secs)).await;
     let _ = sender.send(()).await;
 }

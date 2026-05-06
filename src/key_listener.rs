@@ -43,11 +43,10 @@ pub enum FilterMode {
 #[derive(Debug, PartialEq, Clone)]
 pub enum AppSignal {
     // State signals
-    DashBoard,
     Activate(Target),
     DeActivate,
     Filter(char, FilterMode),
-    MenuRefresh(String, Mode),
+    MenuRefresh(String),
     // Sub state signals
     FileUpdate(PathBuf),
     ClearNotification,
@@ -310,10 +309,7 @@ impl KeyListener {
             self.send(AppSignal::DeActivate);
             key_state.clear_prefix();
         } else {
-            self.send(AppSignal::MenuRefresh(
-                key_state.prefix.clone(),
-                state.clone(),
-            ));
+            self.send(AppSignal::MenuRefresh(key_state.prefix.clone()));
         }
         true
     }
@@ -343,7 +339,7 @@ impl KeyListener {
                         || k.right_alternative()
                             .is_some_and(|r| *k == r || key_state.pressed_keys.contains(&r))
                 }) {
-                    self.send(AppSignal::DashBoard);
+                    self.send(AppSignal::MenuRefresh("".into()));
                     *state = Mode::DashBoard;
                     true
                 } else {
@@ -353,7 +349,7 @@ impl KeyListener {
             Mode::DashBoard => self.menu_helper(&key, MenuType::Dashboard, state, key_state),
             // To act on selected parent node
             Mode::Filtering if key == Key::Return => {
-                self.send(AppSignal::DashBoard);
+                self.send(AppSignal::MenuRefresh("".into()));
                 *state = Mode::DashBoard;
                 true
             }
