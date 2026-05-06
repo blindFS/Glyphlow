@@ -399,6 +399,15 @@ impl AppExecutor {
         }
     }
 
+    fn menu_refresh(&self, key_prefix: &str, set_mode: bool) {
+        if let Some(eoi) = self.selected.as_ref() {
+            self.draw_element_menu(key_prefix, &eoi.role, set_mode);
+        } else {
+            self.clear_drawing();
+            self.draw_dashboard(key_prefix);
+        }
+    }
+
     const SHORT_TIMEOUT: u64 = 1;
     const LONG_TIMEOUT: u64 = 2;
     const DEBUG_TIMEOUT: u64 = 5;
@@ -928,6 +937,13 @@ impl AppExecutor {
     fn execute_workflow_action(&mut self, act: &WorkFlowAction) -> bool {
         // Actions don't need a selected element
         match act {
+            WorkFlowAction::GlyphlowMenu => {
+                self.menu_refresh("", true);
+                // HACK: break the loop so the notification will be kept,
+                // basically `GlyphlowMenu` should be a terminal op
+                self.pending_workflow_actions.clear();
+                return true;
+            }
             WorkFlowAction::Sleep(ms) => {
                 std::thread::sleep(Duration::from_millis(*ms));
                 return false;
@@ -993,10 +1009,16 @@ impl AppExecutor {
                 let center = frame.center();
                 self.right_click_menu_on_element(element, center);
             }
+            WorkFlowAction::GoParent => {
+                if self.select_parent() {
+                    self.target = Target::ChildElement;
+                };
+            }
             WorkFlowAction::Debug => {
                 self.clear_drawing();
                 self.notify(&element.inspect(), Level::Debug);
-                // HACK: break the loop so the notification will be kept
+                // HACK: break the loop so the notification will be kept,
+                // basically `Debug` should be a terminal op
                 self.pending_workflow_actions.clear();
                 return true;
             }
@@ -1040,27 +1062,35 @@ impl AppExecutor {
         }
     }
 
+    /// Select the parent of the currently selected element
+    fn select_parent(&mut self) -> bool {
+        if let Some(parent_element) = self
+            .selected
+            .as_ref()
+            .and_then(|eoi| eoi.element.as_ref())
+            .and_then(|ele| ele.parent().ok())
+        {
+            let screen_frame = Frame::from_origion(self.screen_size);
+            let frame = parent_element
+                .get_frame()
+                .and_then(|f| f.intersect(&screen_frame))
+                .unwrap_or(screen_frame);
+            self.selected = Some(ElementOfInterest {
+                element: Some(parent_element),
+                context: None,
+                role: RoleOfInterest::Generic,
+                frame,
+            });
+            return true;
+        }
+        false
+    }
+
     async fn go_back_in_filtering(&mut self, mode: FilterMode) {
         match mode {
+            // Go back 1 level in element explorer
             FilterMode::Generic if self.target == Target::ChildElement => {
-                // Go back 1 level in element explorer
-                if let Some(parent_element) = self
-                    .selected
-                    .as_ref()
-                    .and_then(|eoi| eoi.element.as_ref())
-                    .and_then(|ele| ele.parent().ok())
-                {
-                    let screen_frame = Frame::from_origion(self.screen_size);
-                    let frame = parent_element
-                        .get_frame()
-                        .and_then(|f| f.intersect(&screen_frame))
-                        .unwrap_or(screen_frame);
-                    self.selected = Some(ElementOfInterest {
-                        element: Some(parent_element),
-                        context: None,
-                        role: RoleOfInterest::Generic,
-                        frame,
-                    });
+                if self.select_parent() {
                     self.activate(Target::ChildElement);
                 }
             }
@@ -1362,12 +1392,7 @@ impl AppExecutor {
                 self.execute_workflow(idx);
             }
             AppSignal::MenuRefresh(key_prefix) => {
-                if let Some(eoi) = self.selected.as_ref() {
-                    self.draw_element_menu(&key_prefix, &eoi.role, false);
-                } else {
-                    self.clear_drawing();
-                    self.draw_dashboard(&key_prefix);
-                }
+                self.menu_refresh(&key_prefix, false);
             }
             AppSignal::ToggleMultiSelection => match self.target {
                 Target::ChildElement | Target::Text | Target::ImageOCR => {

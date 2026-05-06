@@ -40,10 +40,12 @@ pub struct CustomTarget {
 pub enum WorkFlowAction {
     Debug,
     SelectAll,
+    GoParent,
     Focus,
     Press,
     Click,
     ShowMenu,
+    GlyphlowMenu,
     KeyCombo(KeyBinding),
     SearchFor(CustomTarget),
     Sleep(u64),
