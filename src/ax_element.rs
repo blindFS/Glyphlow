@@ -8,11 +8,10 @@ use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     AXUIElementCopyMultipleAttributeValues, AXValueCreate, AXValueGetValue, AXValueRef,
     kAXButtonRole, kAXCellRole, kAXCheckBoxRole, kAXComboBoxRole, kAXContentListSubrole,
-    kAXDescriptionAttribute, kAXErrorSuccess, kAXGroupRole, kAXHiddenAttribute, kAXImageRole,
-    kAXListRole, kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction,
-    kAXRoleAttribute, kAXRowRole, kAXScrollAreaRole, kAXScrollBarRole,
-    kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
-    kAXTextFieldRole, kAXTitleAttribute, kAXValueAttribute, kAXValueTypeCFRange,
+    kAXErrorSuccess, kAXGroupRole, kAXHiddenAttribute, kAXImageRole, kAXListRole, kAXMenuItemRole,
+    kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction, kAXRoleAttribute, kAXRowRole,
+    kAXScrollAreaRole, kAXScrollBarRole, kAXSelectedTextRangeAttribute, kAXSizeAttribute,
+    kAXStaticTextRole, kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueTypeCFRange,
     kAXValueTypeCGPoint, kAXValueTypeCGSize, kAXWindowRole,
 };
 use core_foundation::{
@@ -155,7 +154,7 @@ impl ElementOfInterest {
         Self {
             element: None,
             context,
-            role: RoleOfInterest::Generic,
+            role: RoleOfInterest::PseudoText,
             frame,
         }
     }
@@ -190,6 +189,27 @@ impl ElementCache {
     pub fn clear(&mut self) {
         self.cache.clear();
         self.seen_center.clear();
+    }
+
+    pub fn force_add(
+        &mut self,
+        element: &AXUIElement,
+        context: Option<String>,
+        role: RoleOfInterest,
+        frame: Option<Frame>,
+    ) {
+        // Has to be concrete leaf elements with frames
+        let Some(frame) = frame else {
+            return;
+        };
+
+        let (x, y) = frame.center();
+        // f64 to u64 for hashing
+        let center = (x.to_bits(), y.to_bits());
+
+        let new_ele = ElementOfInterest::new(Some(element.clone()), context, role, frame);
+        self.seen_center.insert(center, self.cache.len());
+        self.cache.push(new_ele);
     }
 
     pub fn add(
@@ -260,7 +280,7 @@ impl ElementCache {
         let center = (x.to_bits(), y.to_bits());
 
         // NOTE: de-duplication for DOM elements
-        let new_ele = ElementOfInterest::new(Some(element.clone()), context, role.clone(), frame);
+        let new_ele = ElementOfInterest::new(Some(element.clone()), context, role, frame);
         if let Some(idx) = self.seen_center.get(&center) {
             self.cache[*idx] = new_ele;
         } else {
@@ -302,9 +322,24 @@ impl ElementCache {
     }
 }
 
+fn role_to_interest(role: &str) -> RoleOfInterest {
+    #[allow(non_upper_case_globals)]
+    match role.to_string().as_str() {
+        kAXImageRole => RoleOfInterest::Image,
+        kAXTextFieldRole | kAXTextAreaRole | kAXComboBoxRole => RoleOfInterest::TextField,
+        kAXMenuItemRole => RoleOfInterest::MenuItem,
+        kAXPopUpButtonRole | kAXButtonRole | "AXRadioButton" => RoleOfInterest::Button,
+        kAXCheckBoxRole => RoleOfInterest::CheckBox,
+        kAXStaticTextRole | "AXHeading" => RoleOfInterest::StaticText,
+        kAXScrollBarRole => RoleOfInterest::ScrollBar,
+        _ => RoleOfInterest::Generic,
+    }
+}
+
 pub trait GetAttribute {
     fn get_attribute(&self, attribute_name: &str) -> Option<CFType>;
     fn get_attribute_string(&self, attribute_name: &str) -> Option<String>;
+    fn get_string_value_or_description(&self) -> Option<String>;
     fn get_frame(&self) -> Option<Frame>;
     fn get_dom_classes(&self) -> Option<Vec<String>>;
     fn inspect(&self);
@@ -322,6 +357,14 @@ impl GetAttribute for AXUIElement {
     fn get_attribute_string(&self, attribute_name: &str) -> Option<String> {
         self.get_attribute(attribute_name)
             .and_then(|val| val.downcast::<CFString>())
+            .map(|cf| cf.to_string())
+    }
+
+    fn get_string_value_or_description(&self) -> Option<String> {
+        self.value()
+            .ok()
+            .and_then(|v| v.downcast::<CFString>())
+            .or_else(|| self.description().ok())
             .map(|cf| cf.to_string())
     }
 
@@ -534,42 +577,34 @@ pub fn traverse_elements(
                 && let Some(c_f) = child_fp.frame
                 && let Some(inter) = child_fp.visible_frame(window_frame)
             {
-                // NOTE: recur into temp nodes with nonsense frames,
-                // or dominating child elements, most of the time, they're meaningless.
+                // NOTE: recur into temp nodes with nonsense frames
                 let (c_w, c_h) = c_f.size();
-                if inter.contains(window_frame) || c_w <= 1.0 || c_h <= 1.0 || {
-                    let (i_w, i_h) = inter.size();
-                    let (w_w, w_h) = window_frame.size();
-                    i_w > 0.9 * w_w && i_h > 0.9 * w_h
-                } {
+                if child_fp.role != kAXScrollBarRole && inter.contains(window_frame)
+                    || c_w <= 1.0
+                    || c_h <= 1.0
+                    || (child_fp.role == kAXGroupRole && {
+                        // Dominating child groups are usually meaningless
+                        let (i_w, i_h) = inter.size();
+                        let (w_w, w_h) = window_frame.size();
+                        i_w > 0.9 * w_w && i_h > 0.9 * w_h
+                    })
+                {
                     traverse_elements(&child, &c_f, window_frame, cache, target, vis_level);
                 } else {
-                    cache.add(
+                    let roi = role_to_interest(&child_fp.role);
+                    let context = match roi {
+                        RoleOfInterest::TextField | RoleOfInterest::StaticText => {
+                            Some(child.get_string_value_or_description().unwrap_or_default())
+                        }
+                        _ => None,
+                    };
+                    cache.force_add(
                         &child,
-                        None,
-                        RoleOfInterest::Generic,
+                        context,
+                        roi,
                         child_fp.frame.and_then(|f| f.intersect(window_frame)),
                     );
                 }
-            }
-        }
-
-        // Skip element levels where only 1 item available
-        if cache.cache.len() == 1 {
-            let temp_eoi = cache.cache[0].clone();
-            cache.clear();
-            if let Some(element) = temp_eoi.element {
-                traverse_elements(
-                    &element,
-                    &temp_eoi
-                        .frame
-                        .intersect(window_frame)
-                        .unwrap_or(*parent_frame),
-                    window_frame,
-                    cache,
-                    target,
-                    vis_level,
-                );
             }
         }
 
@@ -668,10 +703,7 @@ pub fn traverse_elements(
                 cache.add(element, None, RoleOfInterest::Button, ele_fp.frame);
             }
             Target::Text => {
-                if let Some(value) = element
-                    .get_attribute_string(kAXValueAttribute)
-                    .or_else(|| element.get_attribute_string(kAXDescriptionAttribute))
-                {
+                if let Some(value) = element.get_string_value_or_description() {
                     cache.add(
                         element,
                         Some(value),
@@ -701,13 +733,13 @@ pub fn traverse_elements(
             Target::Editable => {
                 cache.add(
                     element,
-                    element.get_attribute_string(kAXValueAttribute),
+                    element.get_string_value_or_description(),
                     RoleOfInterest::TextField,
                     ele_fp.frame,
                 );
             }
             Target::Text => {
-                if let Some(value) = element.get_attribute_string(kAXValueAttribute)
+                if let Some(value) = element.get_string_value_or_description()
                     && !value.is_empty()
                 {
                     cache.add(
