@@ -426,7 +426,7 @@ impl AppExecutor {
         log::log!(log_level, "{msg}");
         self.notification_layers.push(self.draw_menu(msg));
         let sender = self.timeout_sender.clone();
-        tokio::spawn(async move { delay_and_deactivate(sender, timeout_secs).await });
+        tokio::spawn(async move { delay(sender, timeout_secs).await });
     }
 
     fn draw_word_picker(&self) -> (Vec<(usize, String)>, u32) {
@@ -1374,6 +1374,16 @@ impl AppExecutor {
         self.draw_element_menu("", &RoleOfInterest::PseudoText, true);
     }
 
+    fn toggle_multiselection(&mut self) {
+        self.multi_selection.toggle();
+        let on_off = if self.multi_selection.is_on {
+            "on"
+        } else {
+            "off"
+        };
+        self.notify(&format!("Multi-selection is now {on_off}."), Level::Info);
+    }
+
     pub async fn handle_signal(&mut self, signal: AppSignal) {
         match signal {
             AppSignal::Activate(target) => {
@@ -1395,14 +1405,11 @@ impl AppExecutor {
                 self.menu_refresh(&key_prefix, false);
             }
             AppSignal::ToggleMultiSelection => match self.target {
-                Target::ChildElement | Target::Text | Target::ImageOCR => {
-                    self.multi_selection.toggle();
-                    let on_off = if self.multi_selection.is_on {
-                        "on"
-                    } else {
-                        "off"
-                    };
-                    self.notify(&format!("Multi-selection is now {on_off}."), Level::Info);
+                Target::Text | Target::ImageOCR => {
+                    self.toggle_multiselection();
+                }
+                _ if self.word_picker.is_some() => {
+                    self.toggle_multiselection();
                 }
                 _ => {
                     self.notify("Multi selection only works for text.", Level::Warn);
@@ -1467,7 +1474,7 @@ impl AppExecutor {
     }
 }
 
-async fn delay_and_deactivate(sender: Sender<()>, timeout_secs: u64) {
+async fn delay(sender: Sender<()>, timeout_secs: u64) {
     tokio::time::sleep(Duration::from_secs(timeout_secs)).await;
     let _ = sender.send(()).await;
 }
