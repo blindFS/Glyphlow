@@ -15,7 +15,7 @@ use crate::{
 };
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
 use accessibility_sys::{
-    kAXErrorAttributeUnsupported, kAXErrorCannotComplete, kAXFocusedAttribute,
+    kAXErrorAttributeUnsupported, kAXErrorCannotComplete, kAXFocusedAttribute, kAXPopoverRole,
 };
 use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber, string::CFString};
 use log::Level;
@@ -473,7 +473,19 @@ impl AppExecutor {
         let (focused_window, window_frame) = if vis_level == VisibilityCheckingLevel::Loosest {
             (focused_app, screen_frame)
         } else {
-            let window = focused_app.focused_window().unwrap_or(focused_app);
+            let mut window = focused_app.focused_window();
+            // NOTE: prioritize popover windows, e.g. Apple Music search
+            if let Ok(windows) = focused_app.windows()
+                && windows.len() > 1
+            {
+                for win in windows.iter() {
+                    if win.role().is_ok_and(|r| r == kAXPopoverRole) {
+                        window = Ok(win.clone());
+                        break;
+                    }
+                }
+            }
+            let window = window.unwrap_or(focused_app);
             let frame = window
                 .get_frame()
                 .and_then(|f| f.intersect(&screen_frame))
