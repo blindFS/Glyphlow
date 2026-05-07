@@ -10,7 +10,7 @@ use crate::{
     },
     config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel, WorkFlow, WorkFlowAction},
     drawer::GlyphlowDrawingLayer,
-    os_util::get_focused_pid,
+    os_util::{get_focused, get_system_alarm_window},
     util::{Frame, HintBox, estimate_frame_for_text, hint_boxes_from_frames, select_range_helper},
 };
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
@@ -460,9 +460,7 @@ impl AppExecutor {
         let screen_frame = Frame::from_origion(self.screen_size);
 
         // NOTE: prioritize system alarms
-        if let Ok(app) = AXUIElement::application_with_bundle("com.apple.coreservices.uiagent")
-            && let Ok(window) = app.focused_window()
-        {
+        if let Some(window) = get_system_alarm_window() {
             let frame = window.get_frame(screen_frame);
             self.last_window_frame = frame;
             self.is_electron = false;
@@ -477,9 +475,8 @@ impl AppExecutor {
             return Some(frame);
         }
 
-        let (pid, is_electron) = get_focused_pid()?;
+        let (pid, focused_app, is_electron) = get_focused()?;
         self.is_electron = is_electron;
-        let focused_app = AXUIElement::application(pid);
 
         // HACK: need this to bootstrap UI tree generation for some electron apps,
         // e.g. Discord

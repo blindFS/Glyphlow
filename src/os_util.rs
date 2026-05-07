@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use accessibility::{AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
 use core_foundation::{
     base::TCFType, boolean::CFBoolean, dictionary::CFDictionary, string::CFString,
@@ -27,12 +28,32 @@ fn check_is_electron_app(app: &Retained<NSRunningApplication>) -> Option<bool> {
     Some(false)
 }
 
-pub fn get_focused_pid() -> Option<(i32, bool)> {
+const APPLE_ALARM_BUNDLE_IDS: [&str; 3] = [
+    "com.apple.coreservices.uiagent",
+    "com.apple.accessibility.universalAccessAuthWarn",
+    "com.apple.CoreLocationAgent",
+];
+
+pub fn get_system_alarm_window() -> Option<AXUIElement> {
+    for bundle_id in APPLE_ALARM_BUNDLE_IDS {
+        if let Ok(app) = AXUIElement::application_with_bundle(bundle_id)
+            && let Ok(window) = app.focused_window()
+        {
+            return Some(window);
+        }
+    }
+    None
+}
+
+pub fn get_focused() -> Option<(i32, AXUIElement, bool)> {
     let workspace = NSWorkspace::sharedWorkspace();
     let app = workspace.frontmostApplication()?;
+    // eprintln!("Focused app: {:?}", app.bundleIdentifier());
 
+    let pid = app.processIdentifier();
     Some((
-        app.processIdentifier(),
+        pid,
+        AXUIElement::application(pid),
         check_is_electron_app(&app).unwrap_or_default(),
     ))
 }
