@@ -481,7 +481,7 @@ impl AppExecutor {
 
         // HACK: need this to bootstrap UI tree generation for some electron apps,
         // e.g. Discord
-        if is_electron && pid != self.last_pid {
+        if is_electron && (pid != self.last_pid || vis_level == VisibilityCheckingLevel::Loosest) {
             let _ = focused_app.role();
             std::thread::sleep(Duration::from_millis(self.config.electron_initial_wait_ms));
         }
