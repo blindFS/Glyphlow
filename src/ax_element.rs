@@ -423,6 +423,13 @@ impl GetAttribute for AXUIElement {
 
         msg.push_str(&format!("Role: {}\n", fp.role));
 
+        if let Some(f) = fp.frame {
+            let CGPoint { x, y } = f.top_left;
+            msg.push_str(&format!("pos: x: {x}, y: {y}\n"));
+            let (w, h) = f.size();
+            msg.push_str(&format!("size: width: {w}, height: {h}\n"));
+        }
+
         if let Ok(t) = self.title() {
             msg.push_str(&format!("title: {}\n", t));
         }
@@ -437,13 +444,6 @@ impl GetAttribute for AXUIElement {
 
         if let Ok(v) = self.value() {
             msg.push_str(&format!("value: {:?}\n", v));
-        }
-
-        if let Some(f) = fp.frame {
-            let CGPoint { x, y } = f.top_left;
-            msg.push_str(&format!("pos: x: {x}, y: {y}\n"));
-            let (w, h) = f.size();
-            msg.push_str(&format!("size: width: {w}, height: {h}\n"));
         }
 
         msg
@@ -770,7 +770,13 @@ pub fn traverse_elements(
         }
         // NOTE: don't do it for AXSectionList, e.g. Apple Music
         kAXListRole if element.subrole().is_ok_and(|r| r == kAXContentListSubrole) => {
-            if let Some(area_frame) = ele_fp.frame.and_then(|f| f.intersect(&window_frame)) {
+            if let Some(area_frame) = ele_fp.frame.and_then(|f| f.intersect(&window_frame))
+                && {
+                    let (w, h) = area_frame.size();
+                    // HACK: Some content lists may have fake sizes, e.g. Slack
+                    w > 10.0 && h > 10.0
+                }
+            {
                 window_frame = area_frame;
             };
         }
