@@ -15,7 +15,7 @@ use crate::{
 };
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
 use accessibility_sys::{
-    kAXErrorAttributeUnsupported, kAXErrorCannotComplete, kAXFocusedAttribute,
+    kAXErrorAttributeUnsupported, kAXErrorCannotComplete, kAXFocusedAttribute, kAXPopoverRole,
 };
 use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber, string::CFString};
 use log::Level;
@@ -455,15 +455,33 @@ impl AppExecutor {
     }
 
     fn select_app_window(&mut self, vis_level: VisibilityCheckingLevel) -> Option<Frame> {
+        let screen_frame = Frame::from_origion(self.screen_size);
+
+        // NOTE: prioritize system alarms
+        if let Ok(app) = AXUIElement::application_with_bundle("com.apple.coreservices.uiagent")
+            && let Ok(window) = app.focused_window()
+        {
+            let frame = window.get_frame(screen_frame);
+            self.last_window_frame = frame;
+            self.is_electron = false;
+
+            self.selected = Some(ElementOfInterest::new(
+                Some(window),
+                None,
+                RoleOfInterest::Generic,
+                frame,
+            ));
+
+            return Some(frame);
+        }
+
         let (pid, is_electron) = get_focused_pid()?;
         self.is_electron = is_electron;
-
         let focused_app = AXUIElement::application(pid);
-        let screen_frame = Frame::from_origion(self.screen_size);
 
         // HACK: need this to bootstrap UI tree generation for some electron apps,
         // e.g. Discord
-        if is_electron && pid != self.last_pid {
+        if is_electron && (pid != self.last_pid || vis_level == VisibilityCheckingLevel::Loosest) {
             let _ = focused_app.role();
             std::thread::sleep(Duration::from_millis(self.config.electron_initial_wait_ms));
         }
@@ -473,11 +491,20 @@ impl AppExecutor {
         let (focused_window, window_frame) = if vis_level == VisibilityCheckingLevel::Loosest {
             (focused_app, screen_frame)
         } else {
-            let window = focused_app.focused_window().unwrap_or(focused_app);
-            let frame = window
-                .get_frame()
-                .and_then(|f| f.intersect(&screen_frame))
-                .unwrap_or(screen_frame);
+            let mut window = focused_app.focused_window();
+            // NOTE: prioritize popover windows, e.g. Apple Music search
+            if let Ok(windows) = focused_app.windows()
+                && windows.len() > 1
+            {
+                for win in windows.iter() {
+                    if win.role().is_ok_and(|r| r == kAXPopoverRole) {
+                        window = Ok(win.clone());
+                        break;
+                    }
+                }
+            }
+            let window = window.unwrap_or(focused_app);
+            let frame = window.get_frame(screen_frame);
             (window, frame)
         };
         self.last_window_frame = window_frame;
@@ -1071,10 +1098,7 @@ impl AppExecutor {
             .and_then(|ele| ele.parent().ok())
         {
             let screen_frame = Frame::from_origion(self.screen_size);
-            let frame = parent_element
-                .get_frame()
-                .and_then(|f| f.intersect(&screen_frame))
-                .unwrap_or(screen_frame);
+            let frame = parent_element.get_frame(screen_frame);
             self.selected = Some(ElementOfInterest {
                 element: Some(parent_element),
                 context: None,
