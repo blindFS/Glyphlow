@@ -375,6 +375,7 @@ impl AppExecutor {
                 | RoleOfInterest::StaticText
                 | RoleOfInterest::PseudoText => self.set_mode(Mode::TextActionMenu),
                 _ if self.target == Target::Text => self.set_mode(Mode::TextActionMenu),
+                _ if self.target == Target::Scrollable => self.set_mode(Mode::Scrolling),
                 _ => self.set_mode(Mode::DashBoard),
             }
         }
@@ -395,6 +396,7 @@ impl AppExecutor {
                 text_action_helper();
             }
             _ if self.target == Target::Text => text_action_helper(),
+            _ if self.target == Target::Scrollable => self.draw_scrolling_menu(key_prefix),
             _ => self.draw_dashboard(key_prefix),
         }
     }

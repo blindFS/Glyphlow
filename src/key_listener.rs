@@ -302,6 +302,9 @@ impl KeyListener {
             .get(&menu_type)
             .and_then(|m| m.get(&key_state.prefix))
         {
+            if let AppSignal::Activate(_) = signal {
+                *state = Mode::Filtering;
+            }
             self.send(signal.clone());
             key_state.clear_prefix();
         } else if key_char == ' ' {
