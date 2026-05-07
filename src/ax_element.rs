@@ -120,9 +120,13 @@ impl ElementBasicAttributes {
         {
             return false;
         }
-        self.role
-            .to_lowercase()
-            .contains(&target.role.to_lowercase())
+        let role = self.role.to_lowercase();
+        for r in target.role.to_lowercase().split('|') {
+            if role.contains(r) {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -411,11 +415,13 @@ impl GetAttribute for AXUIElement {
     }
 
     fn inspect(&self) -> String {
+        let Some(fp) = ElementBasicAttributes::from(self) else {
+            return "Unknown".into();
+        };
+
         let mut msg = String::new();
 
-        if let Ok(r) = self.role() {
-            msg.push_str(&format!("Role: {}\n", r));
-        }
+        msg.push_str(&format!("Role: {}\n", fp.role));
 
         if let Ok(t) = self.title() {
             msg.push_str(&format!("title: {}\n", t));
@@ -431,6 +437,13 @@ impl GetAttribute for AXUIElement {
 
         if let Ok(v) = self.value() {
             msg.push_str(&format!("value: {:?}\n", v));
+        }
+
+        if let Some(f) = fp.frame {
+            let CGPoint { x, y } = f.top_left;
+            msg.push_str(&format!("pos: x: {x}, y: {y}\n"));
+            let (w, h) = f.size();
+            msg.push_str(&format!("size: width: {w}, height: {h}\n"));
         }
 
         msg
@@ -575,12 +588,13 @@ pub fn traverse_elements(
     };
 
     // WARN: Performance critical! Exclude electron elements scrolled off y axis,
-    // but should avoid false negatives of ancestors for some menu items,
-    // e.g. (Discord right click menu)
     if ele_fp.frame.is_some_and(|f| {
-        let (_, h) = f.size();
+        let (w, h) = f.size();
         (h == 0.0 && f.bottom_right.y == window_frame.bottom_right.y)
-            || (h == 1.0 && f.top_left.y == window_frame.top_left.y)
+            // NOTE: keep full width elements, e.g. Brave google search
+            || (h == 1.0 && f.top_left.y == window_frame.top_left.y && w != window_frame.size().0)
+        // NOTE: should avoid false negatives of ancestors for some menu items,
+        // e.g. (Discord right click menu)
     }) && vis_level != VisibilityCheckingLevel::Loosest
     {
         return;
