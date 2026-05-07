@@ -1273,7 +1273,7 @@ impl AppExecutor {
             ..
         }) = self.selected.as_ref()
         else {
-            panic!("An element is supposed to be selected before entering Mode::Scrolling!")
+            return;
         };
 
         if *role == RoleOfInterest::ScrollBar {
