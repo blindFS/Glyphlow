@@ -24,7 +24,7 @@ use objc2_core_foundation::CGSize;
 use objc2_quartz_core::CALayer;
 use rdev::{Button, EventType, simulate};
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     path::PathBuf,
     sync::{Arc, Mutex},
     time::Duration,
@@ -431,13 +431,11 @@ impl AppExecutor {
         tokio::spawn(async move { delay(sender, timeout_secs).await });
     }
 
-    fn draw_word_picker(&mut self) -> (Vec<(usize, String)>, u32) {
+    fn draw_word_picker(&mut self) {
         let word_picker = self
             .word_picker
             .as_mut()
             .expect("Internal Error: No word picker set.");
-
-        word_picker.update_prefix(&self.key_prefix);
 
         if let Some(text_layer) = word_picker.text_layer.as_ref()
             && let Some(attr_string) =
@@ -445,8 +443,54 @@ impl AppExecutor {
         {
             unsafe { text_layer.setString(Some(&attr_string)) };
         };
+    }
 
-        (word_picker.matched_words(), word_picker.digits)
+    /// If only 1 word is matched, then update the selected text and show the menu
+    fn check_word_picker(&mut self) {
+        let Some(wp) = self.word_picker.as_mut() else {
+            return;
+        };
+        let matched_words = wp.matched_words();
+        let is_searching = wp.is_searching;
+
+        // Duplicated words when multi_selection is off
+        let unique_matching = matched_words.len() == 1
+            || (!self.multi_selection.is_on
+                && matched_words
+                    .iter()
+                    .map(|(_, w)| w)
+                    .collect::<HashSet<_>>()
+                    .len()
+                    == 1);
+
+        if !is_searching
+            && (self.key_prefix.len() == self.hint_width as usize
+                || (!wp.text_prefix.is_empty() && wp.label_prefix.is_empty()))
+            && unique_matching
+            && let Some((idx, text)) = matched_words.first()
+        {
+            if self.multi_selection.is_on {
+                if let Some((idx1, idx2)) = self.multi_selection.set_one_side(*idx) {
+                    let text = self
+                        .word_picker
+                        .as_ref()
+                        .expect("Internal Error: no word picker set yet.")
+                        .select_range(idx1, idx2)
+                        .expect("Internal Error: wrong word picker indexing.");
+                    self.update_selected_text_and_show_menu(text.clone())
+                } else {
+                    self.key_prefix.clear();
+                    // Reset for another side
+                    if let Some(wp) = self.word_picker.as_mut() {
+                        wp.text_prefix.clear();
+                        wp.label_prefix.clear()
+                    };
+                    self.draw_word_picker();
+                }
+            } else {
+                self.update_selected_text_and_show_menu(text.clone())
+            }
+        }
     }
 
     fn select_app_window(&mut self, vis_level: VisibilityCheckingLevel) -> Option<Frame> {
@@ -1111,7 +1155,14 @@ impl AppExecutor {
                 }
             }
             FilterMode::WordPicking => {
-                if !self.multi_selection.is_on || self.multi_selection.one_side_idex.is_none() {
+                if let Some(wp) = self.word_picker.as_mut()
+                    && wp.is_searching
+                {
+                    wp.finish_searching(self.multi_selection.one_side_idex);
+                    self.key_prefix = wp.label_prefix.clone();
+                } else if !self.multi_selection.is_on
+                    || self.multi_selection.one_side_idex.is_none()
+                {
                     // Go back to text action menu
                     self.word_picker = None;
                     self.draw_element_menu("", &RoleOfInterest::PseudoText, true);
@@ -1140,7 +1191,9 @@ impl AppExecutor {
             } else {
                 self.key_prefix.pop();
             }
-        } else if self.key_prefix.len() < self.hint_width as usize {
+        } else if self.key_prefix.len() < self.hint_width as usize
+            || self.word_picker.as_ref().is_some_and(|wp| wp.is_searching)
+        {
             self.key_prefix.push(key_char);
         }
 
@@ -1152,30 +1205,11 @@ impl AppExecutor {
                 self.filter_by_key().await;
             }
             FilterMode::WordPicking => {
-                let (matched_words, digits) = self.draw_word_picker();
-                self.hint_width = digits;
-
-                if self.key_prefix.len() == digits as usize
-                    && matched_words.len() == 1
-                    && let Some((idx, text)) = matched_words.first()
-                {
-                    if self.multi_selection.is_on {
-                        if let Some((idx1, idx2)) = self.multi_selection.set_one_side(*idx) {
-                            let text = self
-                                .word_picker
-                                .as_ref()
-                                .expect("Internal Error: no word picker set yet.")
-                                .select_range(idx1, idx2)
-                                .expect("Internal Error: wrong word picker indexing.");
-                            self.update_selected_text_and_show_menu(text.clone())
-                        } else {
-                            self.key_prefix.clear();
-                            self.draw_word_picker();
-                        }
-                    } else {
-                        self.update_selected_text_and_show_menu(text.clone())
-                    }
-                }
+                if let Some(wp) = self.word_picker.as_mut() {
+                    wp.update_prefix(&self.key_prefix);
+                };
+                self.draw_word_picker();
+                self.check_word_picker();
             }
         }
     }
@@ -1227,6 +1261,7 @@ impl AppExecutor {
                 self.clear_drawing();
                 let word_picker =
                     WordPicker::new(text, &self.window, &self.config.theme, self.screen_size);
+                self.hint_width = word_picker.digits;
 
                 self.clear_cache();
                 self.word_picker = Some(word_picker);
@@ -1437,6 +1472,19 @@ impl AppExecutor {
                 self.perform_scroll_action(sa);
             }
             AppSignal::TextAction(ta) => self.perform_text_action(ta),
+            AppSignal::WordPickerStartSearch => {
+                if let Some(wp) = self.word_picker.as_mut() {
+                    wp.start_searching(self.multi_selection.one_side_idex);
+                    self.key_prefix.clear();
+                }
+            }
+            AppSignal::WordPickerFinishSearch => {
+                if let Some(wp) = self.word_picker.as_mut() {
+                    wp.finish_searching(self.multi_selection.one_side_idex);
+                    self.key_prefix = wp.label_prefix.clone();
+                }
+                self.check_word_picker();
+            }
             AppSignal::ScreenShot => {
                 self.clear_drawing();
                 let frame = if let Some(eoi) = self.selected.as_ref() {

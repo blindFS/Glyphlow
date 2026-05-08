@@ -59,6 +59,9 @@ pub enum AppSignal {
     ReadClipboard,
     ScreenShot,
     FrameOCR,
+    // Word Picker
+    WordPickerStartSearch,
+    WordPickerFinishSearch,
 }
 
 #[derive(Debug, PartialEq)]
@@ -362,7 +365,16 @@ impl KeyListener {
                 self.send(AppSignal::ToggleMultiSelection);
                 true
             }
-            Mode::WordPicking => self.filter_helper(&key, state, FilterMode::WordPicking),
+            Mode::WordPicking => {
+                match key {
+                    Key::Slash => self.send(AppSignal::WordPickerStartSearch),
+                    Key::Return => self.send(AppSignal::WordPickerFinishSearch),
+                    _ => {
+                        self.filter_helper(&key, state, FilterMode::WordPicking);
+                    }
+                }
+                true
+            }
             Mode::Filtering => self.filter_helper(&key, state, FilterMode::Generic),
             Mode::OCRResultFiltering => self.filter_helper(&key, state, FilterMode::OCR),
             Mode::TextActionMenu => self.menu_helper(&key, MenuType::TextAction, state, key_state),

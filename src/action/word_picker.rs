@@ -36,11 +36,11 @@ pub struct WordPicker {
     raw: String,
     words: Vec<Word>,
     offsets: Vec<usize>,
-    is_searching: bool,
-    label_prefix: String,
-    text_prefix: String,
+    pub label_prefix: String,
+    pub text_prefix: String,
     screen_ratio: f64,
     theme: GlyphlowTheme,
+    pub is_searching: bool,
     pub digits: u32,
     pub text_layer: Option<Retained<CATextLayer>>,
 }
@@ -83,18 +83,28 @@ impl WordPicker {
         word_picker
     }
 
-    pub fn start_searching(&mut self) {
+    pub fn start_searching(&mut self, multi_selection_idx: Option<usize>) {
         self.is_searching = true;
         self.text_prefix.clear();
+        if let Some(text_layer) = self.text_layer.as_ref()
+            && let Some(attr_string) = self.get_attributed_string(multi_selection_idx)
+        {
+            unsafe { text_layer.setString(Some(&attr_string)) };
+        };
     }
 
-    pub fn finish_searching(&mut self) {
+    pub fn finish_searching(&mut self, multi_selection_idx: Option<usize>) {
         self.is_searching = false;
+        if let Some(text_layer) = self.text_layer.as_ref()
+            && let Some(attr_string) = self.get_attributed_string(multi_selection_idx)
+        {
+            unsafe { text_layer.setString(Some(&attr_string)) };
+        };
     }
 
     pub fn update_prefix(&mut self, prefix: &str) {
         if self.is_searching {
-            self.text_prefix = prefix.to_string();
+            self.text_prefix = prefix.to_lowercase();
         } else {
             self.label_prefix = prefix.to_string();
         }
@@ -102,7 +112,8 @@ impl WordPicker {
 
     /// Returns HTML string
     fn to_string(&self, width_height_ratio: f64, multi_selection_idx: Option<usize>) -> String {
-        let prefix = self.label_prefix.as_str();
+        let label_prefix = self.label_prefix.as_str();
+        let text_prefix = self.text_prefix.as_str();
 
         let total_unicode_width = self.words.iter().map(|w| w.text.width()).sum::<usize>()
             + self.words.len() * (2 + self.digits as usize);
@@ -112,7 +123,16 @@ impl WordPicker {
             .round() as usize;
 
         let line_span_head = "<span class=\"line\">";
-        let mut buffer = String::new();
+        let mut buffer = format!(
+            "<span class=\"h\">{}</span>",
+            if self.is_searching {
+                format!("/{}", self.text_prefix)
+            } else {
+                "Press / to search".into()
+            }
+        );
+
+        buffer.push('\n');
         let mut line_width = 0;
         buffer.push_str(line_span_head);
 
@@ -123,17 +143,20 @@ impl WordPicker {
             {
                 // For already selected start/end, dim the label
                 ("rh", helper(&w.label, "d"))
-            } else if !prefix.is_empty() && w.label.starts_with(prefix) {
+            } else if (!label_prefix.is_empty() || !text_prefix.is_empty())
+                && w.label.starts_with(label_prefix)
+                && w.text.to_lowercase().contains(text_prefix)
+            {
                 // For matched, highlight the label suffix
                 (
                     "m",
                     format!(
                         "<span class=\"d\">{}</span><span class=\"h\">{}</span>",
-                        prefix,
-                        w.label.get(prefix.len()..).unwrap_or_default()
+                        label_prefix,
+                        w.label.get(label_prefix.len()..).unwrap_or_default()
                     ),
                 )
-            } else if prefix.is_empty() {
+            } else if label_prefix.is_empty() && text_prefix.is_empty() {
                 // No prefix, highlight the all labels
                 ("n", helper(&w.label, "h"))
             } else {
@@ -164,11 +187,14 @@ impl WordPicker {
     }
 
     pub fn matched_words(&self) -> Vec<(usize, String)> {
-        let prefix = self.label_prefix.as_str();
         self.words
             .iter()
             .enumerate()
-            .filter(|(_, w)| !prefix.is_empty() && w.label.starts_with(prefix))
+            .filter(|(_, w)| {
+                (!self.label_prefix.is_empty() || !self.text_prefix.is_empty())
+                    && w.label.starts_with(&self.label_prefix)
+                    && w.text.to_lowercase().contains(&self.text_prefix)
+            })
             .map(|(idx, w)| (idx, w.text.clone()))
             .collect()
     }
