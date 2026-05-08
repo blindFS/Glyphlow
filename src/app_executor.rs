@@ -431,29 +431,22 @@ impl AppExecutor {
         tokio::spawn(async move { delay(sender, timeout_secs).await });
     }
 
-    fn draw_word_picker(&self) -> (Vec<(usize, String)>, u32) {
+    fn draw_word_picker(&mut self) -> (Vec<(usize, String)>, u32) {
         let word_picker = self
             .word_picker
-            .as_ref()
+            .as_mut()
             .expect("Internal Error: No word picker set.");
-        if let Some((text_size, attr_string)) = word_picker.get_attributed_string(
-            self.screen_size,
-            &self.config.theme,
-            &self.key_prefix,
-            self.multi_selection.one_side_idex,
-        ) {
-            self.window.draw_attributed_string(
-                attr_string,
-                self.screen_size,
-                text_size,
-                &self.config.theme,
-            );
+
+        word_picker.update_prefix(&self.key_prefix);
+
+        if let Some(text_layer) = word_picker.text_layer.as_ref()
+            && let Some(attr_string) =
+                word_picker.get_attributed_string(self.multi_selection.one_side_idex)
+        {
+            unsafe { text_layer.setString(Some(&attr_string)) };
         };
 
-        (
-            word_picker.matched_words(&self.key_prefix),
-            word_picker.digits,
-        )
+        (word_picker.matched_words(), word_picker.digits)
     }
 
     fn select_app_window(&mut self, vis_level: VisibilityCheckingLevel) -> Option<Frame> {
@@ -1123,7 +1116,6 @@ impl AppExecutor {
                     self.word_picker = None;
                     self.draw_element_menu("", &RoleOfInterest::PseudoText, true);
                 } else {
-                    self.clear_drawing();
                     self.multi_selection.clear_one_side();
                     self.draw_word_picker();
                 }
@@ -1160,7 +1152,6 @@ impl AppExecutor {
                 self.filter_by_key().await;
             }
             FilterMode::WordPicking => {
-                self.clear_drawing();
                 let (matched_words, digits) = self.draw_word_picker();
                 self.hint_width = digits;
 
@@ -1232,12 +1223,13 @@ impl AppExecutor {
                 true
             }
             TextAction::Split => {
-                let word_picker = WordPicker::new(text);
+                self.set_mode(Mode::WordPicking);
+                self.clear_drawing();
+                let word_picker =
+                    WordPicker::new(text, &self.window, &self.config.theme, self.screen_size);
 
                 self.clear_cache();
                 self.word_picker = Some(word_picker);
-                self.set_mode(Mode::WordPicking);
-                self.draw_word_picker();
                 true
             }
             TextAction::Editor => {
