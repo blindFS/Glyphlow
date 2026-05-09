@@ -48,7 +48,7 @@ pub fn get_system_alarm_window() -> Option<AXUIElement> {
 pub fn get_focused() -> Option<(i32, AXUIElement, bool)> {
     let workspace = NSWorkspace::sharedWorkspace();
     let app = workspace.frontmostApplication()?;
-    // eprintln!("Focused app: {:?}", app.bundleIdentifier());
+    // println!("Focused app: {:?}", app.bundleIdentifier());
 
     let pid = app.processIdentifier();
     Some((

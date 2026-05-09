@@ -1,4 +1,4 @@
-## Towards a Mouse Free UX for Most APPs on macOS (WIP)
+## Towards a Mouse Free UX for Most APPs on macOS
 
 This tiny tool aims to ease the pain of
 

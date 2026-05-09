@@ -76,7 +76,7 @@ pub trait GlyphlowDrawingLayer {
         screen_size: CGSize,
         text_size: CGSize,
         theme: &GlyphlowTheme,
-    );
+    ) -> Retained<CATextLayer>;
 }
 
 impl GlyphlowDrawingLayer for CALayer {
@@ -151,7 +151,7 @@ impl GlyphlowDrawingLayer for CALayer {
             // Background Box
             let (size, _) =
                 estimate_frame_for_text(&attr_string, (screen_size.width, screen_size.height));
-            let (x_offset, y_offset, box_layer) = text_box_with_attributed_string(
+            let (x_offset, y_offset, _, box_layer) = text_box_with_attributed_string(
                 attr_string,
                 true,
                 bg_color,
@@ -199,8 +199,8 @@ impl GlyphlowDrawingLayer for CALayer {
         screen_size: CGSize,
         text_size: CGSize,
         theme: &GlyphlowTheme,
-    ) {
-        let (_, _, text_box) = text_box_with_attributed_string(
+    ) -> Retained<CATextLayer> {
+        let (_, _, text_layer, text_box) = text_box_with_attributed_string(
             attr_string,
             false,
             &theme.menu_bg_color,
@@ -212,6 +212,7 @@ impl GlyphlowDrawingLayer for CALayer {
         text_box.setBorderWidth(2.0);
         text_box.setBorderColor(Some(&theme.menu_fg_color));
         self.addSublayer(&text_box);
+        text_layer
     }
 
     fn draw_menu(
@@ -310,7 +311,7 @@ fn draw_text_box(
             screen_size,
             size,
         )
-        .2
+        .3
     }
 }
 
@@ -322,7 +323,7 @@ fn text_box_with_attributed_string(
     center: Center,
     screen_size: CGSize,
     frame_size: CGSize,
-) -> (f64, f64, Retained<CALayer>) {
+) -> (f64, f64, Retained<CATextLayer>, Retained<CALayer>) {
     let CGSize { width, height } = frame_size;
 
     let box_width = width + (margin * 2.0);
@@ -358,5 +359,5 @@ fn text_box_with_attributed_string(
     text_layer.setContentsScale(2.0); // Retina crispness
     container.addSublayer(&text_layer);
     container.setCornerRadius(margin);
-    (o_x - o_x_move, o_y - o_y_move, container)
+    (o_x - o_x_move, o_y - o_y_move, text_layer, container)
 }

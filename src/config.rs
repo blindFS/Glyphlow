@@ -72,7 +72,7 @@ pub struct CommandAction {
     pub key: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GlyphlowTheme {
     #[serde(with = "nsfont_format", default = "default_hint_font")]
     pub hint_font: Retained<NSFont>,
