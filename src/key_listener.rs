@@ -369,8 +369,14 @@ impl KeyListener {
                 match key {
                     Key::Slash => self.send(AppSignal::WordPickerStartSearch),
                     Key::Return => self.send(AppSignal::WordPickerFinishSearch),
+                    Key::Escape => {
+                        self.send(AppSignal::DeActivate);
+                        *state = Mode::Idle;
+                    }
                     _ => {
-                        self.filter_helper(&key, state, FilterMode::WordPicking);
+                        let key_char = key.to_char();
+                        let key_char = if key_char == ' ' { '󱁐' } else { key_char };
+                        self.send(AppSignal::Filter(key_char, FilterMode::WordPicking));
                     }
                 }
                 true
