@@ -437,12 +437,7 @@ impl AppExecutor {
             .as_mut()
             .expect("Internal Error: No word picker set.");
 
-        if let Some(text_layer) = word_picker.text_layer.as_ref()
-            && let Some(attr_string) =
-                word_picker.get_attributed_string(self.multi_selection.one_side_idex)
-        {
-            unsafe { text_layer.setString(Some(&attr_string)) };
-        };
+        word_picker.update_text_layer(self.multi_selection.one_side_idex);
     }
 
     /// If only 1 word is matched, then update the selected text and show the menu

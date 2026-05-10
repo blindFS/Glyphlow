@@ -43,6 +43,7 @@ pub struct WordPicker {
     pub is_searching: bool,
     pub digits: u32,
     pub text_layer: Option<Retained<CATextLayer>>,
+    matched: Vec<usize>,
 }
 
 impl WordPicker {
@@ -72,9 +73,10 @@ impl WordPicker {
             screen_ratio: width / (height + 0.01),
             theme: theme.clone(),
             text_layer: None,
+            matched: Vec::new(),
         };
 
-        if let Some(attr_string) = word_picker.get_attributed_string(None) {
+        if let Some((attr_string, _)) = word_picker.get_attributed_string(None) {
             let text_size = word_picker.estimate_text_size(&attr_string, theme, screen_size);
             word_picker.text_layer =
                 Some(window.draw_attributed_string(attr_string, screen_size, text_size, theme));
@@ -86,18 +88,19 @@ impl WordPicker {
     pub fn start_searching(&mut self, multi_selection_idx: Option<usize>) {
         self.is_searching = true;
         self.text_prefix.clear();
-        if let Some(text_layer) = self.text_layer.as_ref()
-            && let Some(attr_string) = self.get_attributed_string(multi_selection_idx)
-        {
-            unsafe { text_layer.setString(Some(&attr_string)) };
-        };
+        self.update_text_layer(multi_selection_idx);
     }
 
     pub fn finish_searching(&mut self, multi_selection_idx: Option<usize>) {
         self.is_searching = false;
+        self.update_text_layer(multi_selection_idx);
+    }
+
+    pub fn update_text_layer(&mut self, multi_selection_idx: Option<usize>) {
         if let Some(text_layer) = self.text_layer.as_ref()
-            && let Some(attr_string) = self.get_attributed_string(multi_selection_idx)
+            && let Some((attr_string, matched)) = self.get_attributed_string(multi_selection_idx)
         {
+            self.matched = matched;
             unsafe { text_layer.setString(Some(&attr_string)) };
         };
     }
@@ -110,10 +113,22 @@ impl WordPicker {
         }
     }
 
-    /// Returns HTML string
-    fn to_string(&self, width_height_ratio: f64, multi_selection_idx: Option<usize>) -> String {
+    /// Returns HTML string and matched indices
+    fn to_string(
+        &self,
+        width_height_ratio: f64,
+        multi_selection_idx: Option<usize>,
+    ) -> (String, Vec<usize>) {
         let label_prefix = self.label_prefix.as_str();
         let text_prefix = self.text_prefix.as_str();
+        let text_pattern = (!text_prefix.is_empty()).then_some({
+            let text_pattern = text_prefix
+                .split('󱁐')
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join(".*");
+            Regex::new(&format!(".*{text_pattern}.*")).expect("Wrong regex pattern.")
+        });
 
         let total_unicode_width = self.words.iter().map(|w| w.text.width()).sum::<usize>()
             + self.words.len() * (2 + self.digits as usize);
@@ -126,7 +141,7 @@ impl WordPicker {
         let mut buffer = format!(
             "<span class=\"h\">{}</span>",
             if self.is_searching {
-                format!("/{}", self.text_prefix)
+                format!("/{}", text_prefix)
             } else {
                 "Press / to search".into()
             }
@@ -136,6 +151,7 @@ impl WordPicker {
         let mut line_width = 0;
         buffer.push_str(line_span_head);
 
+        let mut matched = Vec::new();
         let helper = |label, class| format!("<span class=\"{class}\">{label}</span>");
 
         for (idx, w) in self.words.iter().enumerate() {
@@ -145,9 +161,12 @@ impl WordPicker {
                 ("rh", helper(&w.label, "d"))
             } else if (!label_prefix.is_empty() || !text_prefix.is_empty())
                 && w.label.starts_with(label_prefix)
-                && w.text.to_lowercase().contains(text_prefix)
+                && text_pattern
+                    .as_ref()
+                    .is_none_or(|pattern| pattern.is_match(&w.text.to_lowercase()))
             {
                 // For matched, highlight the label suffix
+                matched.push(idx);
                 (
                     "m",
                     format!(
@@ -183,19 +202,13 @@ impl WordPicker {
         }
         buffer.push_str("</span>");
 
-        buffer
+        (buffer, matched)
     }
 
     pub fn matched_words(&self) -> Vec<(usize, String)> {
-        self.words
+        self.matched
             .iter()
-            .enumerate()
-            .filter(|(_, w)| {
-                (!self.label_prefix.is_empty() || !self.text_prefix.is_empty())
-                    && w.label.starts_with(&self.label_prefix)
-                    && w.text.to_lowercase().contains(&self.text_prefix)
-            })
-            .map(|(idx, w)| (idx, w.text.clone()))
+            .filter_map(|idx| self.words.get(*idx).map(|w| (*idx, w.text.clone())))
             .collect()
     }
 
@@ -211,11 +224,11 @@ impl WordPicker {
         self.raw.get(*s_off..e_off).map(String::from)
     }
 
-    pub fn get_attributed_string(
+    fn get_attributed_string(
         &self,
         multi_selection_idx: Option<usize>,
-    ) -> Option<Retained<NSMutableAttributedString>> {
-        let html_str = self.to_string(self.screen_ratio, multi_selection_idx);
+    ) -> Option<(Retained<NSMutableAttributedString>, Vec<usize>)> {
+        let (html_str, matched) = self.to_string(self.screen_ratio, multi_selection_idx);
 
         // CSS colors
         let attr_string = html_to_attributed_string(
@@ -231,7 +244,7 @@ impl WordPicker {
             );
         }
 
-        Some(attr_string)
+        Some((attr_string, matched))
     }
 
     fn estimate_text_size(
