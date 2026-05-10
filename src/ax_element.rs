@@ -423,27 +423,35 @@ impl GetAttribute for AXUIElement {
 
         msg.push_str(&format!("Role: {}\n", fp.role));
 
+        if let Ok(subrole) = self.subrole() {
+            msg.push_str(&format!("Subrole: {}\n", subrole));
+        }
+
         if let Some(f) = fp.frame {
             let CGPoint { x, y } = f.top_left;
-            msg.push_str(&format!("pos: x: {x}, y: {y}\n"));
+            msg.push_str(&format!("Pos: x: {x}, y: {y}\n"));
             let (w, h) = f.size();
-            msg.push_str(&format!("size: width: {w}, height: {h}\n"));
+            msg.push_str(&format!("Size: width: {w}, height: {h}\n"));
+        }
+
+        if let Ok(children) = self.children() {
+            msg.push_str(&format!("Children num: {}\n", children.len()));
         }
 
         if let Ok(t) = self.title() {
-            msg.push_str(&format!("title: {}\n", t));
+            msg.push_str(&format!("Title: {t}\n"));
         }
 
         if let Ok(l) = self.label_value() {
-            msg.push_str(&format!("label: {}\n", l));
+            msg.push_str(&format!("Label: {l}\n"));
         }
 
         if let Ok(d) = self.description() {
-            msg.push_str(&format!("description: {}\n", d));
+            msg.push_str(&format!("Description: {d}\n"));
         }
 
         if let Ok(v) = self.value() {
-            msg.push_str(&format!("value: {:?}\n", v));
+            msg.push_str(&format!("Value: {v:?}\n"));
         }
 
         msg
