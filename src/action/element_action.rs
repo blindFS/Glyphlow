@@ -4,12 +4,11 @@ use block2::RcBlock;
 use objc2::{
     AnyThread,
     rc::{DefaultRetained, Retained, autoreleasepool},
-    runtime::ProtocolObject,
 };
-use objc2_app_kit::{NSImage, NSPasteboard};
+use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSPasteboard, NSPasteboardType};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGImage;
-use objc2_foundation::{NSArray, NSError, NSString};
+use objc2_foundation::{NSArray, NSDictionary, NSError, NSString};
 use objc2_screen_capture_kit::SCScreenshotManager;
 use objc2_vision::{
     VNImageRequestHandler, VNRecognizeTextRequest, VNRecognizedTextObservation, VNRequest,
@@ -55,7 +54,6 @@ async fn capture_focused_window(frame_rect: CGRect) -> Result<Retained<CGImage>,
 // TODO: save more memory
 pub async fn screen_shot(frame: &Frame) -> bool {
     let rect = frame.to_cgrect();
-    let ns_size = frame.ns_size();
     let cg_image = match capture_focused_window(rect).await {
         Ok(img) => img,
         Err(e) => {
@@ -64,15 +62,24 @@ pub async fn screen_shot(frame: &Frame) -> bool {
         }
     };
 
-    autoreleasepool(|_| {
-        let ns_image = NSImage::initWithCGImage_size(NSImage::alloc(), &cg_image, ns_size);
+    autoreleasepool(move |_| {
+        let bitmap_rep = NSBitmapImageRep::initWithCGImage(NSBitmapImageRep::alloc(), &cg_image);
+        let jpeg_data = unsafe {
+            bitmap_rep.representationUsingType_properties(
+                NSBitmapImageFileType::JPEG,
+                &NSDictionary::new(),
+            )
+        };
+
         let pb = NSPasteboard::generalPasteboard();
         // Clear the clipboard before writing
         pb.clearContents();
+        pb.setData_forType(
+            jpeg_data.as_deref(),
+            &NSPasteboardType::from_str("public.jpeg"),
+        );
 
-        let proto_image = ProtocolObject::from_retained(ns_image);
-        let objects = NSArray::from_retained_slice(&[proto_image]);
-        pb.writeObjects(&objects);
+        drop(cg_image);
         true
     })
 }
@@ -87,8 +94,7 @@ pub async fn perform_ocr(
     let (w, h) = frame.size();
     unsafe {
         let cg_image = capture_focused_window(rect).await?;
-
-        autoreleasepool(|_| {
+        autoreleasepool(move |_| {
             let request = VNRecognizeTextRequest::default_retained();
             request.setRecognitionLevel(objc2_vision::VNRequestTextRecognitionLevel::Accurate);
 
@@ -128,6 +134,9 @@ pub async fn perform_ocr(
                     }
                 }
             }
+
+            drop(handler);
+            drop(cg_image);
             Ok(ocr_results)
         })
     }
