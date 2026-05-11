@@ -4,7 +4,7 @@ use crate::{
     drawer::GlyphlowDrawingLayer,
     util::{estimate_frame_for_text, hint_label_from_index},
 };
-use objc2::rc::Retained;
+use objc2::rc::{Retained, autoreleasepool};
 use objc2_app_kit::{NSFont, NSFontAttributeName};
 use objc2_core_foundation::CGSize;
 use objc2_foundation::{NSMutableAttributedString, NSRange};
@@ -97,12 +97,15 @@ impl WordPicker {
     }
 
     pub fn update_text_layer(&mut self, multi_selection_idx: Option<usize>) {
-        if let Some(text_layer) = self.text_layer.as_ref()
-            && let Some((attr_string, matched)) = self.get_attributed_string(multi_selection_idx)
-        {
-            self.matched = matched;
-            unsafe { text_layer.setString(Some(&attr_string)) };
-        };
+        autoreleasepool(|_| {
+            if let Some(text_layer) = self.text_layer.as_ref()
+                && let Some((attr_string, matched)) =
+                    self.get_attributed_string(multi_selection_idx)
+            {
+                self.matched = matched;
+                unsafe { text_layer.setString(Some(&attr_string)) };
+            };
+        })
     }
 
     pub fn update_prefix(&mut self, prefix: &str) {
