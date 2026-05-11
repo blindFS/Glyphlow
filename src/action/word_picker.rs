@@ -124,14 +124,16 @@ impl WordPicker {
     ) -> (String, Vec<usize>) {
         let label_prefix = self.label_prefix.as_str();
         let text_prefix = self.text_prefix.as_str();
-        let text_pattern = (!text_prefix.is_empty()).then_some({
-            let text_pattern = text_prefix
-                .split('󱁐')
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-                .join(".*");
-            Regex::new(&format!(".*{text_pattern}.*")).expect("Wrong regex pattern.")
-        });
+        let text_pattern = (!text_prefix.is_empty())
+            .then_some({
+                let text_pattern = text_prefix
+                    .split('󱁐')
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(".*");
+                Regex::new(&format!(".*{text_pattern}.*"))
+            })
+            .and_then(|r| r.ok());
 
         let total_unicode_width = self.words.iter().map(|w| w.text.width()).sum::<usize>()
             + self.words.len() * (2 + self.digits as usize);
