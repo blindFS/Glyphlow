@@ -21,14 +21,14 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin, x86_64-apple-darwin # Optional: setup for cross-compiling
+          targets: aarch64-apple-darwin
 
       - name: Build for Release
-        run: cargo build --release
+        run: cargo build --release --target=aarch64-apple-darwin
 
       - name: Package Binary
         run: |
-          cd target/release
+          cd target/aarch64-apple-darwin/release
           chmod +x glyphlow
           tar -czf glyphlow.tar.gz glyphlow
 
