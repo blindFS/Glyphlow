@@ -78,7 +78,7 @@
             enable = lib.mkEnableOption "Glyphlow service";
             package = lib.mkOption {
               type = lib.types.package;
-              default = self.packages.${pkgs.system}.glyphlow;
+              default = self.packages.${pkgs.stdenv.hostPlatform.system}.glyphlow;
               description = "The glyphlow package to use.";
             };
             settings = lib.mkOption {
@@ -125,7 +125,7 @@
             enable = lib.mkEnableOption "Glyphlow";
             package = lib.mkOption {
               type = lib.types.package;
-              default = self.packages.${pkgs.system}.glyphlow;
+              default = self.packages.${pkgs.stdenv.hostPlatform.system}.glyphlow;
               description = "The glyphlow package to use.";
             };
             settings = lib.mkOption {

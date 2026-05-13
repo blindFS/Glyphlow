@@ -92,6 +92,8 @@ actions = [
 
 ## Getting Started
 
+### Homebrew
+
 1. Install with brew tap and start the service
 
 ```bash
@@ -102,6 +104,40 @@ brew services start glyphlow
 
 2. Grant accessibility permission to it
 3. Press the global trigger (defaults to "ALT + g") to start
+
+### Nix
+
+1. Add another input to your system flake file
+
+```nix
+  inputs = {
+    # ...
+    # glyphlow
+    glyphlow.url = "github:blindFS/Glyphlow";
+    glyphlow.inputs.nixpkgs.follows = "nixpkgs";
+  };
+```
+
+2. Add the following to your home-manager configuration
+
+```nix
+imports = [
+  inputs.glyphlow.homeManagerModules.glyphlow
+];
+
+programs.glyphlow = {
+  enable = true;
+  settings = {
+    # ...
+  };
+};
+```
+
+Here's an [example](https://github.com/blindFS/modern-dot-files/blob/main/nix/modules/home/glyphlow.nix)
+written in [dendritic pattern](https://github.com/mightyiam/dendritic).
+
+3. Grant accessibility permission to it
+4. Press the global trigger (defaults to "ALT + g") to start
 
 ## Purging
 
@@ -164,7 +200,7 @@ menu_font = "IosevkaTerm Nerd Font Mono:26"
 
 ## Roadmap
 
-1. [ ] nix-flake
+1. [X] nix-flake
 2. [ ] menu bar icon
 
 ## Acknowledgements
