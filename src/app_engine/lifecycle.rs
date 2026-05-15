@@ -1,3 +1,4 @@
+use super::{AppEngine, delay, drawing, filtering, interaction};
 use crate::{
     Mode,
     ax_element::{ElementOfInterest, GetAttribute, Target, traverse_elements},
@@ -8,7 +9,6 @@ use crate::{
 use accessibility::AXUIElementAttributes;
 use log::Level;
 use std::{path::PathBuf, time::Duration};
-use super::{AppEngine, delay, drawing, filtering, interaction};
 
 pub(crate) const SHORT_TIMEOUT: u64 = 1;
 pub(crate) const LONG_TIMEOUT: u64 = 2;
@@ -60,12 +60,17 @@ pub(crate) fn notify(executor: &mut AppEngine, msg: &str, log_level: Level) {
         _ => LONG_TIMEOUT,
     };
     log::log!(log_level, "{msg}");
-    executor.notification_layers.push(drawing::draw_menu(executor, msg));
+    executor
+        .notification_layers
+        .push(drawing::draw_menu(executor, msg));
     let sender = executor.timeout_sender.clone();
     tokio::spawn(async move { delay(sender, timeout_secs).await });
 }
 
-pub(crate) fn select_app_window(executor: &mut AppEngine, vis_level: VisibilityCheckingLevel) -> Option<Frame> {
+pub(crate) fn select_app_window(
+    executor: &mut AppEngine,
+    vis_level: VisibilityCheckingLevel,
+) -> Option<Frame> {
     let screen_frame = Frame::from_origion(executor.screen_size);
 
     // NOTE: prioritize system alarms
@@ -91,7 +96,9 @@ pub(crate) fn select_app_window(executor: &mut AppEngine, vis_level: VisibilityC
     // e.g. Discord
     if is_electron && (pid != executor.last_pid || vis_level == VisibilityCheckingLevel::Loosest) {
         let _ = focused_app.role();
-        std::thread::sleep(Duration::from_millis(executor.config.electron_initial_wait_ms));
+        std::thread::sleep(Duration::from_millis(
+            executor.config.electron_initial_wait_ms,
+        ));
     }
     executor.last_pid = pid;
 
