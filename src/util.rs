@@ -302,9 +302,13 @@ pub fn hint_boxes_from_frames(
             } else {
                 None
             };
-            let color = frame
-                .as_ref()
-                .and_then(|_| theme.frame_colors.get(color_idx % color_num).cloned());
+            let color = (color_num > 0)
+                .then(|| {
+                    frame
+                        .as_ref()
+                        .and_then(|_| theme.frame_colors.get(color_idx % color_num).cloned())
+                })
+                .flatten();
 
             HintBox {
                 label: hint_label_from_index(idx, digits),
