@@ -142,38 +142,38 @@ impl AppEngine {
                 let quick_follow = target == Target::Scrollable
                     || target == Target::Editable
                     || target == Target::Edit;
-                lifecycle::activate(self, target);
+                self.activate(target);
                 if quick_follow {
-                    filtering::quick_follow(self).await;
+                    self.quick_follow().await;
                 }
             }
             AppSignal::DeActivate => {
-                lifecycle::deactivate(self);
+                self.deactivate();
             }
             AppSignal::RunWorkFlow(idx) => {
-                workflow::execute_workflow(self, idx);
+                self.execute_workflow(idx);
             }
             AppSignal::MenuRefresh(key_prefix) => {
-                drawing::menu_refresh(self, &key_prefix, false);
+                self.menu_refresh(&key_prefix, false);
             }
             AppSignal::ToggleMultiSelection => match self.target {
                 Target::Text | Target::ImageOCR => {
-                    filtering::toggle_multiselection(self);
+                    self.toggle_multiselection();
                 }
                 _ if self.word_picker.is_some() => {
-                    filtering::toggle_multiselection(self);
+                    self.toggle_multiselection();
                 }
                 _ => {
-                    lifecycle::notify(self, "Multi selection only works for text.", Level::Warn);
+                    self.notify("Multi selection only works for text.", Level::Warn);
                 }
             },
             AppSignal::Filter(key_char, mode) => {
-                filtering::perform_filtering(self, key_char, mode).await;
+                self.perform_filtering(key_char, mode).await;
             }
             AppSignal::ScrollAction(sa) => {
-                interaction::perform_scroll_action(self, sa);
+                self.perform_scroll_action(sa);
             }
-            AppSignal::TextAction(ta) => interaction::perform_text_action(self, ta),
+            AppSignal::TextAction(ta) => self.perform_text_action(ta),
             AppSignal::WordPickerStartSearch => {
                 if let Some(wp) = self.word_picker.as_mut() {
                     wp.start_searching(self.multi_selection.one_side_idex);
@@ -185,60 +185,49 @@ impl AppEngine {
                     wp.finish_searching(self.multi_selection.one_side_idex);
                     self.key_prefix = wp.label_prefix.clone();
                 }
-                filtering::check_word_picker(self);
+                self.check_word_picker();
             }
             AppSignal::ScreenShot => {
-                drawing::clear_drawing(self);
+                self.clear_drawing();
                 let frame = if let Some(eoi) = self.selected.as_ref() {
                     &eoi.frame
                 } else {
                     // Defaults to the window
-                    &lifecycle::select_app_window(self, self.config.visibility_checking_level)
+                    &self
+                        .select_app_window(self.config.visibility_checking_level)
                         .unwrap_or_else(|| Frame::from_origion(self.screen_size))
                 };
                 if screen_shot(frame).await {
-                    lifecycle::notify_then_deactivate(
-                        self,
-                        "Screenshot copied to clipboard.",
-                        Level::Info,
-                    );
+                    self.notify_then_deactivate("Screenshot copied to clipboard.", Level::Info);
                 } else {
-                    lifecycle::notify_then_deactivate(
-                        self,
-                        "Failed to take screenshot.",
-                        Level::Error,
-                    );
+                    self.notify_then_deactivate("Failed to take screenshot.", Level::Error);
                 };
             }
             AppSignal::FrameOCR => {
                 if let Some(ElementOfInterest { frame, .. }) = self.selected.as_ref() {
                     self.target = Target::ImageOCR;
-                    filtering::perform_ocr_on_frame(self, *frame).await;
+                    self.perform_ocr_on_frame(*frame).await;
                 } else {
-                    drawing::clear_drawing(self);
-                    lifecycle::activate(self, Target::ImageOCR);
+                    self.clear_drawing();
+                    self.activate(Target::ImageOCR);
                 }
             }
-            AppSignal::FileUpdate(pb) => lifecycle::handle_file_update(self, pb),
+            AppSignal::FileUpdate(pb) => self.handle_file_update(pb),
             AppSignal::ReadClipboard => {
-                drawing::clear_drawing(self);
+                self.clear_drawing();
                 if let Some(text) = text_from_clipboard() {
                     self.selected = Some(ElementOfInterest::pseudo(
                         None,
                         Frame::from_origion(self.screen_size),
                     ));
-                    interaction::update_selected_text_and_show_menu(self, text);
+                    self.update_selected_text_and_show_menu(text);
                 } else {
-                    lifecycle::notify_then_deactivate(
-                        self,
-                        "No text found in clipboard.",
-                        Level::Warn,
-                    );
+                    self.notify_then_deactivate("No text found in clipboard.", Level::Warn);
                 }
             }
             AppSignal::ClearNotification => {
-                if lifecycle::check_mode(self, Mode::WaitAndDeactivate) {
-                    lifecycle::deactivate(self);
+                if self.check_mode(Mode::WaitAndDeactivate) {
+                    self.deactivate();
                 } else {
                     for nl in &self.notification_layers {
                         nl.removeFromSuperlayer();
