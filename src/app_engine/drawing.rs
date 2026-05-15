@@ -11,7 +11,7 @@ use objc2::rc::Retained;
 use objc2_quartz_core::CALayer;
 
 impl AppEngine {
-    pub(crate) fn clear_drawing(&self) {
+    pub(super) fn clear_drawing(&self) {
         self.window.clear();
     }
 
@@ -24,7 +24,7 @@ impl AppEngine {
         }
     }
 
-    pub(crate) fn draw_hints(&self, boxes: &[HintBox]) {
+    pub(super) fn draw_hints(&self, boxes: &[HintBox]) {
         self.clear_drawing();
         // NOTE: only select the other side of the same role,
         // and excluding the already selected one.
@@ -132,7 +132,7 @@ impl AppEngine {
         msg
     }
 
-    pub(crate) fn draw_menu(&self, msg: &str) -> Retained<CALayer> {
+    pub(super) fn draw_menu(&self, msg: &str) -> Retained<CALayer> {
         self.window
             .draw_menu(msg, self.screen_size, &self.config.theme)
     }
@@ -197,7 +197,7 @@ impl AppEngine {
         self.draw_menu(&msg);
     }
 
-    pub(crate) fn draw_element_menu(
+    pub(super) fn draw_element_menu(
         &self,
         key_prefix: &str,
         role: &RoleOfInterest,
@@ -239,7 +239,7 @@ impl AppEngine {
         }
     }
 
-    pub(crate) fn menu_refresh(&self, key_prefix: &str, set_mode: bool) {
+    pub(super) fn menu_refresh(&self, key_prefix: &str, set_mode: bool) {
         if let Some(eoi) = self.selected.as_ref() {
             self.draw_element_menu(key_prefix, &eoi.role, set_mode);
         } else {
@@ -248,7 +248,7 @@ impl AppEngine {
         }
     }
 
-    pub(crate) fn draw_word_picker(&mut self) {
+    pub(super) fn draw_word_picker(&mut self) {
         let word_picker = self
             .word_picker
             .as_mut()
@@ -257,7 +257,7 @@ impl AppEngine {
         word_picker.update_text_layer(self.multi_selection.one_side_idex);
     }
 
-    pub(crate) fn draw_hints_from_cache(&mut self) {
+    pub(super) fn draw_hints_from_cache(&mut self) {
         let (hint_width, new_boxes) = self.element_cache.hint_boxes(
             &Frame::from_origion(self.screen_size),
             &self.config.theme,

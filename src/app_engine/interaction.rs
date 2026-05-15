@@ -17,7 +17,7 @@ use rdev::{Button, EventType, simulate};
 use std::time::Duration;
 
 impl AppEngine {
-    pub(crate) fn simulate_event(&self, event_type: &EventType) {
+    pub(super) fn simulate_event(&self, event_type: &EventType) {
         match simulate(event_type) {
             Ok(()) => (),
             Err(e) => {
@@ -26,7 +26,7 @@ impl AppEngine {
         }
     }
 
-    pub(crate) fn simulate_click(&self, x: f64, y: f64, right: bool) {
+    pub(super) fn simulate_click(&self, x: f64, y: f64, right: bool) {
         let button = if right { Button::Right } else { Button::Left };
         self.simulate_event(&EventType::MouseMove { x, y });
         std::thread::sleep(Duration::from_millis(20));
@@ -35,11 +35,11 @@ impl AppEngine {
         self.simulate_event(&EventType::ButtonRelease(button));
     }
 
-    pub(crate) fn focus_on_element(&self, element: &AXUIElement) {
+    pub(super) fn focus_on_element(&self, element: &AXUIElement) {
         element.set_attribute_by_name(kAXFocusedAttribute, CFBoolean::true_value().as_CFType());
     }
 
-    pub(crate) fn press_on_element(
+    pub(super) fn press_on_element(
         &self,
         element: &AXUIElement,
         role: &RoleOfInterest,
@@ -72,7 +72,7 @@ impl AppEngine {
         };
     }
 
-    pub(crate) fn right_click_menu_on_element(&self, element: &AXUIElement, center: (f64, f64)) {
+    pub(super) fn right_click_menu_on_element(&self, element: &AXUIElement, center: (f64, f64)) {
         let (x, y) = center;
 
         if self.is_electron {
@@ -94,7 +94,7 @@ impl AppEngine {
     }
 
     /// Select the parent of the currently selected element
-    pub(crate) fn select_parent(&mut self) -> bool {
+    pub(super) fn select_parent(&mut self) -> bool {
         if let Some(parent_element) = self
             .selected
             .as_ref()
@@ -114,7 +114,7 @@ impl AppEngine {
         false
     }
 
-    pub(crate) fn perform_text_action(&mut self, ta: TextAction) {
+    pub(super) fn perform_text_action(&mut self, ta: TextAction) {
         let Some(ElementOfInterest {
             context: Some(text),
             ..
@@ -190,7 +190,7 @@ impl AppEngine {
         }
     }
 
-    pub(crate) fn perform_scroll_action(&mut self, sa: ScrollAction) {
+    pub(super) fn perform_scroll_action(&mut self, sa: ScrollAction) {
         let Some(ElementOfInterest {
             element: Some(element),
             role,
@@ -280,12 +280,12 @@ impl AppEngine {
         }
     }
 
-    pub(crate) fn update_selected_text_and_show_menu(&mut self, new_text: String) {
+    pub(super) fn update_selected_text_and_show_menu(&mut self, new_text: String) {
         self.update_selected_text(new_text);
         self.draw_element_menu("", &RoleOfInterest::PseudoText, true);
     }
 
-    pub(crate) fn open_editor(&mut self, text: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub(super) fn open_editor(&mut self, text: &str) -> Result<(), Box<dyn std::error::Error>> {
         let editor = self
             .config
             .editor

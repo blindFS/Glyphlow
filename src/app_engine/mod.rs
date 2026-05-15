@@ -23,33 +23,33 @@ mod interaction;
 mod lifecycle;
 mod workflow;
 
-pub(crate) static MAX_TEXT_DISPLAY_LEN: usize = 30;
+pub(super) static MAX_TEXT_DISPLAY_LEN: usize = 30;
 
 #[derive(Debug, Default)]
-pub(crate) struct MultiSeletionState {
-    pub(crate) is_on: bool,
-    pub(crate) one_side_idex: Option<usize>,
-    pub(crate) role: Option<RoleOfInterest>,
+pub(super) struct MultiSeletionState {
+    pub(super) is_on: bool,
+    pub(super) one_side_idex: Option<usize>,
+    pub(super) role: Option<RoleOfInterest>,
 }
 
 impl MultiSeletionState {
-    pub(crate) fn toggle(&mut self) {
+    pub(super) fn toggle(&mut self) {
         self.is_on = !self.is_on;
         self.one_side_idex = None;
         self.role = None;
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub(super) fn reset(&mut self) {
         self.is_on = false;
         self.one_side_idex = None;
         self.role = None;
     }
 
-    pub(crate) fn clear_one_side(&mut self) {
+    pub(super) fn clear_one_side(&mut self) {
         self.one_side_idex = None;
     }
 
-    pub(crate) fn set_one_side(&mut self, other: usize) -> Option<(usize, usize)> {
+    pub(super) fn set_one_side(&mut self, other: usize) -> Option<(usize, usize)> {
         if let Some(one) = self.one_side_idex {
             Some((one, other))
         } else {
@@ -62,38 +62,38 @@ impl MultiSeletionState {
 /// Global state for Glyphlow,
 /// mainly cached UI elements, and some related drawings
 pub struct AppEngine {
-    pub(crate) state: Arc<Mutex<Mode>>,
-    pub(crate) key_state: Arc<Mutex<KeyState>>,
+    pub(super) state: Arc<Mutex<Mode>>,
+    pub(super) key_state: Arc<Mutex<KeyState>>,
     /// Used for drawing hint boxes on screen
-    pub(crate) hint_boxes: Vec<HintBox>,
-    pub(crate) element_cache: ElementCache,
-    pub(crate) key_prefix: String,
-    pub(crate) screen_size: CGSize,
-    pub(crate) window: Retained<CALayer>,
+    pub(super) hint_boxes: Vec<HintBox>,
+    pub(super) element_cache: ElementCache,
+    pub(super) key_prefix: String,
+    pub(super) screen_size: CGSize,
+    pub(super) window: Retained<CALayer>,
     /// Useful for notification clearing
-    pub(crate) notification_layers: Vec<Retained<CALayer>>,
+    pub(super) notification_layers: Vec<Retained<CALayer>>,
     /// Which elements of interest to look for
-    pub(crate) target: Target,
-    pub(crate) config: GlyphlowConfig,
-    pub(crate) hint_width: u32,
-    pub(crate) selected: Option<ElementOfInterest>,
+    pub(super) target: Target,
+    pub(super) config: GlyphlowConfig,
+    pub(super) hint_width: u32,
+    pub(super) selected: Option<ElementOfInterest>,
     /// Keep track of editing element,
     /// so that we can use other glyphlow actions while editing
-    pub(crate) editing: Option<ElementOfInterest>,
+    pub(super) editing: Option<ElementOfInterest>,
     /// For editing element text values
-    pub(crate) temp_file: PathBuf,
-    pub(crate) word_picker: Option<WordPicker>,
-    pub(crate) ocr_cache: Option<OCRResult>,
-    pub(crate) timeout_sender: Sender<()>,
+    pub(super) temp_file: PathBuf,
+    pub(super) word_picker: Option<WordPicker>,
+    pub(super) ocr_cache: Option<OCRResult>,
+    pub(super) timeout_sender: Sender<()>,
     /// Special treatment for Electron based apps.
     /// Like simulate mouse clicking instead of `element.press()`
-    pub(crate) is_electron: bool,
-    pub(crate) last_pid: i32,
-    pub(crate) last_window_frame: Frame,
+    pub(super) is_electron: bool,
+    pub(super) last_pid: i32,
+    pub(super) last_window_frame: Frame,
     /// For multi-selection
-    pub(crate) multi_selection: MultiSeletionState,
+    pub(super) multi_selection: MultiSeletionState,
     /// Something to finish after filtering
-    pub(crate) pending_workflow_actions: VecDeque<WorkFlowAction>,
+    pub(super) pending_workflow_actions: VecDeque<WorkFlowAction>,
 }
 
 impl AppEngine {
@@ -239,7 +239,7 @@ impl AppEngine {
     }
 }
 
-pub(crate) async fn delay(sender: Sender<()>, timeout_secs: u64) {
+pub(super) async fn delay(sender: Sender<()>, timeout_secs: u64) {
     tokio::time::sleep(Duration::from_secs(timeout_secs)).await;
     let _ = sender.send(()).await;
 }

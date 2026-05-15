@@ -9,7 +9,7 @@ use std::time::Duration;
 
 impl AppEngine {
     /// Check if a workflow's starting_role matches current selected element
-    pub(crate) fn is_workflow_valid(&self, wf: &WorkFlow) -> bool {
+    pub(super) fn is_workflow_valid(&self, wf: &WorkFlow) -> bool {
         match wf.starting_role {
             RoleOfInterest::Empty => self.selected.is_none(),
             RoleOfInterest::Generic => self.selected.as_ref().is_some_and(|s| s.element.is_some()),
@@ -121,7 +121,7 @@ impl AppEngine {
         false
     }
 
-    pub(crate) fn execute_pending_workflow_actions(&mut self) {
+    pub(super) fn execute_pending_workflow_actions(&mut self) {
         self.clear_drawing();
         while let Some(act) = self.pending_workflow_actions.pop_front() {
             if self.execute_workflow_action(&act) {
@@ -134,7 +134,7 @@ impl AppEngine {
         }
     }
 
-    pub(crate) fn execute_workflow(&mut self, idx: usize) {
+    pub(super) fn execute_workflow(&mut self, idx: usize) {
         let workflow = self
             .config
             .workflows

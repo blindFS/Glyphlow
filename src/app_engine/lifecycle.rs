@@ -15,23 +15,23 @@ const LONG_TIMEOUT: u64 = 2;
 const DEBUG_TIMEOUT: u64 = 5;
 
 impl AppEngine {
-    pub(crate) fn set_mode(&self, mode: Mode) {
+    pub(super) fn set_mode(&self, mode: Mode) {
         if let Ok(mut state) = self.state.lock() {
             *state = mode;
         }
     }
 
-    pub(crate) fn set_simulating_key(&self, flag: bool) {
+    pub(super) fn set_simulating_key(&self, flag: bool) {
         if let Ok(mut ks) = self.key_state.lock() {
             ks.is_simulating = flag;
         }
     }
 
-    pub(crate) fn check_mode(&self, mode: Mode) -> bool {
+    pub(super) fn check_mode(&self, mode: Mode) -> bool {
         self.state.try_lock().is_ok_and(|s| *s == mode)
     }
 
-    pub(crate) fn deactivate(&mut self) {
+    pub(super) fn deactivate(&mut self) {
         self.clear_cache();
         self.clear_drawing();
         self.selected = None;
@@ -39,7 +39,7 @@ impl AppEngine {
         self.set_mode(Mode::Idle);
     }
 
-    pub(crate) fn clear_cache(&mut self) {
+    pub(super) fn clear_cache(&mut self) {
         self.word_picker = None;
         self.ocr_cache = None;
         self.notification_layers.clear();
@@ -49,12 +49,12 @@ impl AppEngine {
         self.multi_selection.reset();
     }
 
-    pub(crate) fn notify_then_deactivate(&mut self, msg: &str, log_level: Level) {
+    pub(super) fn notify_then_deactivate(&mut self, msg: &str, log_level: Level) {
         self.set_mode(Mode::WaitAndDeactivate);
         self.notify(msg, log_level);
     }
 
-    pub(crate) fn notify(&mut self, msg: &str, log_level: Level) {
+    pub(super) fn notify(&mut self, msg: &str, log_level: Level) {
         let timeout_secs = match log_level {
             Level::Trace | Level::Info => SHORT_TIMEOUT,
             Level::Debug => DEBUG_TIMEOUT,
@@ -67,7 +67,7 @@ impl AppEngine {
         tokio::spawn(async move { delay(sender, timeout_secs).await });
     }
 
-    pub(crate) fn select_app_window(
+    pub(super) fn select_app_window(
         &mut self,
         vis_level: VisibilityCheckingLevel,
     ) -> Option<Frame> {
@@ -133,7 +133,7 @@ impl AppEngine {
         Some(window_frame)
     }
 
-    pub(crate) fn ui_element_traverse_on_activation(&mut self, target: Target) {
+    pub(super) fn ui_element_traverse_on_activation(&mut self, target: Target) {
         // HACK: abuse self.target to mark whether to call external editor
         self.target = target.clone();
         let target = match target {
@@ -170,7 +170,7 @@ impl AppEngine {
         }
     }
 
-    pub(crate) fn activate(&mut self, target: Target) {
+    pub(super) fn activate(&mut self, target: Target) {
         let need_help_msg = target == Target::ChildElement && self.selected.is_none();
         self.ui_element_traverse_on_activation(target);
 
@@ -194,7 +194,7 @@ impl AppEngine {
         }
     }
 
-    pub(crate) fn handle_file_update(&mut self, pb: PathBuf) {
+    pub(super) fn handle_file_update(&mut self, pb: PathBuf) {
         if pb == self.temp_file
             && let Ok(new_text) = std::fs::read_to_string(&self.temp_file)
         {

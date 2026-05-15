@@ -63,7 +63,7 @@ impl AppEngine {
         }
     }
 
-    pub(crate) async fn perform_ocr_on_frame(&mut self, frame: Frame) {
+    pub(super) async fn perform_ocr_on_frame(&mut self, frame: Frame) {
         self.clear_drawing();
         // NOTE: for images with parts out of sight
         let frame = frame
@@ -212,7 +212,7 @@ impl AppEngine {
         }
     }
 
-    pub(crate) async fn quick_follow(&mut self) {
+    pub(super) async fn quick_follow(&mut self) {
         if self.element_cache.cache.len() == 1 {
             self.key_prefix.push('A');
             self.filter_by_key().await;
@@ -256,7 +256,7 @@ impl AppEngine {
         }
     }
 
-    pub(crate) async fn perform_filtering(&mut self, key_char: char, mode: FilterMode) {
+    pub(super) async fn perform_filtering(&mut self, key_char: char, mode: FilterMode) {
         if key_char == '-' {
             if self.key_prefix.is_empty() {
                 self.go_back_in_filtering(mode).await;
@@ -287,7 +287,7 @@ impl AppEngine {
         }
     }
 
-    pub(crate) fn update_editing_text(&mut self, new_text: String) {
+    pub(super) fn update_editing_text(&mut self, new_text: String) {
         if let Some(crate::ax_element::ElementOfInterest {
             element: Some(ele), ..
         }) = self.editing.as_ref()
@@ -303,7 +303,7 @@ impl AppEngine {
     }
 
     /// If only 1 word is matched, then update the selected text and show the menu
-    pub(crate) fn check_word_picker(&mut self) {
+    pub(super) fn check_word_picker(&mut self) {
         let Some(wp) = self.word_picker.as_mut() else {
             return;
         };
@@ -350,7 +350,7 @@ impl AppEngine {
         }
     }
 
-    pub(crate) fn toggle_multiselection(&mut self) {
+    pub(super) fn toggle_multiselection(&mut self) {
         self.multi_selection.toggle();
         let on_off = if self.multi_selection.is_on {
             "on"
