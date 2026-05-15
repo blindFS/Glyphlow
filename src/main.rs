@@ -3,7 +3,7 @@ use core_foundation::{
     runloop::{CFRunLoopRunInMode, kCFRunLoopDefaultMode},
 };
 use glyphlow::{
-    AppExecutor, AppSignal, KeyListener, KeyState, Mode,
+    AppEngine, AppSignal, KeyListener, KeyState, Mode,
     config::{GlyphlowConfig, get_config_path},
     drawer::{GlyphlowDrawingLayer, create_overlay_window, get_main_screen_size},
     os_util::check_accessibility_permissions,
@@ -100,7 +100,7 @@ async fn main() {
 
     // Listen to notification timeout
     let (ttx, mut trx) = mpsc::channel::<()>(100);
-    let mut app_executor = AppExecutor::new(
+    let mut app_engine = AppEngine::new(
         state.clone(),
         key_state.clone(),
         config,
@@ -137,9 +137,9 @@ async fn main() {
 
     loop {
         tokio::select! {
-            Some(signal) = rx.recv() => app_executor.handle_signal(signal).await,
-            Some(pb) = frx.recv() => app_executor.handle_signal(AppSignal::FileUpdate(pb)).await,
-            Some(()) = trx.recv() => app_executor.handle_signal(AppSignal::ClearNotification).await,
+            Some(signal) = rx.recv() => app_engine.handle_signal(signal).await,
+            Some(pb) = frx.recv() => app_engine.handle_signal(AppSignal::FileUpdate(pb)).await,
+            Some(()) = trx.recv() => app_engine.handle_signal(AppSignal::ClearNotification).await,
             _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
                 // NOTE: necessary for up-to-date get_focused_pid and UI drawing
                 unsafe {
