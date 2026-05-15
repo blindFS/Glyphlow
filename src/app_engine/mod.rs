@@ -158,10 +158,10 @@ impl AppEngine {
             }
             AppSignal::ToggleMultiSelection => match self.target {
                 Target::Text | Target::ImageOCR => {
-                    workflow::toggle_multiselection(self);
+                    filtering::toggle_multiselection(self);
                 }
                 _ if self.word_picker.is_some() => {
-                    workflow::toggle_multiselection(self);
+                    filtering::toggle_multiselection(self);
                 }
                 _ => {
                     lifecycle::notify(self, "Multi selection only works for text.", Level::Warn);
@@ -171,9 +171,9 @@ impl AppEngine {
                 filtering::perform_filtering(self, key_char, mode).await;
             }
             AppSignal::ScrollAction(sa) => {
-                workflow::perform_scroll_action(self, sa);
+                interaction::perform_scroll_action(self, sa);
             }
-            AppSignal::TextAction(ta) => workflow::perform_text_action(self, ta),
+            AppSignal::TextAction(ta) => interaction::perform_text_action(self, ta),
             AppSignal::WordPickerStartSearch => {
                 if let Some(wp) = self.word_picker.as_mut() {
                     wp.start_searching(self.multi_selection.one_side_idex);
@@ -227,7 +227,7 @@ impl AppEngine {
                         None,
                         Frame::from_origion(self.screen_size),
                     ));
-                    workflow::update_selected_text_and_show_menu(self, text);
+                    interaction::update_selected_text_and_show_menu(self, text);
                 } else {
                     lifecycle::notify_then_deactivate(
                         self,

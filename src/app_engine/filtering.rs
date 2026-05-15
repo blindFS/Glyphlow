@@ -45,7 +45,7 @@ pub(crate) fn ocr_res_filtering(executor: &mut AppEngine) {
                 let (text, frame) = select_range_helper(&choices, idx1, idx2)
                     .expect("Internal Error: wrong ocr hint indexing.");
                 executor.selected = Some(ElementOfInterest::pseudo(None, frame));
-                workflow::update_selected_text_and_show_menu(executor, text.clone());
+                interaction::update_selected_text_and_show_menu(executor, text.clone());
             } else {
                 executor.key_prefix.clear();
                 drawing::draw_hints(executor, &ocr_hints);
@@ -56,7 +56,7 @@ pub(crate) fn ocr_res_filtering(executor: &mut AppEngine) {
                 .expect("Internal Error: wrong ocr hint indexing.");
             // Context initialized as None, but updated right after
             executor.selected = Some(ElementOfInterest::pseudo(None, Frame::from_cgrect(cg_rect)));
-            workflow::update_selected_text_and_show_menu(executor, selected_text.clone());
+            interaction::update_selected_text_and_show_menu(executor, selected_text.clone());
         }
     } else {
         drawing::draw_hints(executor, &filtered);
@@ -146,7 +146,7 @@ pub(crate) async fn filter_by_key(executor: &mut AppEngine) {
                             .select_range(idx1, idx2, role_ref)
                             .expect("Internal Error: wrong indexing of hints.");
                         executor.selected = Some(ElementOfInterest::pseudo(None, frame));
-                        workflow::update_selected_text_and_show_menu(executor, text);
+                        interaction::update_selected_text_and_show_menu(executor, text);
                     } else {
                         executor.multi_selection.role = Some(*role);
                         executor.key_prefix.clear();
@@ -196,7 +196,7 @@ pub(crate) async fn filter_by_key(executor: &mut AppEngine) {
                 // Focused before editing to increase the success rate
                 interaction::focus_on_element(element);
                 let text = context.clone().unwrap_or_default();
-                match workflow::open_editor(executor, &text) {
+                match interaction::open_editor(executor, &text) {
                     Ok(_) => {
                         lifecycle::set_mode(executor, Mode::Editing);
                         executor.selected = None;
@@ -228,7 +228,7 @@ pub(crate) async fn go_back_in_filtering(executor: &mut AppEngine, mode: FilterM
     match mode {
         // Go back 1 level in element explorer
         FilterMode::Generic if executor.target == Target::ChildElement => {
-            if workflow::select_parent(executor) {
+            if interaction::select_parent(executor) {
                 lifecycle::activate(executor, Target::ChildElement);
             }
         }
@@ -342,7 +342,7 @@ pub(crate) fn check_word_picker(executor: &mut AppEngine) {
                     .expect("Internal Error: no word picker set yet.")
                     .select_range(idx1, idx2)
                     .expect("Internal Error: wrong word picker indexing.");
-                workflow::update_selected_text_and_show_menu(executor, text.clone())
+                interaction::update_selected_text_and_show_menu(executor, text.clone())
             } else {
                 executor.key_prefix.clear();
                 // Reset for another side
@@ -353,7 +353,21 @@ pub(crate) fn check_word_picker(executor: &mut AppEngine) {
                 drawing::draw_word_picker(executor);
             }
         } else {
-            workflow::update_selected_text_and_show_menu(executor, text.clone())
+            interaction::update_selected_text_and_show_menu(executor, text.clone())
         }
     }
+}
+
+pub(crate) fn toggle_multiselection(executor: &mut AppEngine) {
+    executor.multi_selection.toggle();
+    let on_off = if executor.multi_selection.is_on {
+        "on"
+    } else {
+        "off"
+    };
+    lifecycle::notify(
+        executor,
+        &format!("Multi-selection is now {on_off}."),
+        Level::Info,
+    );
 }
