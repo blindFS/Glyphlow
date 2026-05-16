@@ -1,4 +1,4 @@
-use super::{AppEngine, MAX_TEXT_DISPLAY_LEN};
+use super::AppEngine;
 use crate::{
     DASH_BOARD_MENU_ITEMS, IMAGE_ACTION_MENU_ITEMS, MenuItem, Mode, SCROLLBAR_MENU_ITEMS,
     TEXT_ACTION_MENU_ITEMS,
@@ -9,6 +9,8 @@ use crate::{
 };
 use objc2::rc::Retained;
 use objc2_quartz_core::CALayer;
+
+static MAX_TEXT_DISPLAY_LEN: usize = 30;
 
 impl AppEngine {
     pub(super) fn clear_drawing(&self) {

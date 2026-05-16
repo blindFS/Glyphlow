@@ -23,8 +23,6 @@ mod interaction;
 mod lifecycle;
 mod workflow;
 
-pub(super) static MAX_TEXT_DISPLAY_LEN: usize = 30;
-
 #[derive(Debug, Default)]
 pub(super) struct MultiSeletionState {
     pub(super) is_on: bool,
