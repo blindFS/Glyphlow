@@ -285,6 +285,21 @@ impl AppEngine {
         self.draw_element_menu("", &RoleOfInterest::PseudoText, true);
     }
 
+    pub(super) fn update_editing_text(&mut self, new_text: String) {
+        if let Some(crate::ax_element::ElementOfInterest {
+            element: Some(ele), ..
+        }) = self.editing.as_ref()
+        {
+            use accessibility::AXUIElementAttributes;
+            use core_foundation::{base::TCFType, string::CFString};
+            if let Err(e) = ele.set_value(CFString::new(&new_text).as_CFType()) {
+                log::warn!("Failed to set the text of focused element: {ele:?}\n Error: {e}");
+                // Reset editing upon failure
+                self.editing = None;
+            }
+        }
+    }
+
     pub(super) fn open_editor(&mut self, text: &str) -> Result<(), Box<dyn std::error::Error>> {
         let editor = self
             .config

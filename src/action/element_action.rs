@@ -51,7 +51,6 @@ async fn capture_focused_window(frame_rect: CGRect) -> Result<Retained<CGImage>,
     rx.await.map_err(|_| "Channel closed.".to_string())?
 }
 
-// TODO: save more memory
 pub async fn screen_shot(frame: &Frame) -> bool {
     let rect = frame.to_cgrect();
     let cg_image = match capture_focused_window(rect).await {

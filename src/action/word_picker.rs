@@ -322,7 +322,6 @@ fn replace_color_in_css(css: &str, theme: &GlyphlowTheme, dim_level: u8) -> Stri
         .replace("{dim_color}", &rgba_to_css_color(dim_rgba))
 }
 
-// TODO: smarter split
 fn multilingual_split(input: &str) -> (Vec<String>, Vec<usize>) {
     let url_re = get_url_re();
     let segment_re = get_segment_re();

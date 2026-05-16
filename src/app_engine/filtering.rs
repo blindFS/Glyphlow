@@ -287,21 +287,6 @@ impl AppEngine {
         }
     }
 
-    pub(super) fn update_editing_text(&mut self, new_text: String) {
-        if let Some(crate::ax_element::ElementOfInterest {
-            element: Some(ele), ..
-        }) = self.editing.as_ref()
-        {
-            use accessibility::AXUIElementAttributes;
-            use core_foundation::{base::TCFType, string::CFString};
-            if let Err(e) = ele.set_value(CFString::new(&new_text).as_CFType()) {
-                log::warn!("Failed to set the text of focused element: {ele:?}\n Error: {e}");
-                // Reset editing upon failure
-                self.editing = None;
-            }
-        }
-    }
-
     /// If only 1 word is matched, then update the selected text and show the menu
     pub(super) fn check_word_picker(&mut self) {
         let Some(wp) = self.word_picker.as_mut() else {

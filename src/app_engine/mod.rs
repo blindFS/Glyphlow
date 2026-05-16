@@ -13,7 +13,6 @@ use std::{
     collections::VecDeque,
     path::PathBuf,
     sync::{Arc, Mutex},
-    time::Duration,
 };
 use tokio::sync::mpsc::Sender;
 
@@ -235,9 +234,4 @@ impl AppEngine {
             }
         }
     }
-}
-
-pub(super) async fn delay(sender: Sender<()>, timeout_secs: u64) {
-    tokio::time::sleep(Duration::from_secs(timeout_secs)).await;
-    let _ = sender.send(()).await;
 }

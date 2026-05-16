@@ -1,4 +1,4 @@
-use super::{AppEngine, delay};
+use super::AppEngine;
 use crate::{
     Mode,
     ax_element::{ElementOfInterest, GetAttribute, Target, traverse_elements},
@@ -9,6 +9,7 @@ use crate::{
 use accessibility::AXUIElementAttributes;
 use log::Level;
 use std::{path::PathBuf, time::Duration};
+use tokio::sync::mpsc::Sender;
 
 const SHORT_TIMEOUT: u64 = 1;
 const LONG_TIMEOUT: u64 = 2;
@@ -221,4 +222,9 @@ impl AppEngine {
             };
         }
     }
+}
+
+async fn delay(sender: Sender<()>, timeout_secs: u64) {
+    tokio::time::sleep(Duration::from_secs(timeout_secs)).await;
+    let _ = sender.send(()).await;
 }
