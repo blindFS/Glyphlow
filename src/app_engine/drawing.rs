@@ -190,23 +190,21 @@ impl AppEngine {
     }
 
     fn draw_scrolling_menu(&self, key_prefix: &str) {
-        let msg = self.menu_msg_alignment_helper(
-            "Pick a Scrolling Action:",
-            &SCROLLBAR_MENU_ITEMS,
-            false,
-            false,
-            false,
-            key_prefix,
-        );
-        self.draw_menu(&msg);
+        if !self.config.hide_scrolling_menu {
+            let msg = self.menu_msg_alignment_helper(
+                "Pick a Scrolling Action:",
+                &SCROLLBAR_MENU_ITEMS,
+                false,
+                false,
+                false,
+                key_prefix,
+            );
+            self.draw_menu(&msg);
+        }
+        self.draw_selected_frame();
     }
 
-    pub(super) fn draw_element_menu(
-        &self,
-        key_prefix: &str,
-        role: RoleOfInterest,
-        set_mode: bool,
-    ) {
+    pub(super) fn draw_element_menu(&self, key_prefix: &str, role: RoleOfInterest, set_mode: bool) {
         self.clear_drawing();
         // Set mode before drawing to make it more responsive
         if set_mode {
