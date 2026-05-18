@@ -26,8 +26,7 @@ impl AppEngine {
         }
     }
 
-    pub(super) fn simulate_click(&self, x: f64, y: f64, right: bool) {
-        let button = if right { Button::Right } else { Button::Left };
+    pub(super) fn simulate_click(&self, x: f64, y: f64, button: Button) {
         self.simulate_event(&EventType::MouseMove { x, y });
         std::thread::sleep(Duration::from_millis(20));
         self.simulate_event(&EventType::ButtonPress(button));
@@ -49,7 +48,7 @@ impl AppEngine {
         self.focus_on_element(element);
 
         if self.is_electron || *role == RoleOfInterest::Cell {
-            self.simulate_click(x, y, false);
+            self.simulate_click(x, y, Button::Left);
         } else if let Err(e) = element.press() {
             log::warn!("Failed to do UI press on element: {e}");
             match e {
@@ -60,7 +59,7 @@ impl AppEngine {
                         || err_num == kAXErrorAttributeUnsupported => {}
                 _ => {
                     log::info!("Simulating mouse click instead...");
-                    self.simulate_click(x, y, false);
+                    self.simulate_click(x, y, Button::Left);
                 }
             }
         };
@@ -76,7 +75,7 @@ impl AppEngine {
         let (x, y) = center;
 
         if self.is_electron {
-            self.simulate_click(x, y, true);
+            self.simulate_click(x, y, Button::Right);
         } else if let Err(e) = element.show_menu() {
             log::warn!("Failed to show menu on element: {e}");
             match e {
@@ -87,7 +86,7 @@ impl AppEngine {
                         || err_num == kAXErrorAttributeUnsupported => {}
                 _ => {
                     log::info!("Simulating mouse click instead...");
-                    self.simulate_click(x, y, true);
+                    self.simulate_click(x, y, Button::Right);
                 }
             }
         };

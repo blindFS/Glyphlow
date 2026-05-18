@@ -4,7 +4,7 @@ use crate::{
     config::{RoleOfInterest, WorkFlow, WorkFlowAction},
 };
 use log::Level;
-use rdev::EventType;
+use rdev::{Button, EventType};
 use std::time::Duration;
 
 impl AppEngine {
@@ -96,9 +96,24 @@ impl AppEngine {
                 let center = frame.center();
                 self.press_on_element(element, &role, center);
             }
+            WorkFlowAction::Hover => {
+                let (x, y) = frame.center();
+                self.simulate_event(&EventType::MouseMove { x, y });
+            }
+            WorkFlowAction::Move(x, y) => {
+                self.simulate_event(&EventType::MouseMove { x: *x, y: *y });
+            }
             WorkFlowAction::Click => {
                 let (x, y) = frame.center();
-                self.simulate_click(x, y, false);
+                self.simulate_click(x, y, Button::Left);
+            }
+            WorkFlowAction::RightClick => {
+                let (x, y) = frame.center();
+                self.simulate_click(x, y, Button::Right);
+            }
+            WorkFlowAction::MiddleClick => {
+                let (x, y) = frame.center();
+                self.simulate_click(x, y, Button::Middle);
             }
             WorkFlowAction::ShowMenu => {
                 let center = frame.center();
