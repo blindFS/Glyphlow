@@ -44,6 +44,7 @@ pub enum WorkFlowAction {
     Focus,
     Press,
     Hover,
+    Move(f64, f64),
     Click,
     RightClick,
     MiddleClick,

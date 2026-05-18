@@ -100,6 +100,9 @@ impl AppEngine {
                 let (x, y) = frame.center();
                 self.simulate_event(&EventType::MouseMove { x, y });
             }
+            WorkFlowAction::Move(x, y) => {
+                self.simulate_event(&EventType::MouseMove { x: *x, y: *y });
+            }
             WorkFlowAction::Click => {
                 let (x, y) = frame.center();
                 self.simulate_click(x, y, Button::Left);
