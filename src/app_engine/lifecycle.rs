@@ -165,6 +165,7 @@ impl AppEngine {
                 &mut self.element_cache,
                 &target,
                 vis_level,
+                0,
             );
         }
     }

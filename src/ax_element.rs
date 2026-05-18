@@ -602,6 +602,8 @@ pub enum Target {
     Custom(CustomTarget),
 }
 
+const MAX_DEPTH: u8 = 200;
+
 pub fn traverse_elements(
     element: &AXUIElement,
     parent_frame: &Frame,
@@ -609,7 +611,11 @@ pub fn traverse_elements(
     cache: &mut ElementCache,
     target: &Target,
     vis_level: VisibilityCheckingLevel,
+    depth: u8,
 ) {
+    if depth > MAX_DEPTH {
+        return;
+    }
     let Some(ele_fp) = ElementBasicAttributes::from(element) else {
         return;
     };
@@ -661,6 +667,7 @@ pub fn traverse_elements(
                         cache,
                         target,
                         vis_level,
+                        depth + 1,
                     );
                 } else {
                     let roi = role_to_interest(&child_fp.role);
@@ -905,7 +912,15 @@ pub fn traverse_elements(
             if *child == *element {
                 continue;
             }
-            traverse_elements(&child, &new_frame, &window_frame, cache, target, vis_level);
+            traverse_elements(
+                &child,
+                &new_frame,
+                &window_frame,
+                cache,
+                target,
+                vis_level,
+                depth + 1,
+            );
         }
     }
 }
