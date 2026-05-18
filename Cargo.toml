@@ -10,7 +10,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 accessibility = "0.2.0"
 accessibility-sys = "0.2.0"
 core-foundation = "0.10.1"
-core-text = "21.0.0"
+core-text = "22.0.0"
 core-graphics-types = "0.2.0"
 objc2 = "0.6.4"
 objc2-app-kit = "0.3.2"
@@ -25,7 +25,7 @@ notify = "8.2.0"
 notify-debouncer-mini = "0.7.0"
 block2 = "0.6.2"
 regex = "1.12.3"
-tokio = { version = "1.52.1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "sync", "time"] }
 unicode-width = "0.2.2"
 simple_logger = "5.2.0"
 log = "0.4.29"
