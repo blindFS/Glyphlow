@@ -28,6 +28,7 @@ impl AppEngine {
 
     pub(super) fn draw_hints(&self, boxes: &[HintBox]) {
         self.clear_drawing();
+        log::log!(log::Level::Debug, "Start drawing hints");
         // NOTE: only select the other side of the same role,
         // and excluding the already selected one.
         if self.multi_selection.is_on
@@ -49,6 +50,7 @@ impl AppEngine {
             );
         };
         self.draw_selected_frame();
+        log::log!(log::Level::Debug, "Finish drawing hints");
     }
 
     fn menu_format_helper(

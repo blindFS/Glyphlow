@@ -173,7 +173,9 @@ impl AppEngine {
 
     pub(super) fn activate(&mut self, target: Target) {
         let need_help_msg = target == Target::ChildElement && self.selected.is_none();
+        log::log!(Level::Debug, "Start traversing, target: {target:?}");
         self.ui_element_traverse_on_activation(target);
+        log::log!(Level::Debug, "Finish traversing");
 
         if !self.element_cache.cache.is_empty() {
             self.set_mode(Mode::Filtering);
