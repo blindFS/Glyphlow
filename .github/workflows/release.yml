@@ -36,5 +36,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
-          files: target/release/glyphlow.tar.gz
+          files: target/aarch64-apple-darwin/release/glyphlow.tar.gz
           generate_release_notes: true
