@@ -131,35 +131,54 @@ impl ElementBasicAttributes {
 }
 
 #[derive(Clone, Debug)]
+pub enum ElementKind {
+    Standard {
+        element: AXUIElement,
+        role: RoleOfInterest,
+    },
+    Pseudo,
+}
+
+#[derive(Clone, Debug)]
 pub struct ElementOfInterest {
-    pub element: Option<AXUIElement>,
+    pub kind: ElementKind,
     pub context: Option<String>,
-    // TODO: role based drawing?
-    pub role: RoleOfInterest,
     pub frame: Frame,
 }
 
 impl ElementOfInterest {
     pub fn new(
-        element: Option<AXUIElement>,
+        element: AXUIElement,
         context: Option<String>,
         role: RoleOfInterest,
         frame: Frame,
     ) -> Self {
         Self {
-            element,
+            kind: ElementKind::Standard { element, role },
             context,
-            role,
             frame,
         }
     }
 
     pub fn pseudo(context: Option<String>, frame: Frame) -> Self {
         Self {
-            element: None,
+            kind: ElementKind::Pseudo,
             context,
-            role: RoleOfInterest::PseudoText,
             frame,
+        }
+    }
+
+    pub fn role(&self) -> RoleOfInterest {
+        match &self.kind {
+            ElementKind::Standard { role, .. } => *role,
+            ElementKind::Pseudo => RoleOfInterest::PseudoText,
+        }
+    }
+
+    pub fn element(&self) -> Option<&AXUIElement> {
+        match &self.kind {
+            ElementKind::Standard { element, .. } => Some(element),
+            ElementKind::Pseudo => None,
         }
     }
 }
@@ -211,7 +230,7 @@ impl ElementCache {
         // f64 to u64 for hashing
         let center = (x.to_bits(), y.to_bits());
 
-        let new_ele = ElementOfInterest::new(Some(element.clone()), context, role, frame);
+        let new_ele = ElementOfInterest::new(element.clone(), context, role, frame);
         self.seen_center.insert(center, self.cache.len());
         self.cache.push(new_ele);
     }
@@ -284,7 +303,7 @@ impl ElementCache {
         let center = (x.to_bits(), y.to_bits());
 
         // NOTE: de-duplication for DOM elements
-        let new_ele = ElementOfInterest::new(Some(element.clone()), context, role, frame);
+        let new_ele = ElementOfInterest::new(element.clone(), context, role, frame);
         if let Some(idx) = self.seen_center.get(&center) {
             self.cache[*idx] = new_ele;
         } else {
@@ -318,7 +337,7 @@ impl ElementCache {
             .cache
             .iter()
             .map(|eoi| {
-                let is_valid = ref_role.is_none_or(|ref_role| *ref_role == eoi.role);
+                let is_valid = ref_role.is_none_or(|ref_role| *ref_role == eoi.role());
                 (eoi.context.clone().unwrap_or_default(), eoi.frame, is_valid)
             })
             .collect();

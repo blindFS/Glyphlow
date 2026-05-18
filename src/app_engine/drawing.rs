@@ -204,7 +204,7 @@ impl AppEngine {
     pub(super) fn draw_element_menu(
         &self,
         key_prefix: &str,
-        role: &RoleOfInterest,
+        role: RoleOfInterest,
         set_mode: bool,
     ) {
         self.clear_drawing();
@@ -245,7 +245,7 @@ impl AppEngine {
 
     pub(super) fn menu_refresh(&self, key_prefix: &str, set_mode: bool) {
         if let Some(eoi) = self.selected.as_ref() {
-            self.draw_element_menu(key_prefix, &eoi.role, set_mode);
+            self.draw_element_menu(key_prefix, eoi.role(), set_mode);
         } else {
             self.clear_drawing();
             self.draw_dashboard(key_prefix);

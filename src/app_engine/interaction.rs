@@ -98,17 +98,17 @@ impl AppEngine {
         if let Some(parent_element) = self
             .selected
             .as_ref()
-            .and_then(|eoi| eoi.element.as_ref())
+            .and_then(|eoi| eoi.element())
             .and_then(|ele| ele.parent().ok())
         {
             let screen_frame = Frame::from_origion(self.screen_size);
             let frame = parent_element.get_frame(screen_frame);
-            self.selected = Some(ElementOfInterest {
-                element: Some(parent_element),
-                context: None,
-                role: RoleOfInterest::Generic,
+            self.selected = Some(ElementOfInterest::new(
+                parent_element,
+                None,
+                RoleOfInterest::Generic,
                 frame,
-            });
+            ));
             return true;
         }
         false
@@ -191,17 +191,16 @@ impl AppEngine {
     }
 
     pub(super) fn perform_scroll_action(&mut self, sa: ScrollAction) {
-        let Some(ElementOfInterest {
-            element: Some(element),
-            role,
-            frame,
-            ..
-        }) = self.selected.as_ref()
-        else {
+        let Some(selected) = self.selected.as_ref() else {
             return;
         };
+        let Some(element) = selected.element() else {
+            return;
+        };
+        let role = selected.role();
+        let frame = selected.frame;
 
-        if *role == RoleOfInterest::ScrollBar {
+        if role == RoleOfInterest::ScrollBar {
             let Some(old_val) = element
                 .value()
                 .ok()
@@ -228,11 +227,11 @@ impl AppEngine {
                 }
                 ScrollAction::Top => {
                     self.scroll_to_value(element, 0.0);
-                    self.draw_element_menu("", &RoleOfInterest::ScrollBar, false);
+                    self.draw_element_menu("", RoleOfInterest::ScrollBar, false);
                 }
                 ScrollAction::Bottom => {
                     self.scroll_to_value(element, 1.0);
-                    self.draw_element_menu("", &RoleOfInterest::ScrollBar, false);
+                    self.draw_element_menu("", RoleOfInterest::ScrollBar, false);
                 }
             }
         } else {
@@ -261,14 +260,14 @@ impl AppEngine {
                         delta_x: 0,
                         delta_y: 999999,
                     });
-                    self.draw_element_menu("", &RoleOfInterest::ScrollBar, false);
+                    self.draw_element_menu("", RoleOfInterest::ScrollBar, false);
                 }
                 ScrollAction::Bottom => {
                     self.simulate_event(&EventType::Wheel {
                         delta_x: 0,
                         delta_y: -999999,
                     });
-                    self.draw_element_menu("", &RoleOfInterest::ScrollBar, false);
+                    self.draw_element_menu("", RoleOfInterest::ScrollBar, false);
                 }
             }
         }
@@ -282,13 +281,12 @@ impl AppEngine {
 
     pub(super) fn update_selected_text_and_show_menu(&mut self, new_text: String) {
         self.update_selected_text(new_text);
-        self.draw_element_menu("", &RoleOfInterest::PseudoText, true);
+        self.draw_element_menu("", RoleOfInterest::PseudoText, true);
     }
 
     pub(super) fn update_editing_text(&mut self, new_text: String) {
-        if let Some(crate::ax_element::ElementOfInterest {
-            element: Some(ele), ..
-        }) = self.editing.as_ref()
+        if let Some(selected) = self.editing.as_ref()
+            && let Some(ele) = selected.element()
         {
             use accessibility::AXUIElementAttributes;
             use core_foundation::{base::TCFType, string::CFString};
