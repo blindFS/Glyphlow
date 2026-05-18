@@ -28,6 +28,7 @@ impl AppEngine {
 
     pub(super) fn draw_hints(&self, boxes: &[HintBox]) {
         self.clear_drawing();
+        log::log!(log::Level::Debug, "Start drawing hints");
         // NOTE: only select the other side of the same role,
         // and excluding the already selected one.
         if self.multi_selection.is_on
@@ -49,6 +50,7 @@ impl AppEngine {
             );
         };
         self.draw_selected_frame();
+        log::log!(log::Level::Debug, "Finish drawing hints");
     }
 
     fn menu_format_helper(
@@ -188,23 +190,21 @@ impl AppEngine {
     }
 
     fn draw_scrolling_menu(&self, key_prefix: &str) {
-        let msg = self.menu_msg_alignment_helper(
-            "Pick a Scrolling Action:",
-            &SCROLLBAR_MENU_ITEMS,
-            false,
-            false,
-            false,
-            key_prefix,
-        );
-        self.draw_menu(&msg);
+        if !self.config.hide_scrolling_menu {
+            let msg = self.menu_msg_alignment_helper(
+                "Pick a Scrolling Action:",
+                &SCROLLBAR_MENU_ITEMS,
+                false,
+                false,
+                false,
+                key_prefix,
+            );
+            self.draw_menu(&msg);
+        }
+        self.draw_selected_frame();
     }
 
-    pub(super) fn draw_element_menu(
-        &self,
-        key_prefix: &str,
-        role: &RoleOfInterest,
-        set_mode: bool,
-    ) {
+    pub(super) fn draw_element_menu(&self, key_prefix: &str, role: RoleOfInterest, set_mode: bool) {
         self.clear_drawing();
         // Set mode before drawing to make it more responsive
         if set_mode {
@@ -243,7 +243,7 @@ impl AppEngine {
 
     pub(super) fn menu_refresh(&self, key_prefix: &str, set_mode: bool) {
         if let Some(eoi) = self.selected.as_ref() {
-            self.draw_element_menu(key_prefix, &eoi.role, set_mode);
+            self.draw_element_menu(key_prefix, eoi.role(), set_mode);
         } else {
             self.clear_drawing();
             self.draw_dashboard(key_prefix);

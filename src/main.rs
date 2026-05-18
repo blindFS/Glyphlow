@@ -23,7 +23,11 @@ use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() {
-    simple_logger::init_with_level(log::Level::Info).expect("Failed to init logger");
+    simple_logger::SimpleLogger::new()
+        .with_level(log::LevelFilter::Info)
+        .env()
+        .init()
+        .expect("Failed to init logger");
 
     if !check_accessibility_permissions() {
         log::error!("Accessibility permissions not granted.");

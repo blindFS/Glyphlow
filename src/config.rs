@@ -336,6 +336,8 @@ pub struct GlyphlowConfig {
     pub workflows: Vec<WorkFlow>,
     #[serde(default = "default_scroll_distance")]
     pub scroll_distance: f64,
+    #[serde(default = "default_hide_scrolling_menu")]
+    pub hide_scrolling_menu: bool,
     #[serde(default = "default_element_min_width")]
     pub element_min_width: u16,
     #[serde(default = "default_element_min_height")]
@@ -482,6 +484,9 @@ fn default_workflows() -> Vec<WorkFlow> {
 fn default_scroll_distance() -> f64 {
     0.05
 }
+fn default_hide_scrolling_menu() -> bool {
+    false
+}
 fn default_element_min_width() -> u16 {
     15
 }
@@ -516,6 +521,7 @@ impl Default for GlyphlowConfig {
             text_actions: default_text_actions(),
             workflows: default_workflows(),
             scroll_distance: default_scroll_distance(),
+            hide_scrolling_menu: default_hide_scrolling_menu(),
             element_min_width: default_element_min_width(),
             element_min_height: default_element_min_height(),
             image_min_size: default_image_min_size(),

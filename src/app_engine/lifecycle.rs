@@ -81,7 +81,7 @@ impl AppEngine {
             self.is_electron = false;
 
             self.selected = Some(ElementOfInterest::new(
-                Some(window),
+                window,
                 None,
                 RoleOfInterest::Generic,
                 frame,
@@ -125,7 +125,7 @@ impl AppEngine {
         self.last_window_frame = window_frame;
 
         self.selected = Some(ElementOfInterest::new(
-            Some(focused_window),
+            focused_window,
             None,
             RoleOfInterest::Generic,
             window_frame,
@@ -153,27 +153,28 @@ impl AppEngine {
         }
 
         self.clear_cache();
-        if let Some(ElementOfInterest {
-            element: Some(element),
-            frame,
-            ..
-        }) = self.selected.as_ref()
+        if let Some(selected) = self.selected.as_ref()
+            && let Some(element) = selected.element()
         {
+            let frame = selected.frame;
             traverse_elements(
                 element,
                 // Very loose visibility constraint
-                frame,
+                &frame,
                 &self.last_window_frame,
                 &mut self.element_cache,
                 &target,
                 vis_level,
+                0,
             );
         }
     }
 
     pub(super) fn activate(&mut self, target: Target) {
         let need_help_msg = target == Target::ChildElement && self.selected.is_none();
+        log::log!(Level::Debug, "Start traversing, target: {target:?}");
         self.ui_element_traverse_on_activation(target);
+        log::log!(Level::Debug, "Finish traversing");
 
         if !self.element_cache.cache.is_empty() {
             self.set_mode(Mode::Filtering);
@@ -188,7 +189,7 @@ impl AppEngine {
             let (x, y) = eoi.frame.center();
             self.simulate_event(&rdev::EventType::MouseMove { x, y });
             self.clear_cache();
-            self.draw_element_menu("", &RoleOfInterest::ScrollBar, true);
+            self.draw_element_menu("", RoleOfInterest::ScrollBar, true);
         } else {
             self.clear_drawing();
             self.notify_then_deactivate("No relevant UI elements found.", Level::Warn);

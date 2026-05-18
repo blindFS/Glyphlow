@@ -98,20 +98,16 @@ impl AppEngine {
         if self.key_prefix.len() == self.hint_width as usize
             && filtered_boxes.len() == 1
             && let Some(crate::util::HintBox { idx, .. }) = filtered_boxes.first()
-            && let Some(
-                eoi @ ElementOfInterest {
-                    element: Some(element),
-                    context,
-                    frame,
-                    role,
-                    ..
-                },
-            ) = self.element_cache.cache.get(*idx)
+            && let Some(eoi) = self.element_cache.cache.get(*idx)
+            && let Some(element) = eoi.element()
         {
+            let role = eoi.role();
+            let context = &eoi.context;
+            let frame = &eoi.frame;
             match self.target {
                 Target::MenuItem | Target::Clickable => {
                     let center = frame.center();
-                    self.press_on_element(element, role, center);
+                    self.press_on_element(element, &role, center);
                     self.deactivate();
                 }
                 Target::Image => {
@@ -131,9 +127,9 @@ impl AppEngine {
                                 .multi_selection
                                 .role
                                 .as_ref()
-                                .is_some_and(|other| *role == *other)
+                                .is_some_and(|other| role == *other)
                             {
-                                Some(role)
+                                Some(&role)
                             } else {
                                 None
                             };
@@ -144,7 +140,7 @@ impl AppEngine {
                             self.selected = Some(ElementOfInterest::pseudo(None, frame));
                             self.update_selected_text_and_show_menu(text);
                         } else {
-                            self.multi_selection.role = Some(*role);
+                            self.multi_selection.role = Some(role);
                             self.key_prefix.clear();
                             self.draw_hints(&self.hint_boxes);
                         }
@@ -170,9 +166,9 @@ impl AppEngine {
                         let role = self
                             .selected
                             .as_ref()
-                            .map(|eoi| eoi.role)
+                            .map(|eoi| eoi.role())
                             .unwrap_or_default();
-                        self.draw_element_menu("", &role, true);
+                        self.draw_element_menu("", role, true);
                     } else {
                         self.draw_hints_from_cache();
                     }
@@ -180,7 +176,7 @@ impl AppEngine {
                 Target::Scrollable => {
                     self.selected = Some(eoi.clone());
                     self.clear_cache();
-                    self.draw_element_menu("", &RoleOfInterest::ScrollBar, true);
+                    self.draw_element_menu("", RoleOfInterest::ScrollBar, true);
                 }
                 Target::Editable => {
                     self.selected = Some(eoi.clone());
@@ -238,7 +234,7 @@ impl AppEngine {
                 {
                     // Go back to text action menu
                     self.word_picker = None;
-                    self.draw_element_menu("", &RoleOfInterest::PseudoText, true);
+                    self.draw_element_menu("", RoleOfInterest::PseudoText, true);
                 } else {
                     self.multi_selection.clear_one_side();
                     self.draw_word_picker();

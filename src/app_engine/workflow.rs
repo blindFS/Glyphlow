@@ -1,6 +1,6 @@
 use super::AppEngine;
 use crate::{
-    ax_element::{ElementOfInterest, GetAttribute, SetAttribute, Target},
+    ax_element::{GetAttribute, SetAttribute, Target},
     config::{RoleOfInterest, WorkFlow, WorkFlowAction},
 };
 use log::Level;
@@ -12,11 +12,14 @@ impl AppEngine {
     pub(super) fn is_workflow_valid(&self, wf: &WorkFlow) -> bool {
         match wf.starting_role {
             RoleOfInterest::Empty => self.selected.is_none(),
-            RoleOfInterest::Generic => self.selected.as_ref().is_some_and(|s| s.element.is_some()),
+            RoleOfInterest::Generic => self
+                .selected
+                .as_ref()
+                .is_some_and(|s| s.element().is_some()),
             _ => self
                 .selected
                 .as_ref()
-                .is_some_and(|s| s.element.is_some() && s.role == wf.starting_role),
+                .is_some_and(|s| s.element().is_some() && s.role() == wf.starting_role),
         }
     }
 
@@ -65,14 +68,7 @@ impl AppEngine {
         }
 
         // Actions that require a selected element
-        let Some(ElementOfInterest {
-            element: Some(element),
-            context,
-            role,
-            frame,
-            ..
-        }) = self.selected.as_ref()
-        else {
+        let Some(selected) = self.selected.as_ref() else {
             self.notify_then_deactivate(
                 &format!("Running a workflow action with no element selected. {act:?}"),
                 Level::Error,
@@ -80,13 +76,25 @@ impl AppEngine {
             return true;
         };
 
+        let Some(element) = selected.element() else {
+            self.notify_then_deactivate(
+                &format!("Running a workflow action with no accessibility element. {act:?}"),
+                Level::Error,
+            );
+            return true;
+        };
+
+        let context = &selected.context;
+        let role = selected.role();
+        let frame = selected.frame;
+
         match act {
             WorkFlowAction::Focus => {
                 self.focus_on_element(element);
             }
             WorkFlowAction::Press => {
                 let center = frame.center();
-                self.press_on_element(element, role, center);
+                self.press_on_element(element, &role, center);
             }
             WorkFlowAction::Click => {
                 let (x, y) = frame.center();
