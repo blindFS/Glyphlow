@@ -28,9 +28,12 @@ impl AppEngine {
 
     /// Draw/Update hint boxes
     pub(super) fn draw_hints(&mut self, incremental: bool) {
+        log::log!(
+            log::Level::Debug,
+            "Start drawing hints, incremental: {incremental}"
+        );
         if !incremental {
             self.clear_drawing();
-            log::log!(log::Level::Debug, "Start drawing hints");
             self.window.draw_hints(
                 &mut self.hint_boxes,
                 &self.config.theme,
@@ -38,10 +41,10 @@ impl AppEngine {
                 self.screen_size,
             );
             self.draw_selected_frame();
-            log::log!(log::Level::Debug, "Finish drawing hints");
         } else {
             self.update_hints();
         }
+        log::log!(log::Level::Debug, "Finish drawing hints");
     }
 
     /// Show/Hide hint_boxes/colored_frames, update hint text
@@ -49,7 +52,8 @@ impl AppEngine {
         let prefix_len = self.key_prefix.len();
         let sublayers = unsafe { self.window.sublayers().unwrap_or_default() };
 
-        // Safety check: if layers were cleared or out of sync, do nothing
+        // NOTE: Safety check: if layers were cleared or out of sync, do nothing.
+        // Happens when an immediate filtering key pressed right after the activation signal.
         if sublayers.count() < 2 {
             return;
         }

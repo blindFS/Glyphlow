@@ -17,6 +17,7 @@ const DEBUG_TIMEOUT: u64 = 5;
 
 impl AppEngine {
     pub(super) fn set_mode(&self, mode: Mode) {
+        log::log!(Level::Trace, "Set mode: {mode:?}");
         if let Ok(mut state) = self.state.lock() {
             *state = mode;
         }
