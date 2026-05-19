@@ -11,6 +11,7 @@ use glyphlow::{
 use notify::RecursiveMode;
 use notify_debouncer_mini::{DebounceEventResult, new_debouncer};
 use objc2::MainThreadMarker;
+use objc2_app_kit::NSWindowCollectionBehavior;
 use objc2_quartz_core::CALayer;
 use rdev::{EventType, grab};
 use std::{
@@ -62,6 +63,12 @@ async fn main() {
     let mtm = MainThreadMarker::new().expect("Not on main thread");
     let screen_size = get_main_screen_size(mtm);
     let window = create_overlay_window(mtm, screen_size);
+    // To work across different macOS native workspaces
+    window.setCollectionBehavior(
+        NSWindowCollectionBehavior::CanJoinAllSpaces
+            | NSWindowCollectionBehavior::Stationary
+            | NSWindowCollectionBehavior::IgnoresCycle,
+    );
     window.makeKeyAndOrderFront(None);
     let window = CALayer::from_window(&window).expect("Failed to get root layer of window.");
 
