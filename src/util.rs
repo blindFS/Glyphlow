@@ -775,6 +775,7 @@ mod collision_tests {
             delta: (0.0, 0.0),
             frame: None,
             color: None,
+            text_layer: None,
         }
     }
 

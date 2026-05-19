@@ -125,7 +125,6 @@ impl GlyphlowDrawingLayer for CALayer {
 
         // Colors parsed from hex strings
         let bg_color = &theme.hint_bg_color;
-        let _font = &theme.hint_font;
 
         let frames_root = CALayer::new();
         frames_root.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), screen_size));
