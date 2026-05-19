@@ -63,18 +63,6 @@ pub trait GlyphlowDrawingLayer {
         key_prefix_len: usize,
         screen_size: CGSize,
     );
-    fn update_hint_text(
-        text_layer: &CATextLayer,
-        label: &str,
-        key_prefix_len: usize,
-        theme: &GlyphlowTheme,
-    );
-    fn update_hint_text_with_attr(
-        attr_string: &Retained<NSMutableAttributedString>,
-        label: &str,
-        key_prefix_len: usize,
-        theme: &GlyphlowTheme,
-    );
     fn draw_menu(
         &self,
         text: &str,
@@ -137,15 +125,9 @@ impl GlyphlowDrawingLayer for CALayer {
         for hint in hints {
             let bg_color = hint.color.as_ref().unwrap_or(bg_color);
 
-            let frame_layer = CALayer::new();
+            let mut frame_layer = CALayer::new();
             if let Some(frame) = &hint.frame {
-                let origin = frame.top_left;
-                let origin = NSPoint::new(origin.x, origin.y);
-                let (w, h) = frame.size();
-                frame_layer.setFrame(NSRect::new(origin, NSSize::new(w, h)));
-                frame_layer.setBorderWidth(2.0);
-                frame_layer.setBorderColor(Some(bg_color));
-                frame_layer.setZPosition(-1.0);
+                frame_layer = frame_box_layer(frame, bg_color);
             }
             frames_root.addSublayer(&frame_layer);
 
@@ -156,7 +138,7 @@ impl GlyphlowDrawingLayer for CALayer {
                 &label_string,
             );
 
-            Self::update_hint_text_with_attr(&attr_string, &hint.label, key_prefix_len, theme);
+            update_hint_text_with_attr(&attr_string, &hint.label, key_prefix_len, theme);
 
             // Background Box
             let (size, _) =
@@ -208,52 +190,6 @@ impl GlyphlowDrawingLayer for CALayer {
         self.addSublayer(&boxes_root);
     }
 
-    fn update_hint_text(
-        text_layer: &CATextLayer,
-        label: &str,
-        key_prefix_len: usize,
-        theme: &GlyphlowTheme,
-    ) {
-        let label_string = NSString::from_str(label);
-        let attr_string = NSMutableAttributedString::initWithString(
-            NSMutableAttributedString::alloc(),
-            &label_string,
-        );
-        Self::update_hint_text_with_attr(&attr_string, label, key_prefix_len, theme);
-        unsafe {
-            text_layer.setString(Some(&attr_string));
-        }
-    }
-
-    fn update_hint_text_with_attr(
-        attr_string: &Retained<NSMutableAttributedString>,
-        label: &str,
-        key_prefix_len: usize,
-        theme: &GlyphlowTheme,
-    ) {
-        let hl_color = &theme.hint_hl_color;
-        let fg_color = &theme.hint_fg_color;
-        let font = &theme.hint_font;
-
-        unsafe {
-            attr_string.addAttribute_value_range(
-                NSForegroundColorAttributeName,
-                hl_color.as_ref(),
-                NSRange::new(0, key_prefix_len),
-            );
-            attr_string.addAttribute_value_range(
-                NSForegroundColorAttributeName,
-                fg_color.as_ref(),
-                NSRange::new(key_prefix_len, label.len() - key_prefix_len),
-            );
-            attr_string.addAttribute_value_range(
-                NSFontAttributeName,
-                font,
-                NSRange::new(0, label.len()),
-            );
-        }
-    }
-
     fn draw_attributed_string(
         &self,
         attr_string: Retained<NSMutableAttributedString>,
@@ -299,17 +235,21 @@ impl GlyphlowDrawingLayer for CALayer {
     }
 
     fn draw_frame_box(&self, frame: &Frame, color: &CFRetained<CGColor>) {
-        let container = CALayer::new();
-        let origin = frame.top_left;
-        let origin = NSPoint::new(origin.x, origin.y);
-        let (w, h) = frame.size();
-        container.setFrame(NSRect::new(origin, NSSize::new(w, h)));
-        container.setBorderWidth(2.0);
-        container.setBorderColor(Some(color));
-        container.setZPosition(-1.0);
-
+        let container = frame_box_layer(frame, color);
         self.addSublayer(&container);
     }
+}
+
+fn frame_box_layer(frame: &Frame, color: &CFRetained<CGColor>) -> Retained<CALayer> {
+    let container = CALayer::new();
+    let origin = frame.top_left;
+    let origin = NSPoint::new(origin.x, origin.y);
+    let (w, h) = frame.size();
+    container.setFrame(NSRect::new(origin, NSSize::new(w, h)));
+    container.setBorderWidth(2.0);
+    container.setBorderColor(Some(color));
+    container.setZPosition(-1.0);
+    container
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -421,4 +361,50 @@ fn text_box_with_attributed_string(
     container.addSublayer(&text_layer);
     container.setCornerRadius(margin);
     (o_x - o_x_move, o_y - o_y_move, text_layer, container)
+}
+
+pub fn update_hint_text(
+    text_layer: &CATextLayer,
+    label: &str,
+    key_prefix_len: usize,
+    theme: &GlyphlowTheme,
+) {
+    let label_string = NSString::from_str(label);
+    let attr_string = NSMutableAttributedString::initWithString(
+        NSMutableAttributedString::alloc(),
+        &label_string,
+    );
+    update_hint_text_with_attr(&attr_string, label, key_prefix_len, theme);
+    unsafe {
+        text_layer.setString(Some(&attr_string));
+    }
+}
+
+fn update_hint_text_with_attr(
+    attr_string: &Retained<NSMutableAttributedString>,
+    label: &str,
+    key_prefix_len: usize,
+    theme: &GlyphlowTheme,
+) {
+    let hl_color = &theme.hint_hl_color;
+    let fg_color = &theme.hint_fg_color;
+    let font = &theme.hint_font;
+
+    unsafe {
+        attr_string.addAttribute_value_range(
+            NSForegroundColorAttributeName,
+            hl_color.as_ref(),
+            NSRange::new(0, key_prefix_len),
+        );
+        attr_string.addAttribute_value_range(
+            NSForegroundColorAttributeName,
+            fg_color.as_ref(),
+            NSRange::new(key_prefix_len, label.len() - key_prefix_len),
+        );
+        attr_string.addAttribute_value_range(
+            NSFontAttributeName,
+            font,
+            NSRange::new(0, label.len()),
+        );
+    }
 }

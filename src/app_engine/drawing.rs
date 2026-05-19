@@ -4,7 +4,7 @@ use crate::{
     TEXT_ACTION_MENU_ITEMS,
     ax_element::{ElementOfInterest, Target},
     config::RoleOfInterest,
-    drawer::GlyphlowDrawingLayer,
+    drawer::{GlyphlowDrawingLayer, update_hint_text},
     util::Frame,
 };
 use objc2::rc::Retained;
@@ -26,67 +26,65 @@ impl AppEngine {
         }
     }
 
+    /// Draw/Update hint boxes
     pub(super) fn draw_hints(&mut self, incremental: bool) {
         if !incremental {
             self.clear_drawing();
             log::log!(log::Level::Debug, "Start drawing hints");
-            self.draw_selected_frame();
             self.window.draw_hints(
                 &mut self.hint_boxes,
                 &self.config.theme,
                 self.key_prefix.len(),
                 self.screen_size,
             );
+            self.draw_selected_frame();
             log::log!(log::Level::Debug, "Finish drawing hints");
         } else {
-            let prefix_len = self.key_prefix.len();
+            self.update_hints();
+        }
+    }
 
-            unsafe {
-                let sublayers = self.window.sublayers().unwrap_or_default();
-                let offset = if self.selected.is_some() { 1 } else { 0 };
+    /// Show/Hide hint_boxes/colored_frames, update hint text
+    fn update_hints(&mut self) {
+        let prefix_len = self.key_prefix.len();
+        let sublayers = unsafe { self.window.sublayers().unwrap_or_default() };
 
-                // Safety check: if layers were cleared or out of sync, fall back to full redraw
-                if sublayers.count() < offset + 2 {
-                    self.draw_hints(false);
-                    return;
-                }
+        // Safety check: if layers were cleared or out of sync, do nothing
+        if sublayers.count() < 2 {
+            return;
+        }
 
-                let frames_root: Retained<CALayer> = sublayers.objectAtIndex(offset);
-                let boxes_root: Retained<CALayer> = sublayers.objectAtIndex(offset + 1);
+        let frames_root: Retained<CALayer> = sublayers.objectAtIndex(0);
+        let boxes_root: Retained<CALayer> = sublayers.objectAtIndex(1);
 
-                let frame_layers = frames_root.sublayers().unwrap_or_default();
-                let box_layers = boxes_root.sublayers().unwrap_or_default();
+        let frame_layers = unsafe { frames_root.sublayers().unwrap_or_default() };
+        let box_layers = unsafe { boxes_root.sublayers().unwrap_or_default() };
 
-                if frame_layers.count() < self.hint_boxes.len()
-                    || box_layers.count() < self.hint_boxes.len()
-                {
-                    self.draw_hints(false);
-                    return;
-                }
+        if frame_layers.count() < self.hint_boxes.len()
+            || box_layers.count() < self.hint_boxes.len()
+        {
+            return;
+        }
 
-                CATransaction::begin();
-                for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
-                    let frame_layer: Retained<CALayer> = frame_layers.objectAtIndex(i);
-                    let box_layer: Retained<CALayer> = box_layers.objectAtIndex(i);
+        CATransaction::begin();
+        for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
+            let frame_layer: Retained<CALayer> = frame_layers.objectAtIndex(i);
+            let box_layer: Retained<CALayer> = box_layers.objectAtIndex(i);
 
-                    let visible = hb.label.starts_with(&self.key_prefix)
-                        && !(self.multi_selection.is_on
-                            && self.multi_selection.one_side_idex.is_some_and(|idx| idx == hb.idx));
+            let visible = hb.label.starts_with(&self.key_prefix)
+                && !(self.multi_selection.is_on
+                    && self
+                        .multi_selection
+                        .one_side_idex
+                        .is_some_and(|idx| idx == hb.idx));
 
-                    frame_layer.setHidden(!visible);
-                    box_layer.setHidden(!visible);
-                    if visible && let Some(text_layer) = &hb.text_layer {
-                        <CALayer as GlyphlowDrawingLayer>::update_hint_text(
-                            text_layer,
-                            &hb.label,
-                            prefix_len,
-                            &self.config.theme,
-                        );
-                    }
-                }
-                CATransaction::commit();
+            frame_layer.setHidden(!visible);
+            box_layer.setHidden(!visible);
+            if visible && let Some(text_layer) = &hb.text_layer {
+                update_hint_text(text_layer, &hb.label, prefix_len, &self.config.theme);
             }
         }
+        CATransaction::commit();
     }
 
     fn menu_format_helper(
