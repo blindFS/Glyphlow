@@ -5,7 +5,7 @@ use crate::{
     ax_element::{ElementOfInterest, Target},
     config::RoleOfInterest,
     drawer::GlyphlowDrawingLayer,
-    util::{Frame, HintBox},
+    util::Frame,
 };
 use objc2::rc::Retained;
 use objc2_quartz_core::{CALayer, CATransaction};
@@ -26,13 +26,13 @@ impl AppEngine {
         }
     }
 
-    pub(super) fn draw_hints(&mut self, boxes: &mut [HintBox], incremental: bool) {
+    pub(super) fn draw_hints(&mut self, incremental: bool) {
         if !incremental {
             self.clear_drawing();
             log::log!(log::Level::Debug, "Start drawing hints");
             self.draw_selected_frame();
             self.window.draw_hints(
-                boxes,
+                &mut self.hint_boxes,
                 &self.config.theme,
                 self.key_prefix.len(),
                 self.screen_size,
@@ -46,7 +46,7 @@ impl AppEngine {
                 let sublayers = self.window.sublayers().unwrap_or_default();
                 let offset = if self.selected.is_some() { 1 } else { 0 };
 
-                for (i, hb) in boxes.iter().enumerate() {
+                for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
                     let container: Retained<CALayer> = sublayers.objectAtIndex(i + offset);
 
                     let visible = hb.label.starts_with(&self.key_prefix)
@@ -275,13 +275,13 @@ impl AppEngine {
     }
 
     pub(super) fn draw_hints_from_cache(&mut self) {
-        let (hint_width, mut new_boxes) = self.element_cache.hint_boxes(
+        let (hint_width, new_boxes) = self.element_cache.hint_boxes(
             &Frame::from_origion(self.screen_size),
             &self.config.theme,
             self.config.colored_frame_min_size as f64,
         );
         self.hint_width = hint_width;
-        self.draw_hints(&mut new_boxes, false);
         self.hint_boxes = new_boxes;
+        self.draw_hints(false);
     }
 }

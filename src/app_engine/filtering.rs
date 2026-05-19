@@ -12,36 +12,36 @@ use log::Level;
 
 impl AppEngine {
     fn ocr_res_filtering(&mut self) {
-        let (digits, mut ocr_hints) = {
-            let ocr_res = self
-                .ocr_cache
-                .as_ref()
-                .expect("Internal Error: OCR cache not set.");
-            let len = ocr_res.len();
-            let iter = ocr_res.iter().map(|(_, rect)| Frame::from_cgrect(rect));
-            hint_boxes_from_frames(
-                len,
-                iter,
-                &Frame::from_origion(self.screen_size),
-                &self.config.theme,
-                self.config.colored_frame_min_size as f64,
-            )
-        };
-        self.hint_width = digits;
+        if self.hint_boxes.is_empty() {
+            let (digits, ocr_hints) = {
+                let ocr_res = self
+                    .ocr_cache
+                    .as_ref()
+                    .expect("Internal Error: OCR cache not set.");
+                let len = ocr_res.len();
+                let iter = ocr_res.iter().map(|(_, rect)| Frame::from_cgrect(rect));
+                hint_boxes_from_frames(
+                    len,
+                    iter,
+                    &Frame::from_origion(self.screen_size),
+                    &self.config.theme,
+                    self.config.colored_frame_min_size as f64,
+                )
+            };
+            self.hint_width = digits;
+            self.hint_boxes = ocr_hints;
+            self.draw_hints(false);
+        } else {
+            self.draw_hints(true);
+        }
 
-        // Draw initial hints
-        self.draw_hints(&mut ocr_hints, false);
-
-        let filtered_idx = ocr_hints
+        let filtered_idx = self.hint_boxes
             .iter()
             .filter(|b| b.label.starts_with(&self.key_prefix))
             .map(|b| b.idx)
             .collect::<Vec<_>>();
 
-        // Apply incremental filter
-        self.draw_hints(&mut ocr_hints, true);
-
-        if self.key_prefix.len() == digits as usize && let Some(&hb_idx) = filtered_idx.first() {
+        if self.key_prefix.len() == self.hint_width as usize && let Some(&hb_idx) = filtered_idx.first() {
             if self.multi_selection.is_on {
                 if let Some((idx1, idx2)) = self.multi_selection.set_one_side(hb_idx) {
                     let choices: Vec<(String, Frame, bool)> = self
@@ -57,7 +57,7 @@ impl AppEngine {
                     self.update_selected_text_and_show_menu(text.clone());
                 } else {
                     self.key_prefix.clear();
-                    self.draw_hints(&mut ocr_hints, true);
+                    self.draw_hints(true);
                 }
             } else {
                 let (selected_text, cg_rect) = self
@@ -77,6 +77,7 @@ impl AppEngine {
 
     pub(super) async fn perform_ocr_on_frame(&mut self, frame: Frame) {
         self.clear_drawing();
+        self.hint_boxes.clear();
         // NOTE: for images with parts out of sight
         let frame = frame
             .intersect(&Frame::from_origion(self.screen_size))
@@ -154,9 +155,7 @@ impl AppEngine {
                         } else {
                             self.multi_selection.role = Some(role);
                             self.key_prefix.clear();
-                            let mut boxes = std::mem::take(&mut self.hint_boxes);
-                            self.draw_hints(&mut boxes, true);
-                            self.hint_boxes = boxes;
+                            self.draw_hints(true);
                         }
                     } else if context.is_some() {
                         self.selected = Some(eoi.clone());
@@ -218,9 +217,7 @@ impl AppEngine {
                 }
             }
         } else {
-            let mut boxes = std::mem::take(&mut self.hint_boxes);
-            self.draw_hints(&mut boxes, true);
-            self.hint_boxes = boxes;
+            self.draw_hints(true);
         }
     }
 
@@ -258,9 +255,7 @@ impl AppEngine {
             }
             FilterMode::Generic if self.multi_selection.is_on => {
                 self.multi_selection.clear_one_side();
-                let mut boxes = std::mem::take(&mut self.hint_boxes);
-                self.draw_hints(&mut boxes, true);
-                self.hint_boxes = boxes;
+                self.draw_hints(true);
             }
             FilterMode::OCR if self.multi_selection.is_on => {
                 self.multi_selection.clear_one_side();
