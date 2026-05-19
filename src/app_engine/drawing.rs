@@ -8,7 +8,7 @@ use crate::{
     util::{Frame, HintBox},
 };
 use objc2::rc::Retained;
-use objc2_quartz_core::CALayer;
+use objc2_quartz_core::{CALayer, CATransaction};
 
 static MAX_TEXT_DISPLAY_LEN: usize = 30;
 
@@ -26,31 +26,46 @@ impl AppEngine {
         }
     }
 
-    pub(super) fn draw_hints(&self, boxes: &[HintBox]) {
-        self.clear_drawing();
-        log::log!(log::Level::Debug, "Start drawing hints");
-        // NOTE: only select the other side of the same role,
-        // and excluding the already selected one.
-        if self.multi_selection.is_on
-            && let Some(one_idx) = self.multi_selection.one_side_idex
-        {
-            let iter = boxes.iter().filter(|hb| hb.idx != one_idx);
+    pub(super) fn draw_hints(&mut self, boxes: &mut [HintBox], incremental: bool) {
+        if !incremental {
+            self.clear_drawing();
+            log::log!(log::Level::Debug, "Start drawing hints");
+            self.draw_selected_frame();
             self.window.draw_hints(
-                iter,
+                boxes,
                 &self.config.theme,
                 self.key_prefix.len(),
                 self.screen_size,
             );
+            log::log!(log::Level::Debug, "Finish drawing hints");
         } else {
-            self.window.draw_hints(
-                boxes.iter(),
-                &self.config.theme,
-                self.key_prefix.len(),
-                self.screen_size,
-            );
-        };
-        self.draw_selected_frame();
-        log::log!(log::Level::Debug, "Finish drawing hints");
+            let prefix_len = self.key_prefix.len();
+
+            unsafe {
+                CATransaction::begin();
+                let sublayers = self.window.sublayers().unwrap_or_default();
+                let offset = if self.selected.is_some() { 1 } else { 0 };
+
+                for (i, hb) in boxes.iter().enumerate() {
+                    let container: Retained<CALayer> = sublayers.objectAtIndex(i + offset);
+
+                    let visible = hb.label.starts_with(&self.key_prefix)
+                        && !(self.multi_selection.is_on
+                            && self.multi_selection.one_side_idex.is_some_and(|idx| idx == hb.idx));
+
+                    container.setHidden(!visible);
+                    if visible && let Some(text_layer) = &hb.text_layer {
+                        <CALayer as GlyphlowDrawingLayer>::update_hint_text(
+                            text_layer,
+                            &hb.label,
+                            prefix_len,
+                            &self.config.theme,
+                        );
+                    }
+                }
+                CATransaction::commit();
+            }
+        }
     }
 
     fn menu_format_helper(
@@ -260,13 +275,13 @@ impl AppEngine {
     }
 
     pub(super) fn draw_hints_from_cache(&mut self) {
-        let (hint_width, new_boxes) = self.element_cache.hint_boxes(
+        let (hint_width, mut new_boxes) = self.element_cache.hint_boxes(
             &Frame::from_origion(self.screen_size),
             &self.config.theme,
             self.config.colored_frame_min_size as f64,
         );
         self.hint_width = hint_width;
+        self.draw_hints(&mut new_boxes, false);
         self.hint_boxes = new_boxes;
-        self.draw_hints(&self.hint_boxes);
     }
 }

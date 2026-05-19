@@ -56,12 +56,24 @@ pub fn create_overlay_window(mtm: MainThreadMarker, screen_size: CGSize) -> Reta
 pub trait GlyphlowDrawingLayer {
     fn from_window(window: &Retained<NSWindow>) -> Option<Retained<CALayer>>;
     fn clear(&self);
-    fn draw_hints<'a>(
+    fn draw_hints(
         &self,
-        hints: impl Iterator<Item = &'a HintBox>,
+        hints: &mut [HintBox],
         theme: &GlyphlowTheme,
         key_prefix_len: usize,
         screen_size: CGSize,
+    );
+    fn update_hint_text(
+        text_layer: &CATextLayer,
+        label: &str,
+        key_prefix_len: usize,
+        theme: &GlyphlowTheme,
+    );
+    fn update_hint_text_with_attr(
+        attr_string: &Retained<NSMutableAttributedString>,
+        label: &str,
+        key_prefix_len: usize,
+        theme: &GlyphlowTheme,
     );
     fn draw_menu(
         &self,
@@ -99,9 +111,9 @@ impl GlyphlowDrawingLayer for CALayer {
         Some(root_layer)
     }
 
-    fn draw_hints<'a>(
+    fn draw_hints(
         &self,
-        hints: impl Iterator<Item = &'a HintBox>,
+        hints: &mut [HintBox],
         theme: &GlyphlowTheme,
         key_prefix_len: usize,
         screen_size: CGSize,
@@ -113,45 +125,39 @@ impl GlyphlowDrawingLayer for CALayer {
 
         // Colors parsed from hex strings
         let bg_color = &theme.hint_bg_color;
-        let hl_color = &theme.hint_hl_color;
-        let fg_color = &theme.hint_fg_color;
-        let font = &theme.hint_font;
+        let _font = &theme.hint_font;
 
         for hint in hints {
             let bg_color = hint.color.as_ref().unwrap_or(bg_color);
 
+            let container = CALayer::new();
+            container.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), screen_size));
+
             if let Some(frame) = &hint.frame {
-                self.draw_frame_box(frame, bg_color);
+                let frame_layer = CALayer::new();
+                let origin = frame.top_left;
+                let origin = NSPoint::new(origin.x, origin.y);
+                let (w, h) = frame.size();
+                frame_layer.setFrame(NSRect::new(origin, NSSize::new(w, h)));
+                frame_layer.setBorderWidth(2.0);
+                frame_layer.setBorderColor(Some(bg_color));
+                frame_layer.setZPosition(-1.0);
+                container.addSublayer(&frame_layer);
             }
-            // Create NSMutableAttributedString first to estimate the size
-            // Highlight prefixed keys
+
+            // Create NSMutableAttributedString
             let label_string = NSString::from_str(&hint.label);
             let attr_string = NSMutableAttributedString::initWithString(
                 NSMutableAttributedString::alloc(),
                 &label_string,
             );
-            unsafe {
-                attr_string.addAttribute_value_range(
-                    NSForegroundColorAttributeName,
-                    hl_color.as_ref(),
-                    NSRange::new(0, key_prefix_len),
-                );
-                attr_string.addAttribute_value_range(
-                    NSForegroundColorAttributeName,
-                    fg_color.as_ref(),
-                    NSRange::new(key_prefix_len, hint.label.len() - key_prefix_len),
-                );
-                attr_string.addAttribute_value_range(
-                    NSFontAttributeName,
-                    font,
-                    NSRange::new(0, hint.label.len()),
-                );
-            }
+
+            Self::update_hint_text_with_attr(&attr_string, &hint.label, key_prefix_len, theme);
 
             // Background Box
             let (size, _) =
                 estimate_frame_for_text(&attr_string, (screen_size.width, screen_size.height));
-            let (x_offset, y_offset, _, box_layer) = text_box_with_attributed_string(
+            let (x_offset, y_offset, text_layer, box_layer) = text_box_with_attributed_string(
                 attr_string,
                 true,
                 bg_color,
@@ -160,6 +166,8 @@ impl GlyphlowDrawingLayer for CALayer {
                 screen_size,
                 size,
             );
+
+            hint.text_layer = Some(text_layer);
 
             // Create the triangle pointing to the center
             let box_size = box_layer.bounds().size;
@@ -189,7 +197,54 @@ impl GlyphlowDrawingLayer for CALayer {
             ));
 
             box_layer.insertSublayer_atIndex(&tri_layer, 0);
-            self.addSublayer(&box_layer);
+            container.addSublayer(&box_layer);
+            self.addSublayer(&container);
+        }
+    }
+
+    fn update_hint_text(
+        text_layer: &CATextLayer,
+        label: &str,
+        key_prefix_len: usize,
+        theme: &GlyphlowTheme,
+    ) {
+        let label_string = NSString::from_str(label);
+        let attr_string = NSMutableAttributedString::initWithString(
+            NSMutableAttributedString::alloc(),
+            &label_string,
+        );
+        Self::update_hint_text_with_attr(&attr_string, label, key_prefix_len, theme);
+        unsafe {
+            text_layer.setString(Some(&attr_string));
+        }
+    }
+
+    fn update_hint_text_with_attr(
+        attr_string: &Retained<NSMutableAttributedString>,
+        label: &str,
+        key_prefix_len: usize,
+        theme: &GlyphlowTheme,
+    ) {
+        let hl_color = &theme.hint_hl_color;
+        let fg_color = &theme.hint_fg_color;
+        let font = &theme.hint_font;
+
+        unsafe {
+            attr_string.addAttribute_value_range(
+                NSForegroundColorAttributeName,
+                hl_color.as_ref(),
+                NSRange::new(0, key_prefix_len),
+            );
+            attr_string.addAttribute_value_range(
+                NSForegroundColorAttributeName,
+                fg_color.as_ref(),
+                NSRange::new(key_prefix_len, label.len() - key_prefix_len),
+            );
+            attr_string.addAttribute_value_range(
+                NSFontAttributeName,
+                font,
+                NSRange::new(0, label.len()),
+            );
         }
     }
 

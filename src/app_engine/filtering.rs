@@ -12,33 +12,42 @@ use log::Level;
 
 impl AppEngine {
     fn ocr_res_filtering(&mut self) {
-        let ocr_res = self
-            .ocr_cache
-            .as_ref()
-            .expect("Internal Error: OCR cache not set.");
-        let len = ocr_res.len();
-        let iter = ocr_res.iter().map(|(_, rect)| Frame::from_cgrect(rect));
-        let (digits, ocr_hints) = hint_boxes_from_frames(
-            len,
-            iter,
-            &Frame::from_origion(self.screen_size),
-            &self.config.theme,
-            self.config.colored_frame_min_size as f64,
-        );
+        let (digits, mut ocr_hints) = {
+            let ocr_res = self
+                .ocr_cache
+                .as_ref()
+                .expect("Internal Error: OCR cache not set.");
+            let len = ocr_res.len();
+            let iter = ocr_res.iter().map(|(_, rect)| Frame::from_cgrect(rect));
+            hint_boxes_from_frames(
+                len,
+                iter,
+                &Frame::from_origion(self.screen_size),
+                &self.config.theme,
+                self.config.colored_frame_min_size as f64,
+            )
+        };
         self.hint_width = digits;
 
-        let filtered = ocr_hints
+        // Draw initial hints
+        self.draw_hints(&mut ocr_hints, false);
+
+        let filtered_idx = ocr_hints
             .iter()
             .filter(|b| b.label.starts_with(&self.key_prefix))
-            .cloned()
+            .map(|b| b.idx)
             .collect::<Vec<_>>();
 
-        if self.key_prefix.len() == digits as usize
-            && let Some(hb) = filtered.first()
-        {
+        // Apply incremental filter
+        self.draw_hints(&mut ocr_hints, true);
+
+        if self.key_prefix.len() == digits as usize && let Some(&hb_idx) = filtered_idx.first() {
             if self.multi_selection.is_on {
-                if let Some((idx1, idx2)) = self.multi_selection.set_one_side(hb.idx) {
-                    let choices: Vec<(String, Frame, bool)> = ocr_res
+                if let Some((idx1, idx2)) = self.multi_selection.set_one_side(hb_idx) {
+                    let choices: Vec<(String, Frame, bool)> = self
+                        .ocr_cache
+                        .as_ref()
+                        .unwrap()
                         .iter()
                         .map(|(s, rect)| (s.clone(), Frame::from_cgrect(rect), true))
                         .collect::<Vec<_>>();
@@ -48,18 +57,21 @@ impl AppEngine {
                     self.update_selected_text_and_show_menu(text.clone());
                 } else {
                     self.key_prefix.clear();
-                    self.draw_hints(&ocr_hints);
+                    self.draw_hints(&mut ocr_hints, true);
                 }
             } else {
-                let (selected_text, cg_rect) = ocr_res
-                    .get(hb.idx)
+                let (selected_text, cg_rect) = self
+                    .ocr_cache
+                    .as_ref()
+                    .unwrap()
+                    .get(hb_idx)
                     .expect("Internal Error: wrong ocr hint indexing.");
+                let selected_text = selected_text.clone();
+                let frame = Frame::from_cgrect(cg_rect);
                 // Context initialized as None, but updated right after
-                self.selected = Some(ElementOfInterest::pseudo(None, Frame::from_cgrect(cg_rect)));
-                self.update_selected_text_and_show_menu(selected_text.clone());
+                self.selected = Some(ElementOfInterest::pseudo(None, frame));
+                self.update_selected_text_and_show_menu(selected_text);
             }
-        } else {
-            self.draw_hints(&filtered);
         }
     }
 
@@ -142,7 +154,9 @@ impl AppEngine {
                         } else {
                             self.multi_selection.role = Some(role);
                             self.key_prefix.clear();
-                            self.draw_hints(&self.hint_boxes);
+                            let mut boxes = std::mem::take(&mut self.hint_boxes);
+                            self.draw_hints(&mut boxes, true);
+                            self.hint_boxes = boxes;
                         }
                     } else if context.is_some() {
                         self.selected = Some(eoi.clone());
@@ -204,7 +218,9 @@ impl AppEngine {
                 }
             }
         } else {
-            self.draw_hints(&filtered_boxes);
+            let mut boxes = std::mem::take(&mut self.hint_boxes);
+            self.draw_hints(&mut boxes, true);
+            self.hint_boxes = boxes;
         }
     }
 
@@ -242,7 +258,9 @@ impl AppEngine {
             }
             FilterMode::Generic if self.multi_selection.is_on => {
                 self.multi_selection.clear_one_side();
-                self.filter_by_key().await;
+                let mut boxes = std::mem::take(&mut self.hint_boxes);
+                self.draw_hints(&mut boxes, true);
+                self.hint_boxes = boxes;
             }
             FilterMode::OCR if self.multi_selection.is_on => {
                 self.multi_selection.clear_one_side();
