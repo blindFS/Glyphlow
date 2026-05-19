@@ -42,9 +42,14 @@ impl AppEngine {
             let prefix_len = self.key_prefix.len();
 
             unsafe {
-                CATransaction::begin();
                 let sublayers = self.window.sublayers().unwrap_or_default();
                 let offset = if self.selected.is_some() { 1 } else { 0 };
+
+                // Safety check: if layers were cleared or out of sync, fall back to full redraw
+                if sublayers.count() < offset + 2 {
+                    self.draw_hints(false);
+                    return;
+                }
 
                 let frames_root: Retained<CALayer> = sublayers.objectAtIndex(offset);
                 let boxes_root: Retained<CALayer> = sublayers.objectAtIndex(offset + 1);
@@ -52,6 +57,14 @@ impl AppEngine {
                 let frame_layers = frames_root.sublayers().unwrap_or_default();
                 let box_layers = boxes_root.sublayers().unwrap_or_default();
 
+                if frame_layers.count() < self.hint_boxes.len()
+                    || box_layers.count() < self.hint_boxes.len()
+                {
+                    self.draw_hints(false);
+                    return;
+                }
+
+                CATransaction::begin();
                 for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
                     let frame_layer: Retained<CALayer> = frame_layers.objectAtIndex(i);
                     let box_layer: Retained<CALayer> = box_layers.objectAtIndex(i);
