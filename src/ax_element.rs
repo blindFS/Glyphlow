@@ -121,12 +121,8 @@ impl ElementBasicAttributes {
             return false;
         }
         let role = self.role.to_lowercase();
-        for r in target.role.to_lowercase().split('|') {
-            if role.contains(r) {
-                return true;
-            }
-        }
-        false
+        let target_role = target.role.to_lowercase();
+        target_role.split('|').any(|r| role.contains(r))
     }
 }
 
@@ -753,19 +749,14 @@ pub fn traverse_elements(
         // NOTE: first found in Discord app
         // hopefully won't cause too many false positives
         kAXRowRole => {
-            if *target == Target::Clickable {
-                let mut has_cell_child = false;
-                if let Ok(children) = element.children() {
-                    for child in &children {
-                        if child.role().is_ok_and(|r| r == kAXCellRole) {
-                            has_cell_child = true;
-                            break;
-                        }
-                    }
-                }
-                if !has_cell_child {
-                    cache.add(element, None, RoleOfInterest::Cell, ele_fp.frame);
-                }
+            if *target == Target::Clickable
+                && !element.children().is_ok_and(|children| {
+                    children
+                        .iter()
+                        .any(|c| c.role().is_ok_and(|r| r == kAXCellRole))
+                })
+            {
+                cache.add(element, None, RoleOfInterest::Cell, ele_fp.frame);
             }
         }
         kAXImageRole => match target {

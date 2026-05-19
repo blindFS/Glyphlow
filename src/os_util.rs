@@ -20,12 +20,11 @@ const ELECTRON_FRAMEWORKS: [&str; 6] = [
 fn check_is_electron_app(app: &Retained<NSRunningApplication>) -> Option<bool> {
     let boundle_path = PathBuf::from(app.bundleURL()?.path()?.to_string());
     let framwork_path = boundle_path.join("Contents").join("Frameworks");
-    for framework in ELECTRON_FRAMEWORKS {
-        if framwork_path.join(framework).exists() {
-            return Some(true);
-        }
-    }
-    Some(false)
+    Some(
+        ELECTRON_FRAMEWORKS
+            .iter()
+            .any(|framework| framwork_path.join(framework).exists()),
+    )
 }
 
 const APPLE_ALARM_BUNDLE_IDS: [&str; 3] = [
@@ -35,14 +34,11 @@ const APPLE_ALARM_BUNDLE_IDS: [&str; 3] = [
 ];
 
 pub fn get_system_alarm_window() -> Option<AXUIElement> {
-    for bundle_id in APPLE_ALARM_BUNDLE_IDS {
-        if let Ok(app) = AXUIElement::application_with_bundle(bundle_id)
-            && let Ok(window) = app.focused_window()
-        {
-            return Some(window);
-        }
-    }
-    None
+    APPLE_ALARM_BUNDLE_IDS.iter().find_map(|bundle_id| {
+        AXUIElement::application_with_bundle(bundle_id)
+            .and_then(|app| app.focused_window())
+            .ok()
+    })
 }
 
 pub fn get_focused() -> Option<(i32, AXUIElement, bool)> {
