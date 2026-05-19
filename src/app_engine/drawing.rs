@@ -46,14 +46,22 @@ impl AppEngine {
                 let sublayers = self.window.sublayers().unwrap_or_default();
                 let offset = if self.selected.is_some() { 1 } else { 0 };
 
+                let frames_root: Retained<CALayer> = sublayers.objectAtIndex(offset);
+                let boxes_root: Retained<CALayer> = sublayers.objectAtIndex(offset + 1);
+
+                let frame_layers = frames_root.sublayers().unwrap_or_default();
+                let box_layers = boxes_root.sublayers().unwrap_or_default();
+
                 for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
-                    let container: Retained<CALayer> = sublayers.objectAtIndex(i + offset);
+                    let frame_layer: Retained<CALayer> = frame_layers.objectAtIndex(i);
+                    let box_layer: Retained<CALayer> = box_layers.objectAtIndex(i);
 
                     let visible = hb.label.starts_with(&self.key_prefix)
                         && !(self.multi_selection.is_on
                             && self.multi_selection.one_side_idex.is_some_and(|idx| idx == hb.idx));
 
-                    container.setHidden(!visible);
+                    frame_layer.setHidden(!visible);
+                    box_layer.setHidden(!visible);
                     if visible && let Some(text_layer) = &hb.text_layer {
                         <CALayer as GlyphlowDrawingLayer>::update_hint_text(
                             text_layer,

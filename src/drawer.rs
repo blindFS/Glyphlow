@@ -127,14 +127,19 @@ impl GlyphlowDrawingLayer for CALayer {
         let bg_color = &theme.hint_bg_color;
         let _font = &theme.hint_font;
 
+        let frames_root = CALayer::new();
+        frames_root.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), screen_size));
+        frames_root.setZPosition(-1.0);
+
+        let boxes_root = CALayer::new();
+        boxes_root.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), screen_size));
+        boxes_root.setZPosition(0.0);
+
         for hint in hints {
             let bg_color = hint.color.as_ref().unwrap_or(bg_color);
 
-            let container = CALayer::new();
-            container.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), screen_size));
-
+            let frame_layer = CALayer::new();
             if let Some(frame) = &hint.frame {
-                let frame_layer = CALayer::new();
                 let origin = frame.top_left;
                 let origin = NSPoint::new(origin.x, origin.y);
                 let (w, h) = frame.size();
@@ -142,8 +147,8 @@ impl GlyphlowDrawingLayer for CALayer {
                 frame_layer.setBorderWidth(2.0);
                 frame_layer.setBorderColor(Some(bg_color));
                 frame_layer.setZPosition(-1.0);
-                container.addSublayer(&frame_layer);
             }
+            frames_root.addSublayer(&frame_layer);
 
             // Create NSMutableAttributedString
             let label_string = NSString::from_str(&hint.label);
@@ -197,9 +202,11 @@ impl GlyphlowDrawingLayer for CALayer {
             ));
 
             box_layer.insertSublayer_atIndex(&tri_layer, 0);
-            container.addSublayer(&box_layer);
-            self.addSublayer(&container);
+            boxes_root.addSublayer(&box_layer);
         }
+
+        self.addSublayer(&frames_root);
+        self.addSublayer(&boxes_root);
     }
 
     fn update_hint_text(
