@@ -49,6 +49,8 @@ pub fn estimate_frame_for_text(
     (OCGSize::new(width, height), range.length)
 }
 
+use objc2_quartz_core::CATextLayer;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct HintBox {
     pub label: String,
@@ -59,6 +61,7 @@ pub struct HintBox {
     pub delta: (f64, f64),
     pub frame: Option<Frame>,
     pub color: Option<CFRetained<CGColor>>,
+    pub text_layer: Option<Retained<CATextLayer>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Copy)]
@@ -318,6 +321,7 @@ pub fn hint_boxes_from_frames(
                 idx,
                 frame,
                 color,
+                text_layer: None,
             }
         })
         .collect::<Vec<_>>();
@@ -771,6 +775,7 @@ mod collision_tests {
             delta: (0.0, 0.0),
             frame: None,
             color: None,
+            text_layer: None,
         }
     }
 

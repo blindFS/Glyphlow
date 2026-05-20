@@ -4,11 +4,11 @@ use crate::{
     TEXT_ACTION_MENU_ITEMS,
     ax_element::{ElementOfInterest, Target},
     config::RoleOfInterest,
-    drawer::GlyphlowDrawingLayer,
-    util::{Frame, HintBox},
+    drawer::{GlyphlowDrawingLayer, update_hint_text},
+    util::Frame,
 };
 use objc2::rc::Retained;
-use objc2_quartz_core::CALayer;
+use objc2_quartz_core::{CALayer, CATransaction};
 
 static MAX_TEXT_DISPLAY_LEN: usize = 30;
 
@@ -26,31 +26,69 @@ impl AppEngine {
         }
     }
 
-    pub(super) fn draw_hints(&self, boxes: &[HintBox]) {
-        self.clear_drawing();
-        log::log!(log::Level::Debug, "Start drawing hints");
-        // NOTE: only select the other side of the same role,
-        // and excluding the already selected one.
-        if self.multi_selection.is_on
-            && let Some(one_idx) = self.multi_selection.one_side_idex
-        {
-            let iter = boxes.iter().filter(|hb| hb.idx != one_idx);
+    /// Draw/Update hint boxes
+    pub(super) fn draw_hints(&mut self, incremental: bool) {
+        log::log!(
+            log::Level::Debug,
+            "Start drawing hints, incremental: {incremental}"
+        );
+        if !incremental {
+            self.clear_drawing();
             self.window.draw_hints(
-                iter,
+                &mut self.hint_boxes,
                 &self.config.theme,
                 self.key_prefix.len(),
                 self.screen_size,
             );
+            self.draw_selected_frame();
         } else {
-            self.window.draw_hints(
-                boxes.iter(),
-                &self.config.theme,
-                self.key_prefix.len(),
-                self.screen_size,
-            );
-        };
-        self.draw_selected_frame();
+            self.update_hints();
+        }
         log::log!(log::Level::Debug, "Finish drawing hints");
+    }
+
+    /// Show/Hide hint_boxes/colored_frames, update hint text
+    fn update_hints(&mut self) {
+        let prefix_len = self.key_prefix.len();
+        let sublayers = unsafe { self.window.sublayers().unwrap_or_default() };
+
+        // NOTE: Safety check: if layers were cleared or out of sync, do nothing.
+        // Happens when an immediate filtering key pressed right after the activation signal.
+        if sublayers.count() < 2 {
+            return;
+        }
+
+        let frames_root: Retained<CALayer> = sublayers.objectAtIndex(0);
+        let boxes_root: Retained<CALayer> = sublayers.objectAtIndex(1);
+
+        let frame_layers = unsafe { frames_root.sublayers().unwrap_or_default() };
+        let box_layers = unsafe { boxes_root.sublayers().unwrap_or_default() };
+
+        if frame_layers.count() < self.hint_boxes.len()
+            || box_layers.count() < self.hint_boxes.len()
+        {
+            return;
+        }
+
+        CATransaction::begin();
+        for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
+            let frame_layer: Retained<CALayer> = frame_layers.objectAtIndex(i);
+            let box_layer: Retained<CALayer> = box_layers.objectAtIndex(i);
+
+            let visible = hb.label.starts_with(&self.key_prefix)
+                && !(self.multi_selection.is_on
+                    && self
+                        .multi_selection
+                        .one_side_idex
+                        .is_some_and(|idx| idx == hb.idx));
+
+            frame_layer.setHidden(!visible);
+            box_layer.setHidden(!visible);
+            if visible && let Some(text_layer) = &hb.text_layer {
+                update_hint_text(text_layer, &hb.label, prefix_len, &self.config.theme);
+            }
+        }
+        CATransaction::commit();
     }
 
     fn menu_format_helper(
@@ -267,6 +305,6 @@ impl AppEngine {
         );
         self.hint_width = hint_width;
         self.hint_boxes = new_boxes;
-        self.draw_hints(&self.hint_boxes);
+        self.draw_hints(false);
     }
 }
