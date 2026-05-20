@@ -167,27 +167,7 @@ impl AppEngine {
                 }
                 Target::ChildElement => {
                     self.selected = Some(eoi.clone());
-                    self.ui_element_traverse_on_activation(Target::ChildElement);
-                    // Quick follow if only 1 element remaining
-                    // NOTE: use count to avoid circular pointer
-                    let mut count = 0;
-                    while self.element_cache.cache.len() == 1 && count < 10 {
-                        count += 1;
-                        self.selected = Some(self.element_cache.cache[0].clone());
-                        self.ui_element_traverse_on_activation(Target::ChildElement);
-                    }
-
-                    // Actions for current selected element
-                    if self.element_cache.cache.is_empty() {
-                        let role = self
-                            .selected
-                            .as_ref()
-                            .map(|eoi| eoi.role())
-                            .unwrap_or_default();
-                        self.draw_element_menu("", role, true);
-                    } else {
-                        self.draw_hints_from_cache();
-                    }
+                    self.activate(Target::ChildElement);
                 }
                 Target::Scrollable => {
                     self.selected = Some(eoi.clone());
@@ -231,7 +211,7 @@ impl AppEngine {
         }
     }
 
-    async fn go_back_in_filtering(&mut self, mode: FilterMode) {
+    fn go_back_in_filtering(&mut self, mode: FilterMode) {
         match mode {
             // Go back 1 level in element explorer
             FilterMode::Generic if self.target == Target::ChildElement => {
@@ -271,7 +251,7 @@ impl AppEngine {
     pub(super) async fn perform_filtering(&mut self, key_char: char, mode: FilterMode) {
         if key_char == '-' {
             if self.key_prefix.is_empty() {
-                self.go_back_in_filtering(mode).await;
+                self.go_back_in_filtering(mode);
                 return;
             } else {
                 self.key_prefix.pop();

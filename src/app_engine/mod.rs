@@ -91,6 +91,7 @@ pub struct AppEngine {
     pub(super) multi_selection: MultiSeletionState,
     /// Something to finish after filtering
     pub(super) pending_workflow_actions: VecDeque<WorkFlowAction>,
+    pub(super) incremental_drawing_roots: Option<(Retained<CALayer>, Retained<CALayer>)>,
 }
 
 impl AppEngine {
@@ -130,6 +131,7 @@ impl AppEngine {
             last_window_frame: Frame::from_origion(screen_size),
             multi_selection: MultiSeletionState::default(),
             pending_workflow_actions: VecDeque::new(),
+            incremental_drawing_roots: None,
         }
     }
 

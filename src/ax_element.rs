@@ -21,7 +21,7 @@ use core_foundation::{
     string::CFString,
 };
 use objc2_core_foundation::{CGPoint, CGSize};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::mpsc::Sender};
 
 const BASIC_ATTRIBUTES: [&str; 4] = [
     kAXRoleAttribute,
@@ -29,6 +29,12 @@ const BASIC_ATTRIBUTES: [&str; 4] = [
     kAXSizeAttribute,
     kAXHiddenAttribute,
 ];
+
+pub enum ElementSignal {
+    // Traversal
+    ElementFound(Option<ElementOfInterest>),
+    TraversalFinished(Target),
+}
 
 struct ElementBasicAttributes {
     pub frame: Option<Frame>,
@@ -126,16 +132,20 @@ impl ElementBasicAttributes {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThreadSafeElement(pub AXUIElement);
+unsafe impl Send for ThreadSafeElement {}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum ElementKind {
     Standard {
-        element: AXUIElement,
+        element: ThreadSafeElement,
         role: RoleOfInterest,
     },
     Pseudo,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ElementOfInterest {
     pub kind: ElementKind,
     pub context: Option<String>,
@@ -150,10 +160,22 @@ impl ElementOfInterest {
         frame: Frame,
     ) -> Self {
         Self {
-            kind: ElementKind::Standard { element, role },
+            kind: ElementKind::Standard {
+                element: ThreadSafeElement(element),
+                role,
+            },
             context,
             frame,
         }
+    }
+
+    pub fn try_new(
+        element: AXUIElement,
+        context: Option<String>,
+        role: RoleOfInterest,
+        frame: Option<Frame>,
+    ) -> Option<Self> {
+        frame.map(|f| Self::new(element, context, role, f))
     }
 
     pub fn pseudo(context: Option<String>, frame: Frame) -> Self {
@@ -173,7 +195,7 @@ impl ElementOfInterest {
 
     pub fn element(&self) -> Option<&AXUIElement> {
         match &self.kind {
-            ElementKind::Standard { element, .. } => Some(element),
+            ElementKind::Standard { element, .. } => Some(&element.0),
             ElementKind::Pseudo => None,
         }
     }
@@ -210,43 +232,31 @@ impl ElementCache {
         self.seen_center.clear();
     }
 
-    pub fn force_add(
-        &mut self,
-        element: &AXUIElement,
-        context: Option<String>,
-        role: RoleOfInterest,
-        frame: Option<Frame>,
-    ) {
-        // Has to be concrete leaf elements with frames
-        let Some(frame) = frame else {
-            return;
-        };
-
+    pub fn force_add(&mut self, eoi: ElementOfInterest) {
+        let ElementOfInterest { frame, .. } = &eoi;
         let (x, y) = frame.center();
         // f64 to u64 for hashing
         let center = (x.to_bits(), y.to_bits());
 
-        let new_ele = ElementOfInterest::new(element.clone(), context, role, frame);
         self.seen_center.insert(center, self.cache.len());
-        self.cache.push(new_ele);
+        self.cache.push(eoi);
     }
 
-    pub fn add(
-        &mut self,
-        element: &AXUIElement,
-        context: Option<String>,
-        role: RoleOfInterest,
-        frame: Option<Frame>,
-    ) {
-        // Has to be concrete leaf elements with frames
-        let Some(frame) = frame else {
+    pub fn add(&mut self, eoi: ElementOfInterest) {
+        let ElementOfInterest {
+            kind: ElementKind::Standard { element, role },
+            context,
+            frame,
+        } = &eoi
+        else {
             return;
         };
 
         // NOTE: Use parent frames for scroll bars,
         // replaces the existing AXScrollArea in later center point check
-        let frame = if role == RoleOfInterest::ScrollBar
+        let frame = if *role == RoleOfInterest::ScrollBar
             && let Some(parent_frame) = element
+                .0
                 .parent()
                 .ok()
                 .and_then(|p| ElementBasicAttributes::from(&p))
@@ -254,7 +264,7 @@ impl ElementCache {
         {
             parent_frame
         } else {
-            frame
+            *frame
         };
 
         let (w, h) = frame.size();
@@ -299,12 +309,13 @@ impl ElementCache {
         let center = (x.to_bits(), y.to_bits());
 
         // NOTE: de-duplication for DOM elements
-        let new_ele = ElementOfInterest::new(element.clone(), context, role, frame);
         if let Some(idx) = self.seen_center.get(&center) {
-            self.cache[*idx] = new_ele;
+            self.cache[*idx] = eoi;
         } else {
             self.seen_center.insert(center, self.cache.len());
-            self.cache.push(new_ele);
+            let mut eoi = eoi;
+            eoi.frame = frame;
+            self.cache.push(eoi);
         }
     }
 
@@ -600,18 +611,19 @@ pub enum Target {
 
 const MAX_DEPTH: u8 = 200;
 
-pub fn traverse_elements(
-    element: &AXUIElement,
+fn traverse_elements(
+    ts_elem: ThreadSafeElement,
     parent_frame: &Frame,
     window_frame: &Frame,
-    cache: &mut ElementCache,
     target: &Target,
     vis_level: VisibilityCheckingLevel,
+    result_tx: Sender<ElementSignal>,
     depth: u8,
 ) {
     if depth > MAX_DEPTH {
         return;
     }
+    let element = &ts_elem.0;
     let Some(ele_fp) = ElementBasicAttributes::from(element) else {
         return;
     };
@@ -657,12 +669,12 @@ pub fn traverse_elements(
                     })
                 {
                     traverse_elements(
-                        &child,
+                        ThreadSafeElement(child.to_owned()),
                         &child_fp.frame.unwrap_or(*parent_frame),
                         window_frame,
-                        cache,
                         target,
                         vis_level,
+                        result_tx.clone(),
                         depth + 1,
                     );
                 } else {
@@ -673,12 +685,13 @@ pub fn traverse_elements(
                         }
                         _ => None,
                     };
-                    cache.force_add(
-                        &child,
-                        context,
-                        roi,
-                        child_fp.frame.and_then(|f| f.intersect(window_frame)),
-                    );
+                    let _ =
+                        result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                            child.to_owned(),
+                            context,
+                            roi,
+                            child_fp.frame.and_then(|f| f.intersect(window_frame)),
+                        )));
                 }
             }
         }
@@ -717,7 +730,12 @@ pub fn traverse_elements(
         && ele_fp.match_custom_target(ct)
         && element.match_custom_target(ct)
     {
-        cache.add(element, None, RoleOfInterest::CustomTarget, ele_fp.frame);
+        let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+            element.clone(),
+            None,
+            RoleOfInterest::CustomTarget,
+            ele_fp.frame,
+        )));
     };
 
     let mut window_frame = *window_frame;
@@ -727,7 +745,12 @@ pub fn traverse_elements(
         // TODO: DOM Class List based image searching for icon button
         kAXPopUpButtonRole | kAXButtonRole | "AXRadioButton" => match target {
             Target::Clickable => {
-                cache.add(element, None, RoleOfInterest::Button, ele_fp.frame);
+                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                    element.clone(),
+                    None,
+                    RoleOfInterest::Button,
+                    ele_fp.frame,
+                )));
             }
             Target::Text => {
                 if let Ok(ctx) = element
@@ -736,14 +759,25 @@ pub fn traverse_elements(
                     .or_else(|_| element.description())
                     .map(|cf| cf.to_string())
                 {
-                    cache.add(element, Some(ctx), RoleOfInterest::Button, ele_fp.frame);
+                    let _ =
+                        result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                            element.clone(),
+                            Some(ctx),
+                            RoleOfInterest::Button,
+                            ele_fp.frame,
+                        )));
                 }
             }
             _ => (),
         },
         kAXCellRole => {
             if *target == Target::Clickable {
-                cache.add(element, None, RoleOfInterest::Cell, ele_fp.frame);
+                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                    element.clone(),
+                    None,
+                    RoleOfInterest::Cell,
+                    ele_fp.frame,
+                )));
             }
         }
         // NOTE: first found in Discord app
@@ -756,30 +790,51 @@ pub fn traverse_elements(
                         .any(|c| c.role().is_ok_and(|r| r == kAXCellRole))
                 })
             {
-                cache.add(element, None, RoleOfInterest::Cell, ele_fp.frame);
+                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                    element.clone(),
+                    None,
+                    RoleOfInterest::Cell,
+                    ele_fp.frame,
+                )));
             }
         }
         kAXImageRole => match target {
             Target::Image | Target::ImageOCR => {
-                cache.add(element, None, RoleOfInterest::Image, ele_fp.frame);
+                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                    element.clone(),
+                    None,
+                    RoleOfInterest::Image,
+                    ele_fp.frame,
+                )));
             }
             Target::Clickable if element.is_clickable() => {
-                cache.add(element, None, RoleOfInterest::Button, ele_fp.frame);
+                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                    element.clone(),
+                    None,
+                    RoleOfInterest::Button,
+                    ele_fp.frame,
+                )));
             }
             _ => (),
         },
         kAXStaticTextRole => match target {
             Target::Clickable if element.is_clickable() => {
-                cache.add(element, None, RoleOfInterest::Button, ele_fp.frame);
+                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                    element.clone(),
+                    None,
+                    RoleOfInterest::Button,
+                    ele_fp.frame,
+                )));
             }
             Target::Text => {
                 if let Some(value) = element.get_string_value_or_description() {
-                    cache.add(
-                        element,
-                        Some(value),
-                        RoleOfInterest::StaticText,
-                        ele_fp.frame,
-                    );
+                    let _ =
+                        result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                            element.clone(),
+                            Some(value),
+                            RoleOfInterest::StaticText,
+                            ele_fp.frame,
+                        )));
                 }
             }
             _ => (),
@@ -807,43 +862,55 @@ pub fn traverse_elements(
         }
         kAXComboBoxRole | kAXTextFieldRole | kAXTextAreaRole => match target {
             Target::Editable => {
-                cache.add(
-                    element,
+                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                    element.clone(),
                     element.get_string_value_or_description(),
                     RoleOfInterest::TextField,
                     ele_fp.frame,
-                );
+                )));
             }
             Target::Text => {
                 if let Some(value) = element.get_string_value_or_description()
                     && !value.is_empty()
                 {
-                    cache.add(
-                        element,
-                        Some(value),
-                        RoleOfInterest::TextField,
-                        ele_fp.frame,
-                    );
+                    let _ =
+                        result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                            element.clone(),
+                            Some(value),
+                            RoleOfInterest::TextField,
+                            ele_fp.frame,
+                        )));
                 }
             }
             // NOTE: Even if not clickable, still could be focused on click
             Target::Clickable => {
-                cache.add(element, None, RoleOfInterest::TextField, ele_fp.frame);
+                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                    element.clone(),
+                    None,
+                    RoleOfInterest::TextField,
+                    ele_fp.frame,
+                )));
             }
             _ => (),
         },
         kAXCheckBoxRole => match target {
             Target::Clickable => {
-                cache.add(element, None, RoleOfInterest::CheckBox, ele_fp.frame);
+                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                    element.clone(),
+                    None,
+                    RoleOfInterest::CheckBox,
+                    ele_fp.frame,
+                )));
             }
             Target::Text => {
                 if let Ok(value) = element.description().map(|v| v.to_string()) {
-                    cache.add(
-                        element,
-                        Some(value),
-                        RoleOfInterest::StaticText,
-                        ele_fp.frame,
-                    );
+                    let _ =
+                        result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                            element.clone(),
+                            Some(value),
+                            RoleOfInterest::StaticText,
+                            ele_fp.frame,
+                        )));
                 }
             }
             _ => (),
@@ -855,43 +922,74 @@ pub fn traverse_elements(
                     .or_else(|_| element.label_value())
                     .map(|v| v.to_string())
             {
-                cache.add(
-                    element,
+                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                    element.clone(),
                     Some(value),
                     RoleOfInterest::StaticText,
                     ele_fp.frame,
-                );
+                )));
             }
         }
         kAXGroupRole => match target {
             Target::Clickable if element.is_clickable() => {
-                cache.add(element, None, RoleOfInterest::Button, ele_fp.frame);
+                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                    element.clone(),
+                    None,
+                    RoleOfInterest::Button,
+                    ele_fp.frame,
+                )));
             }
             // NOTE: Potential texts in leaf AXGroup
             Target::ImageOCR if !element.has_children() => {
-                cache.add(element, None, RoleOfInterest::Image, ele_fp.frame);
+                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                    element.clone(),
+                    None,
+                    RoleOfInterest::Image,
+                    ele_fp.frame,
+                )));
             }
             _ => (),
         },
         kAXMenuItemRole => match target {
             Target::Text => {
                 if let Some(title) = element.get_attribute_string(kAXTitleAttribute) {
-                    cache.add(element, Some(title), RoleOfInterest::MenuItem, ele_fp.frame);
+                    let _ =
+                        result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                            element.clone(),
+                            Some(title),
+                            RoleOfInterest::MenuItem,
+                            ele_fp.frame,
+                        )));
                 }
             }
             Target::MenuItem | Target::Clickable => {
-                cache.add(element, None, RoleOfInterest::MenuItem, ele_fp.frame);
+                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                    element.clone(),
+                    None,
+                    RoleOfInterest::MenuItem,
+                    ele_fp.frame,
+                )));
             }
             _ => (),
         },
         kAXScrollBarRole => {
             if *target == Target::Scrollable {
-                cache.add(element, None, RoleOfInterest::ScrollBar, ele_fp.frame);
+                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                    element.clone(),
+                    None,
+                    RoleOfInterest::ScrollBar,
+                    ele_fp.frame,
+                )));
             }
         }
         _ => match target {
             Target::Clickable if element.is_clickable() => {
-                cache.add(element, None, RoleOfInterest::Button, ele_fp.frame);
+                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                    element.clone(),
+                    None,
+                    RoleOfInterest::Button,
+                    ele_fp.frame,
+                )));
             }
             _ => (),
         },
@@ -903,15 +1001,40 @@ pub fn traverse_elements(
             if *child == *element {
                 continue;
             }
+            let safe_child = ThreadSafeElement(child.to_owned());
+            let tx_clone = result_tx.clone();
+
             traverse_elements(
-                &child,
+                safe_child,
                 &new_frame,
                 &window_frame,
-                cache,
                 target,
                 vis_level,
+                tx_clone,
                 depth + 1,
             );
         }
     }
+}
+
+pub fn traverse(
+    root: ThreadSafeElement,
+    parent_frame: Frame,
+    window_frame: Frame,
+    target: Target,
+    vis_level: VisibilityCheckingLevel,
+    result_tx: Sender<ElementSignal>,
+) {
+    let target_c = target.clone();
+    let tx_c = result_tx.clone();
+    traverse_elements(
+        root,
+        &parent_frame,
+        &window_frame,
+        &target_c,
+        vis_level,
+        tx_c,
+        0,
+    );
+    let _ = result_tx.send(ElementSignal::TraversalFinished(target));
 }

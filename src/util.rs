@@ -225,15 +225,15 @@ pub fn select_range_helper(
             }
 
             // Fuzzy boundaries for elements on the same line as start or end
-            if (f.bottom_right.y - s_frame.bottom_right.y).abs() < y_thres {
-                if f.top_left.x >= s_frame.top_left.x {
-                    return true;
-                }
+            if (f.bottom_right.y - s_frame.bottom_right.y).abs() < y_thres
+                && f.top_left.x >= s_frame.top_left.x
+            {
+                return true;
             }
-            if (f.bottom_right.y - e_frame.bottom_right.y).abs() < y_thres {
-                if f.top_left.x <= e_frame.bottom_right.x {
-                    return true;
-                }
+            if (f.bottom_right.y - e_frame.bottom_right.y).abs() < y_thres
+                && f.top_left.x <= e_frame.bottom_right.x
+            {
+                return true;
             }
             false
         })
@@ -307,7 +307,7 @@ pub fn select_range_helper(
     Some((text, Frame::new(x_min, y_min, x_max, y_max)))
 }
 
-const MAX_COLLISION_OPS: usize = 150;
+pub const MAX_COLLISION_OPS: usize = 150;
 
 pub fn hint_boxes_from_frames(
     len: usize,
@@ -689,7 +689,7 @@ mod frame_tests {
         assert_eq!(b.cmp(&c), Ordering::Less);
         assert_eq!(a.cmp(&c), Ordering::Less);
 
-        let mut frames = vec![a, b, c];
+        let mut frames = [a, b, c];
         // This should no longer panic as it's a proper total order
         frames.sort();
         assert_eq!(frames[0], a);

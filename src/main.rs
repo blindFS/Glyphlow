@@ -35,7 +35,7 @@ async fn main() {
         return;
     }
 
-    let (tx, mut rx) = mpsc::channel::<AppSignal>(100);
+    let (tx, mut rx) = mpsc::channel::<AppSignal>(1000);
 
     let config_path = get_config_path();
     let config = match config_path

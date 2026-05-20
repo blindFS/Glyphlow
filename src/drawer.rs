@@ -63,6 +63,19 @@ pub trait GlyphlowDrawingLayer {
         key_prefix_len: usize,
         screen_size: CGSize,
     );
+    fn draw_incremental_hint(
+        &self,
+        hint: &mut HintBox,
+        theme: &GlyphlowTheme,
+        key_prefix_len: usize,
+        screen_size: CGSize,
+        frames_root: &CALayer,
+        boxes_root: &CALayer,
+    );
+    fn prepare_incremental_hints(
+        &self,
+        screen_size: CGSize,
+    ) -> (Retained<CALayer>, Retained<CALayer>);
     fn draw_menu(
         &self,
         text: &str,
@@ -106,6 +119,29 @@ impl GlyphlowDrawingLayer for CALayer {
         key_prefix_len: usize,
         screen_size: CGSize,
     ) {
+        let (frames_root, boxes_root) = self.prepare_incremental_hints(screen_size);
+
+        for hint in hints {
+            self.draw_incremental_hint(
+                hint,
+                theme,
+                key_prefix_len,
+                screen_size,
+                &frames_root,
+                &boxes_root,
+            );
+        }
+    }
+
+    fn draw_incremental_hint(
+        &self,
+        hint: &mut HintBox,
+        theme: &GlyphlowTheme,
+        key_prefix_len: usize,
+        screen_size: CGSize,
+        frames_root: &CALayer,
+        boxes_root: &CALayer,
+    ) {
         // Geometry determined by font size
         let font_size = &theme.hint_font.pointSize();
         let tri_height = font_size / 2.0;
@@ -113,7 +149,73 @@ impl GlyphlowDrawingLayer for CALayer {
 
         // Colors parsed from hex strings
         let bg_color = &theme.hint_bg_color;
+        let bg_color = hint.color.as_ref().unwrap_or(bg_color);
 
+        let mut frame_layer = CALayer::new();
+        if let Some(frame) = &hint.frame {
+            frame_layer = frame_box_layer(frame, bg_color);
+        }
+        frames_root.addSublayer(&frame_layer);
+
+        // Create NSMutableAttributedString
+        let label_string = NSString::from_str(&hint.label);
+        let attr_string = NSMutableAttributedString::initWithString(
+            NSMutableAttributedString::alloc(),
+            &label_string,
+        );
+
+        update_hint_text_with_attr(&attr_string, &hint.label, key_prefix_len, theme);
+
+        // Background Box
+        let (size, _) =
+            estimate_frame_for_text(&attr_string, (screen_size.width, screen_size.height));
+        let (x_offset, y_offset, text_layer, box_layer) = text_box_with_attributed_string(
+            attr_string,
+            true,
+            bg_color,
+            theme.hint_margin_size as f64,
+            Center::Top(hint.x, hint.y - tri_height),
+            screen_size,
+            size,
+        );
+
+        hint.text_layer = Some(text_layer);
+
+        // Create the triangle pointing to the center
+        let box_size = box_layer.bounds().size;
+        let tri_y_offset = box_size.height;
+        let tri_x_offset = (box_size.width - tri_width) / 2.0;
+        let tri_layer = CAShapeLayer::new();
+        let path = CGMutablePath::new();
+
+        unsafe {
+            CGMutablePath::move_to_point(Some(&path), std::ptr::null(), 0.0, 0.0); // A
+            CGMutablePath::add_line_to_point(
+                Some(&path),
+                std::ptr::null(),
+                tri_width / 2.0 - hint.delta.0 + x_offset,
+                // y coordinate is inverted
+                tri_height - hint.delta.1 + y_offset,
+            ); // B
+            CGMutablePath::add_line_to_point(Some(&path), std::ptr::null(), tri_width, 0.0); // C
+        }
+        CGMutablePath::close_subpath(Some(&path));
+
+        tri_layer.setPath(Some(&path));
+        tri_layer.setFillColor(Some(bg_color));
+        tri_layer.setFrame(NSRect::new(
+            NSPoint::new(tri_x_offset, tri_y_offset),
+            NSSize::new(tri_width, tri_height),
+        ));
+
+        box_layer.insertSublayer_atIndex(&tri_layer, 0);
+        boxes_root.addSublayer(&box_layer);
+    }
+
+    fn prepare_incremental_hints(
+        &self,
+        screen_size: CGSize,
+    ) -> (Retained<CALayer>, Retained<CALayer>) {
         let frames_root = CALayer::new();
         frames_root.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), screen_size));
         frames_root.setZPosition(-1.0);
@@ -122,72 +224,10 @@ impl GlyphlowDrawingLayer for CALayer {
         boxes_root.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), screen_size));
         boxes_root.setZPosition(0.0);
 
-        for hint in hints {
-            let bg_color = hint.color.as_ref().unwrap_or(bg_color);
-
-            let mut frame_layer = CALayer::new();
-            if let Some(frame) = &hint.frame {
-                frame_layer = frame_box_layer(frame, bg_color);
-            }
-            frames_root.addSublayer(&frame_layer);
-
-            // Create NSMutableAttributedString
-            let label_string = NSString::from_str(&hint.label);
-            let attr_string = NSMutableAttributedString::initWithString(
-                NSMutableAttributedString::alloc(),
-                &label_string,
-            );
-
-            update_hint_text_with_attr(&attr_string, &hint.label, key_prefix_len, theme);
-
-            // Background Box
-            let (size, _) =
-                estimate_frame_for_text(&attr_string, (screen_size.width, screen_size.height));
-            let (x_offset, y_offset, text_layer, box_layer) = text_box_with_attributed_string(
-                attr_string,
-                true,
-                bg_color,
-                theme.hint_margin_size as f64,
-                Center::Top(hint.x, hint.y - tri_height),
-                screen_size,
-                size,
-            );
-
-            hint.text_layer = Some(text_layer);
-
-            // Create the triangle pointing to the center
-            let box_size = box_layer.bounds().size;
-            let tri_y_offset = box_size.height;
-            let tri_x_offset = (box_size.width - tri_width) / 2.0;
-            let tri_layer = CAShapeLayer::new();
-            let path = CGMutablePath::new();
-
-            unsafe {
-                CGMutablePath::move_to_point(Some(&path), std::ptr::null(), 0.0, 0.0); // A
-                CGMutablePath::add_line_to_point(
-                    Some(&path),
-                    std::ptr::null(),
-                    tri_width / 2.0 - hint.delta.0 + x_offset,
-                    // y coordinate is inverted
-                    tri_height - hint.delta.1 + y_offset,
-                ); // B
-                CGMutablePath::add_line_to_point(Some(&path), std::ptr::null(), tri_width, 0.0); // C
-            }
-            CGMutablePath::close_subpath(Some(&path));
-
-            tri_layer.setPath(Some(&path));
-            tri_layer.setFillColor(Some(bg_color));
-            tri_layer.setFrame(NSRect::new(
-                NSPoint::new(tri_x_offset, tri_y_offset),
-                NSSize::new(tri_width, tri_height),
-            ));
-
-            box_layer.insertSublayer_atIndex(&tri_layer, 0);
-            boxes_root.addSublayer(&box_layer);
-        }
-
         self.addSublayer(&frames_root);
         self.addSublayer(&boxes_root);
+
+        (frames_root, boxes_root)
     }
 
     fn draw_attributed_string(
