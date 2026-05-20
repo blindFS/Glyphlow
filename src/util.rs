@@ -81,22 +81,14 @@ impl PartialOrd for Frame {
 const MIN_HEIGHT_THRESHOLD: f64 = 10.0;
 
 impl Ord for Frame {
-    // Compare the bottom left point, y coordinate first, if about the same, then x
+    // Compare the bottom left point, y coordinate first, then x
     fn cmp(&self, other: &Self) -> Ordering {
-        let (x1, y1) = (self.top_left.x, self.bottom_right.y);
-        let (_, h1) = self.size();
-        let (x2, y2) = (other.top_left.x, other.bottom_right.y);
-        let (_, h2) = other.size();
+        let y1 = self.bottom_right.y;
+        let y2 = other.bottom_right.y;
+        let x1 = self.top_left.x;
+        let x2 = other.top_left.x;
 
-        // For some multi-line segments, heights are quite different
-        let height_thres = (h2.min(h1) * 0.8).min(MIN_HEIGHT_THRESHOLD);
-        if y1 > y2 + height_thres {
-            Ordering::Greater
-        } else if y2 > y1 + height_thres {
-            Ordering::Less
-        } else {
-            x1.total_cmp(&x2)
-        }
+        y1.total_cmp(&y2).then_with(|| x1.total_cmp(&x2))
     }
 }
 
@@ -219,19 +211,62 @@ pub fn select_range_helper(
     // NOTE: Exclude elements too far left/right
     let font_height = estimate_font_height(s1, frame1).min(estimate_font_height(s2, frame2));
     let x_thres = font_height * 2.5;
+    let y_thres = (font_height * 0.8).min(MIN_HEIGHT_THRESHOLD);
 
     // Roughly sort all elements in y range
     let mut within_y_range = choices
         .iter()
-        .filter(|(_, f, v)| *v && f >= s_frame && f <= e_frame)
-        .collect::<Vec<_>>();
-    within_y_range.sort_by_key(|(_, f, _)| f);
+        .filter(|(_, f, v)| {
+            if !*v {
+                return false;
+            }
+            if f >= s_frame && f <= e_frame {
+                return true;
+            }
 
-    // Find the x_min
+            // Fuzzy boundaries for elements on the same line as start or end
+            if (f.bottom_right.y - s_frame.bottom_right.y).abs() < y_thres {
+                if f.top_left.x >= s_frame.top_left.x {
+                    return true;
+                }
+            }
+            if (f.bottom_right.y - e_frame.bottom_right.y).abs() < y_thres {
+                if f.top_left.x <= e_frame.bottom_right.x {
+                    return true;
+                }
+            }
+            false
+        })
+        .collect::<Vec<_>>();
+
+    // Sort by Y strictly first (ensures total order)
+    within_y_range.sort_by(|(_, f1, _), (_, f2, _)| f1.cmp(f2));
+
+    // Group into lines and sort each line by X to handle staggered Y
+    let mut i = 0;
+    while i < within_y_range.len() {
+        let mut j = i + 1;
+        let (_, fi, _) = within_y_range[i];
+        while j < within_y_range.len() {
+            let (_, fj, _) = within_y_range[j];
+            if fj.bottom_right.y > fi.bottom_right.y + y_thres {
+                break;
+            }
+            j += 1;
+        }
+        within_y_range[i..j]
+            .sort_by(|(_, f1, _), (_, f2, _)| f1.top_left.x.total_cmp(&f2.top_left.x));
+        i = j;
+    }
+
+    // Find the x_min from elements actually included
     let mut x_ranges = within_y_range
         .iter()
         .map(|(_, f, _)| (f.top_left.x, f.bottom_right.x))
         .collect::<Vec<_>>();
+    if x_ranges.is_empty() {
+        return None;
+    }
     x_ranges.sort_by(|a, b| a.0.total_cmp(&b.0));
 
     let (mut this_min, mut this_max) = *x_ranges
@@ -619,6 +654,47 @@ mod frame_tests {
         assert_eq!(frames[0].top_left.x, 10.0);
         assert_eq!(frames[1].top_left.x, 50.0);
         assert_eq!(frames[2].top_left.x, 100.0);
+    }
+
+    #[test]
+    fn test_frame_ordering_horizontal_same_y() {
+        // frames with identical y-coordinates should be sorted by x (top_left.x)
+        let frame_left = Frame::new(10.0, 0.0, 20.0, 15.0);
+        let frame_right = Frame::new(50.0, 0.0, 60.0, 15.0);
+
+        assert_eq!(frame_left.cmp(&frame_right), Ordering::Less);
+        assert_eq!(frame_right.cmp(&frame_left), Ordering::Greater);
+    }
+
+    #[test]
+    fn test_total_order_violation_repro() {
+        // A: y=100, h=20, x=10
+        // B: y=105, h=5,  x=0
+        // C: y=110, h=20, x=0
+        let a = Frame {
+            top_left: CGPoint { x: 10.0, y: 80.0 },
+            bottom_right: CGPoint { x: 20.0, y: 100.0 },
+        };
+        let b = Frame {
+            top_left: CGPoint { x: 0.0, y: 100.0 },
+            bottom_right: CGPoint { x: 10.0, y: 105.0 },
+        };
+        let c = Frame {
+            top_left: CGPoint { x: 0.0, y: 90.0 },
+            bottom_right: CGPoint { x: 10.0, y: 110.0 },
+        };
+
+        // Strict order should be consistent: a < b < c
+        assert_eq!(a.cmp(&b), Ordering::Less);
+        assert_eq!(b.cmp(&c), Ordering::Less);
+        assert_eq!(a.cmp(&c), Ordering::Less);
+
+        let mut frames = vec![a, b, c];
+        // This should no longer panic as it's a proper total order
+        frames.sort();
+        assert_eq!(frames[0], a);
+        assert_eq!(frames[1], b);
+        assert_eq!(frames[2], c);
     }
 }
 

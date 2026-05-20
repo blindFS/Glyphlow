@@ -35,13 +35,16 @@ impl AppEngine {
             self.draw_hints(true);
         }
 
-        let filtered_idx = self.hint_boxes
+        let filtered_idx = self
+            .hint_boxes
             .iter()
             .filter(|b| b.label.starts_with(&self.key_prefix))
             .map(|b| b.idx)
             .collect::<Vec<_>>();
 
-        if self.key_prefix.len() == self.hint_width as usize && let Some(&hb_idx) = filtered_idx.first() {
+        if self.key_prefix.len() == self.hint_width as usize
+            && let Some(&hb_idx) = filtered_idx.first()
+        {
             if self.multi_selection.is_on {
                 if let Some((idx1, idx2)) = self.multi_selection.set_one_side(hb_idx) {
                     let choices: Vec<(String, Frame, bool)> = self
