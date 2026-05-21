@@ -197,18 +197,20 @@ impl AppEngine {
         self.draw_selected_frame();
 
         let mut color_idx = 0;
-        for (idx, signal) in result_rx.iter().enumerate() {
-            autoreleasepool(|_| match signal {
-                ElementSignal::ElementFound(Some(ele)) => {
-                    let need_flush = (idx + 1) % Self::HINTBOX_FLUSH_BATCH_SIZE == 0;
-                    self.handle_element_found(ele, &mut color_idx, need_flush);
+        autoreleasepool(|_| {
+            for (idx, signal) in result_rx.iter().enumerate() {
+                match signal {
+                    ElementSignal::ElementFound(Some(ele)) => {
+                        let need_flush = (idx + 1) % Self::HINTBOX_FLUSH_BATCH_SIZE == 0;
+                        self.handle_element_found(ele, &mut color_idx, need_flush);
+                    }
+                    ElementSignal::TraversalFinished(target) => {
+                        self.handle_traversal_finished(target);
+                    }
+                    _ => (),
                 }
-                ElementSignal::TraversalFinished(target) => {
-                    self.handle_traversal_finished(target);
-                }
-                _ => (),
-            })
-        }
+            }
+        });
         log::log!(Level::Debug, "Finish traversing");
     }
 

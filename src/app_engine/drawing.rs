@@ -17,12 +17,14 @@ impl AppEngine {
     }
 
     pub(super) fn draw_selected_frame(&self) {
-        if let Some(ElementOfInterest { frame, .. }) = self.selected.as_ref() {
-            self.window.draw_frame_box(
-                &frame.invert_y(self.screen_size.height),
-                &self.config.theme.hint_bg_color,
-            );
-        }
+        autoreleasepool(|_| {
+            if let Some(ElementOfInterest { frame, .. }) = self.selected.as_ref() {
+                self.window.draw_frame_box(
+                    &frame.invert_y(self.screen_size.height),
+                    &self.config.theme.hint_bg_color,
+                );
+            }
+        })
     }
 
     /// Draw/Update hint boxes
@@ -148,8 +150,10 @@ impl AppEngine {
     }
 
     pub(super) fn draw_menu(&self, msg: &str) -> Retained<CALayer> {
-        self.window
-            .draw_menu(msg, self.screen_size, &self.config.theme)
+        autoreleasepool(|_| {
+            self.window
+                .draw_menu(msg, self.screen_size, &self.config.theme)
+        })
     }
 
     fn draw_dashboard(&self, key_prefix: &str) {
@@ -216,55 +220,49 @@ impl AppEngine {
     }
 
     pub(super) fn draw_element_menu(&self, key_prefix: &str, role: RoleOfInterest, set_mode: bool) {
-        autoreleasepool(|_| {
-            self.clear_drawing();
-            // Set mode before drawing to make it more responsive
-            if set_mode {
-                match role {
-                    RoleOfInterest::Image => self.set_mode(Mode::ImageActionMenu),
-                    RoleOfInterest::ScrollBar => self.set_mode(Mode::Scrolling),
-                    RoleOfInterest::TextField
-                    | RoleOfInterest::StaticText
-                    | RoleOfInterest::PseudoText => self.set_mode(Mode::TextActionMenu),
-                    _ if self.target == Target::Text => self.set_mode(Mode::TextActionMenu),
-                    _ if self.target == Target::Scrollable => self.set_mode(Mode::Scrolling),
-                    _ => self.set_mode(Mode::DashBoard),
-                }
-            }
-
-            let text_action_helper = || {
-                let text = self
-                    .selected
-                    .as_ref()
-                    .and_then(|eoi| eoi.context.as_ref())
-                    .expect("Internal Error: selected text should be ready for text action menu");
-                self.draw_text_action_menu(text, key_prefix);
-            };
-
+        self.clear_drawing();
+        // Set mode before drawing to make it more responsive
+        if set_mode {
             match role {
-                RoleOfInterest::Image => self.draw_image_action_menu(key_prefix),
-                RoleOfInterest::ScrollBar => self.draw_scrolling_menu(key_prefix),
+                RoleOfInterest::Image => self.set_mode(Mode::ImageActionMenu),
+                RoleOfInterest::ScrollBar => self.set_mode(Mode::Scrolling),
                 RoleOfInterest::TextField
                 | RoleOfInterest::StaticText
-                | RoleOfInterest::PseudoText => {
-                    text_action_helper();
-                }
-                _ if self.target == Target::Text => text_action_helper(),
-                _ if self.target == Target::Scrollable => self.draw_scrolling_menu(key_prefix),
-                _ => self.draw_dashboard(key_prefix),
+                | RoleOfInterest::PseudoText => self.set_mode(Mode::TextActionMenu),
+                _ if self.target == Target::Text => self.set_mode(Mode::TextActionMenu),
+                _ if self.target == Target::Scrollable => self.set_mode(Mode::Scrolling),
+                _ => self.set_mode(Mode::DashBoard),
             }
-        })
+        }
+
+        let text_action_helper = || {
+            let text = self
+                .selected
+                .as_ref()
+                .and_then(|eoi| eoi.context.as_ref())
+                .expect("Internal Error: selected text should be ready for text action menu");
+            self.draw_text_action_menu(text, key_prefix);
+        };
+
+        match role {
+            RoleOfInterest::Image => self.draw_image_action_menu(key_prefix),
+            RoleOfInterest::ScrollBar => self.draw_scrolling_menu(key_prefix),
+            RoleOfInterest::TextField | RoleOfInterest::StaticText | RoleOfInterest::PseudoText => {
+                text_action_helper();
+            }
+            _ if self.target == Target::Text => text_action_helper(),
+            _ if self.target == Target::Scrollable => self.draw_scrolling_menu(key_prefix),
+            _ => self.draw_dashboard(key_prefix),
+        }
     }
 
     pub(super) fn menu_refresh(&self, key_prefix: &str, set_mode: bool) {
-        autoreleasepool(|_| {
-            if let Some(eoi) = self.selected.as_ref() {
-                self.draw_element_menu(key_prefix, eoi.role(), set_mode);
-            } else {
-                self.clear_drawing();
-                self.draw_dashboard(key_prefix);
-            }
-        })
+        if let Some(eoi) = self.selected.as_ref() {
+            self.draw_element_menu(key_prefix, eoi.role(), set_mode);
+        } else {
+            self.clear_drawing();
+            self.draw_dashboard(key_prefix);
+        }
     }
 
     pub(super) fn draw_word_picker(&mut self) {
