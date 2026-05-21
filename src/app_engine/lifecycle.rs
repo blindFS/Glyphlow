@@ -193,7 +193,6 @@ impl AppEngine {
         let result_rx = self.ui_element_traverse_on_activation(target);
 
         self.clear_drawing();
-        self.draw_selected_frame();
 
         let mut color_idx = 0;
         for (idx, signal) in result_rx.iter().enumerate() {
@@ -204,8 +203,6 @@ impl AppEngine {
                 }
                 ElementSignal::TraversalFinished(target) => {
                     self.handle_traversal_finished(target);
-                    // For internal activations like workflow action / element explorer
-                    self.set_mode(Mode::Filtering);
                 }
                 _ => (),
             }
@@ -285,6 +282,8 @@ impl AppEngine {
             if need_help_msg {
                 self.notify("Press Enter to act.", Level::Trace);
             }
+            // For internal activations like workflow action / element explorer
+            self.set_mode(Mode::Filtering);
         } else if self.target == Target::Scrollable
             && let Some(eoi) = self.selected.as_ref()
         {
