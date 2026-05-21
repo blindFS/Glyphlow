@@ -1,14 +1,19 @@
 use super::AppEngine;
 use crate::{
     Mode,
-    ax_element::{ElementOfInterest, GetAttribute, Target, traverse_elements},
+    ax_element::{
+        ElementOfInterest, ElementSignal, GetAttribute, Target, ThreadSafeElement, traverse,
+    },
     config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
     os_util::{get_focused, get_system_alarm_window},
-    util::Frame,
+    user_interface::{HintBox, hint_label_from_index, resolve_collisions},
+    util::{Frame, digits_by_length},
 };
 use accessibility::AXUIElementAttributes;
 use log::Level;
-use std::{path::PathBuf, time::Duration};
+use objc2::rc::autoreleasepool;
+use objc2_quartz_core::CATransaction;
+use std::{path::PathBuf, sync::mpsc::Receiver, time::Duration};
 use tokio::sync::mpsc::Sender;
 
 const SHORT_TIMEOUT: u64 = 1;
@@ -37,6 +42,7 @@ impl AppEngine {
         self.clear_cache();
         self.clear_drawing();
         self.selected = None;
+        self.hint_width = 0;
         self.pending_workflow_actions.clear();
         self.set_mode(Mode::Idle);
     }
@@ -135,7 +141,10 @@ impl AppEngine {
         Some(window_frame)
     }
 
-    pub(super) fn ui_element_traverse_on_activation(&mut self, target: Target) {
+    pub(super) fn ui_element_traverse_on_activation(
+        &mut self,
+        target: Target,
+    ) -> Receiver<ElementSignal> {
         // HACK: abuse self.target to mark whether to call external editor
         self.target = target.clone();
         let target = match target {
@@ -154,35 +163,129 @@ impl AppEngine {
         }
 
         self.clear_cache();
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+
         if let Some(selected) = self.selected.as_ref()
             && let Some(element) = selected.element()
         {
             let frame = selected.frame;
-            traverse_elements(
-                element,
-                // Very loose visibility constraint
-                &frame,
-                &self.last_window_frame,
-                &mut self.element_cache,
-                &target,
-                vis_level,
-                0,
+            let safe_root = ThreadSafeElement(element.clone());
+            let window_frame = self.last_window_frame;
+            let _ = std::thread::spawn(move || {
+                traverse(
+                    safe_root,
+                    // Very loose visibility constraint
+                    frame,
+                    window_frame,
+                    target,
+                    vis_level,
+                    result_tx,
+                );
+            });
+        }
+
+        result_rx
+    }
+
+    const HINTBOX_FLUSH_BATCH_SIZE: usize = 5;
+
+    pub(super) fn activate(&mut self, target: Target) {
+        log::log!(Level::Debug, "Start traversing, target: {target:?}");
+        let result_rx = self.ui_element_traverse_on_activation(target);
+
+        self.clear_drawing();
+        self.draw_selected_frame();
+
+        let mut color_idx = 0;
+        for (idx, signal) in result_rx.iter().enumerate() {
+            autoreleasepool(|_| match signal {
+                ElementSignal::ElementFound(Some(ele)) => {
+                    let need_flush = (idx + 1) % Self::HINTBOX_FLUSH_BATCH_SIZE == 0;
+                    self.handle_element_found(ele, &mut color_idx, need_flush);
+                }
+                ElementSignal::TraversalFinished(target) => {
+                    self.handle_traversal_finished(target);
+                }
+                _ => (),
+            })
+        }
+        log::log!(Level::Debug, "Finish traversing");
+    }
+
+    fn handle_element_found(
+        &mut self,
+        ele: ElementOfInterest,
+        color_idx: &mut usize,
+        need_flush: bool,
+    ) {
+        // New element added (not a duplicate)
+        if let Some(idx) = self.element_cache.add_by_target(ele, &self.target) {
+            let eoi = &self.element_cache.cache[idx];
+
+            let screen_frame = Frame::from_origion(self.screen_size);
+            let frame = eoi.frame.intersect(&screen_frame).unwrap_or(screen_frame);
+
+            let (x, y) = frame.center();
+            let (w, h) = frame.size();
+
+            let color_num = self.config.theme.frame_colors.len();
+
+            // Draw frames for large enough elements
+            let frame = if w.max(h) >= self.config.colored_frame_min_size as f64 {
+                *color_idx += 1;
+                Some(eoi.frame.invert_y(self.screen_size.height))
+            } else {
+                None
+            };
+            let color = (color_num > 0 && frame.is_some())
+                .then(|| {
+                    self.config
+                        .theme
+                        .frame_colors
+                        .get(*color_idx % color_num)
+                        .cloned()
+                })
+                .flatten();
+
+            let mut hb = HintBox::new(
+                idx,
+                hint_label_from_index(idx, None),
+                x,
+                self.screen_size.height - y,
+                frame,
+                color,
             );
+
+            hb.draw(&self.window, &self.config.theme, 0, self.screen_size);
+            if need_flush {
+                CATransaction::flush();
+            }
+
+            self.hint_boxes.push(hb);
+            let digits = digits_by_length(self.hint_boxes.len());
+
+            if digits > self.hint_width {
+                for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
+                    hb.label = hint_label_from_index(i, Some(digits));
+                }
+            }
+            self.hint_width = digits;
         }
     }
 
-    pub(super) fn activate(&mut self, target: Target) {
+    fn handle_traversal_finished(&mut self, target: Target) {
         let need_help_msg = target == Target::ChildElement && self.selected.is_none();
-        log::log!(Level::Debug, "Start traversing, target: {target:?}");
-        self.ui_element_traverse_on_activation(target);
-        log::log!(Level::Debug, "Finish traversing");
 
-        if !self.element_cache.cache.is_empty() {
-            self.set_mode(Mode::Filtering);
-            self.draw_hints_from_cache();
+        if !self.hint_boxes.is_empty() {
+            resolve_collisions(&mut self.hint_boxes, self.hint_width, &self.config.theme);
+            // Update layers to match final positions and labels without clearing (avoid flicker)
+            self.update_hints();
+
             if need_help_msg {
                 self.notify("Press Enter to act.", Level::Trace);
             }
+            // For internal activations like workflow action / element explorer
+            self.set_mode(Mode::Filtering);
         } else if self.target == Target::Scrollable
             && let Some(eoi) = self.selected.as_ref()
         {

@@ -3,7 +3,8 @@ use crate::{
     action::{OCRResult, WordPicker, screen_shot, text_from_clipboard},
     ax_element::{ElementCache, ElementOfInterest, Target},
     config::{GlyphlowConfig, RoleOfInterest, WorkFlowAction},
-    util::{Frame, HintBox},
+    user_interface::HintBox,
+    util::Frame,
 };
 use log::Level;
 use objc2::rc::Retained;

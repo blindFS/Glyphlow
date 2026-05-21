@@ -7,17 +7,16 @@ use objc2_app_kit::{
     NSMutableParagraphStyle, NSParagraphStyleAttributeName, NSScreen, NSWindow, NSWindowStyleMask,
 };
 use objc2_core_foundation::{CFRetained, CGSize};
-use objc2_core_graphics::{CGColor, CGMutablePath};
+use objc2_core_graphics::CGColor;
 use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
-use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer, CATransaction, kCAAlignmentCenter};
+use objc2_quartz_core::{CALayer, CATextLayer, CATransaction, kCAAlignmentCenter};
 
 use crate::{
     config::GlyphlowTheme,
-    util::{Frame, HintBox, estimate_frame_for_text},
+    util::{Frame, estimate_frame_for_text},
 };
 
 enum Center {
-    Top(f64, f64),
     Middle(f64, f64),
 }
 
@@ -56,13 +55,6 @@ pub fn create_overlay_window(mtm: MainThreadMarker, screen_size: CGSize) -> Reta
 pub trait GlyphlowDrawingLayer {
     fn from_window(window: &Retained<NSWindow>) -> Option<Retained<CALayer>>;
     fn clear(&self);
-    fn draw_hints(
-        &self,
-        hints: &mut [HintBox],
-        theme: &GlyphlowTheme,
-        key_prefix_len: usize,
-        screen_size: CGSize,
-    );
     fn draw_menu(
         &self,
         text: &str,
@@ -82,9 +74,7 @@ pub trait GlyphlowDrawingLayer {
 impl GlyphlowDrawingLayer for CALayer {
     fn clear(&self) {
         unsafe {
-            CATransaction::begin();
             self.setSublayers(None);
-            CATransaction::commit();
             // Force cleared after calling
             CATransaction::flush();
         }
@@ -97,97 +87,6 @@ impl GlyphlowDrawingLayer for CALayer {
         // Clear existing sublayers
         root_layer.clear();
         Some(root_layer)
-    }
-
-    fn draw_hints(
-        &self,
-        hints: &mut [HintBox],
-        theme: &GlyphlowTheme,
-        key_prefix_len: usize,
-        screen_size: CGSize,
-    ) {
-        // Geometry determined by font size
-        let font_size = &theme.hint_font.pointSize();
-        let tri_height = font_size / 2.0;
-        let tri_width = font_size / 2.0;
-
-        // Colors parsed from hex strings
-        let bg_color = &theme.hint_bg_color;
-
-        let frames_root = CALayer::new();
-        frames_root.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), screen_size));
-        frames_root.setZPosition(-1.0);
-
-        let boxes_root = CALayer::new();
-        boxes_root.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), screen_size));
-        boxes_root.setZPosition(0.0);
-
-        for hint in hints {
-            let bg_color = hint.color.as_ref().unwrap_or(bg_color);
-
-            let mut frame_layer = CALayer::new();
-            if let Some(frame) = &hint.frame {
-                frame_layer = frame_box_layer(frame, bg_color);
-            }
-            frames_root.addSublayer(&frame_layer);
-
-            // Create NSMutableAttributedString
-            let label_string = NSString::from_str(&hint.label);
-            let attr_string = NSMutableAttributedString::initWithString(
-                NSMutableAttributedString::alloc(),
-                &label_string,
-            );
-
-            update_hint_text_with_attr(&attr_string, &hint.label, key_prefix_len, theme);
-
-            // Background Box
-            let (size, _) =
-                estimate_frame_for_text(&attr_string, (screen_size.width, screen_size.height));
-            let (x_offset, y_offset, text_layer, box_layer) = text_box_with_attributed_string(
-                attr_string,
-                true,
-                bg_color,
-                theme.hint_margin_size as f64,
-                Center::Top(hint.x, hint.y - tri_height),
-                screen_size,
-                size,
-            );
-
-            hint.text_layer = Some(text_layer);
-
-            // Create the triangle pointing to the center
-            let box_size = box_layer.bounds().size;
-            let tri_y_offset = box_size.height;
-            let tri_x_offset = (box_size.width - tri_width) / 2.0;
-            let tri_layer = CAShapeLayer::new();
-            let path = CGMutablePath::new();
-
-            unsafe {
-                CGMutablePath::move_to_point(Some(&path), std::ptr::null(), 0.0, 0.0); // A
-                CGMutablePath::add_line_to_point(
-                    Some(&path),
-                    std::ptr::null(),
-                    tri_width / 2.0 - hint.delta.0 + x_offset,
-                    // y coordinate is inverted
-                    tri_height - hint.delta.1 + y_offset,
-                ); // B
-                CGMutablePath::add_line_to_point(Some(&path), std::ptr::null(), tri_width, 0.0); // C
-            }
-            CGMutablePath::close_subpath(Some(&path));
-
-            tri_layer.setPath(Some(&path));
-            tri_layer.setFillColor(Some(bg_color));
-            tri_layer.setFrame(NSRect::new(
-                NSPoint::new(tri_x_offset, tri_y_offset),
-                NSSize::new(tri_width, tri_height),
-            ));
-
-            box_layer.insertSublayer_atIndex(&tri_layer, 0);
-            boxes_root.addSublayer(&box_layer);
-        }
-
-        self.addSublayer(&frames_root);
-        self.addSublayer(&boxes_root);
     }
 
     fn draw_attributed_string(
@@ -331,7 +230,6 @@ fn text_box_with_attributed_string(
     let box_height = height + (margin * 2.0);
 
     let (o_x, o_y) = match center {
-        Center::Top(x, y) => (x - box_width / 2.0, y - box_height),
         Center::Middle(x, y) => (x - box_width / 2.0, y - box_height / 2.0),
     };
 
@@ -361,50 +259,4 @@ fn text_box_with_attributed_string(
     container.addSublayer(&text_layer);
     container.setCornerRadius(margin);
     (o_x - o_x_move, o_y - o_y_move, text_layer, container)
-}
-
-pub fn update_hint_text(
-    text_layer: &CATextLayer,
-    label: &str,
-    key_prefix_len: usize,
-    theme: &GlyphlowTheme,
-) {
-    let label_string = NSString::from_str(label);
-    let attr_string = NSMutableAttributedString::initWithString(
-        NSMutableAttributedString::alloc(),
-        &label_string,
-    );
-    update_hint_text_with_attr(&attr_string, label, key_prefix_len, theme);
-    unsafe {
-        text_layer.setString(Some(&attr_string));
-    }
-}
-
-fn update_hint_text_with_attr(
-    attr_string: &Retained<NSMutableAttributedString>,
-    label: &str,
-    key_prefix_len: usize,
-    theme: &GlyphlowTheme,
-) {
-    let hl_color = &theme.hint_hl_color;
-    let fg_color = &theme.hint_fg_color;
-    let font = &theme.hint_font;
-
-    unsafe {
-        attr_string.addAttribute_value_range(
-            NSForegroundColorAttributeName,
-            hl_color.as_ref(),
-            NSRange::new(0, key_prefix_len),
-        );
-        attr_string.addAttribute_value_range(
-            NSForegroundColorAttributeName,
-            fg_color.as_ref(),
-            NSRange::new(key_prefix_len, label.len() - key_prefix_len),
-        );
-        attr_string.addAttribute_value_range(
-            NSFontAttributeName,
-            font,
-            NSRange::new(0, label.len()),
-        );
-    }
 }

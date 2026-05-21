@@ -1,9 +1,8 @@
 use super::AppEngine;
 use crate::action::{WordPicker, get_dictionary_attributed_string};
-use crate::ax_element::SetAttribute;
-use crate::ax_element::{ElementOfInterest, GetAttribute};
+use crate::ax_element::{ElementOfInterest, GetAttribute, SetAttribute};
 use crate::config::RoleOfInterest;
-use crate::drawer::GlyphlowDrawingLayer;
+use crate::user_interface::GlyphlowDrawingLayer;
 use crate::util::Frame;
 use crate::{Mode, ScrollAction, TextAction};
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};

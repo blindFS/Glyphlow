@@ -1,35 +1,16 @@
-use std::{
-    cmp::Ordering,
-    collections::{HashMap, VecDeque},
-};
+use std::cmp::Ordering;
 
-use core_foundation::{attributed_string::CFAttributedStringRef, base::CFRange};
-use core_graphics_types::geometry::CGSize;
+use core_foundation::attributed_string::CFAttributedStringRef;
 use core_text::framesetter::CTFramesetter;
 use objc2::rc::Retained;
-use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize as OCGSize};
-use objc2_core_graphics::CGColor;
+use objc2_core_foundation::{CGPoint, CGRect, CGSize as OCGSize};
 use objc2_foundation::{NSMutableAttributedString, NSSize};
 use unicode_width::UnicodeWidthStr;
 
-use crate::config::GlyphlowTheme;
-
-pub fn hint_label_from_index(i: usize, digits: u32) -> String {
-    let mut n = i;
-    let mut result = Vec::new();
-
-    while n > 0 {
-        let remainder = (n % 26) as u8;
-        let char = (b'A' + remainder) as char;
-        result.push(char);
-        n /= 26;
-    }
-
-    // pad to fixed length
-    while result.len() < digits as usize {
-        result.push('A');
-    }
-    result.iter().collect()
+#[derive(Debug, Clone, PartialEq, Copy)]
+pub struct Frame {
+    pub top_left: CGPoint,
+    pub bottom_right: CGPoint,
 }
 
 pub fn estimate_frame_for_text(
@@ -38,36 +19,16 @@ pub fn estimate_frame_for_text(
 ) -> (OCGSize, isize) {
     let cf_attr_string = Retained::as_ptr(attr_string) as CFAttributedStringRef;
     let framesetter = CTFramesetter::new_with_attributed_string(cf_attr_string);
-    let (CGSize { width, height }, range) = framesetter.suggest_frame_size_with_constraints(
-        CFRange {
-            location: 0,
-            length: 0,
-        },
-        std::ptr::null(),
-        CGSize::new(size.0, size.1),
-    );
+    let (core_graphics_types::geometry::CGSize { width, height }, range) = framesetter
+        .suggest_frame_size_with_constraints(
+            core_foundation::base::CFRange {
+                location: 0,
+                length: 0,
+            },
+            std::ptr::null(),
+            core_graphics_types::geometry::CGSize::new(size.0, size.1),
+        );
     (OCGSize::new(width, height), range.length)
-}
-
-use objc2_quartz_core::CATextLayer;
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct HintBox {
-    pub label: String,
-    pub x: f64,
-    pub y: f64,
-    pub idx: usize,
-    /// Moved distance to avoid collision
-    pub delta: (f64, f64),
-    pub frame: Option<Frame>,
-    pub color: Option<CFRetained<CGColor>>,
-    pub text_layer: Option<Retained<CATextLayer>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Copy)]
-pub struct Frame {
-    pub top_left: CGPoint,
-    pub bottom_right: CGPoint,
 }
 
 impl Eq for Frame {}
@@ -81,22 +42,14 @@ impl PartialOrd for Frame {
 const MIN_HEIGHT_THRESHOLD: f64 = 10.0;
 
 impl Ord for Frame {
-    // Compare the bottom left point, y coordinate first, if about the same, then x
+    // Compare the bottom left point, y coordinate first, then x
     fn cmp(&self, other: &Self) -> Ordering {
-        let (x1, y1) = (self.top_left.x, self.bottom_right.y);
-        let (_, h1) = self.size();
-        let (x2, y2) = (other.top_left.x, other.bottom_right.y);
-        let (_, h2) = other.size();
+        let y1 = self.bottom_right.y;
+        let y2 = other.bottom_right.y;
+        let x1 = self.top_left.x;
+        let x2 = other.top_left.x;
 
-        // For some multi-line segments, heights are quite different
-        let height_thres = (h2.min(h1) * 0.8).min(MIN_HEIGHT_THRESHOLD);
-        if y1 > y2 + height_thres {
-            Ordering::Greater
-        } else if y2 > y1 + height_thres {
-            Ordering::Less
-        } else {
-            x1.total_cmp(&x2)
-        }
+        y1.total_cmp(&y2).then_with(|| x1.total_cmp(&x2))
     }
 }
 
@@ -219,19 +172,62 @@ pub fn select_range_helper(
     // NOTE: Exclude elements too far left/right
     let font_height = estimate_font_height(s1, frame1).min(estimate_font_height(s2, frame2));
     let x_thres = font_height * 2.5;
+    let y_thres = (font_height * 0.8).min(MIN_HEIGHT_THRESHOLD);
 
     // Roughly sort all elements in y range
     let mut within_y_range = choices
         .iter()
-        .filter(|(_, f, v)| *v && f >= s_frame && f <= e_frame)
-        .collect::<Vec<_>>();
-    within_y_range.sort_by_key(|(_, f, _)| f);
+        .filter(|(_, f, v)| {
+            if !*v {
+                return false;
+            }
+            if f >= s_frame && f <= e_frame {
+                return true;
+            }
 
-    // Find the x_min
+            // Fuzzy boundaries for elements on the same line as start or end
+            if (f.bottom_right.y - s_frame.bottom_right.y).abs() < y_thres
+                && f.top_left.x >= s_frame.top_left.x
+            {
+                return true;
+            }
+            if (f.bottom_right.y - e_frame.bottom_right.y).abs() < y_thres
+                && f.top_left.x <= e_frame.bottom_right.x
+            {
+                return true;
+            }
+            false
+        })
+        .collect::<Vec<_>>();
+
+    // Sort by Y strictly first (ensures total order)
+    within_y_range.sort_by(|(_, f1, _), (_, f2, _)| f1.cmp(f2));
+
+    // Group into lines and sort each line by X to handle staggered Y
+    let mut i = 0;
+    while i < within_y_range.len() {
+        let mut j = i + 1;
+        let (_, fi, _) = within_y_range[i];
+        while j < within_y_range.len() {
+            let (_, fj, _) = within_y_range[j];
+            if fj.bottom_right.y > fi.bottom_right.y + y_thres {
+                break;
+            }
+            j += 1;
+        }
+        within_y_range[i..j]
+            .sort_by(|(_, f1, _), (_, f2, _)| f1.top_left.x.total_cmp(&f2.top_left.x));
+        i = j;
+    }
+
+    // Find the x_min from elements actually included
     let mut x_ranges = within_y_range
         .iter()
         .map(|(_, f, _)| (f.top_left.x, f.bottom_right.x))
         .collect::<Vec<_>>();
+    if x_ranges.is_empty() {
+        return None;
+    }
     x_ranges.sort_by(|a, b| a.0.total_cmp(&b.0));
 
     let (mut this_min, mut this_max) = *x_ranges
@@ -270,213 +266,6 @@ pub fn select_range_helper(
         x_max = x_max.max(f.bottom_right.x);
     }
     Some((text, Frame::new(x_min, y_min, x_max, y_max)))
-}
-
-const MAX_COLLISION_OPS: usize = 150;
-
-pub fn hint_boxes_from_frames(
-    len: usize,
-    frames: impl Iterator<Item = Frame>,
-    screen_frame: &Frame,
-    theme: &GlyphlowTheme,
-    colored_frame_min_size: f64,
-) -> (u32, Vec<HintBox>) {
-    if len == 0 {
-        return (0, Vec::new());
-    }
-    let digits = len.ilog(26) + 1;
-    let color_num = theme.frame_colors.len();
-    let mut color_idx = 0;
-
-    let mut boxes = frames
-        .enumerate()
-        .map(|(idx, frame)| {
-            // NOTE: better positioning
-            let (_, screen_height) = screen_frame.size();
-            let frame = frame.intersect(screen_frame).unwrap_or(*screen_frame);
-
-            let (x, y) = frame.center();
-            let (w, h) = frame.size();
-
-            // Draw frames for large enough elements
-            let frame = if w.max(h) >= colored_frame_min_size {
-                color_idx += 1;
-                Some(frame.invert_y(screen_height))
-            } else {
-                None
-            };
-            let color = (color_num > 0)
-                .then(|| {
-                    frame
-                        .as_ref()
-                        .and_then(|_| theme.frame_colors.get(color_idx % color_num).cloned())
-                })
-                .flatten();
-
-            HintBox {
-                label: hint_label_from_index(idx, digits),
-                x,
-                y: (screen_height - y),
-                delta: (0.0, 0.0),
-                idx,
-                frame,
-                color,
-                text_layer: None,
-            }
-        })
-        .collect::<Vec<_>>();
-
-    // Estimate box size
-    let x_thres =
-        theme.hint_font.pointSize() * digits as f64 * 0.8 + 2.0 * theme.hint_margin_size as f64;
-    let y_thres = theme.hint_font.pointSize() * 1.5 + 2.0 * theme.hint_margin_size as f64;
-    resolve_collisions_reactive(&mut boxes, x_thres, y_thres, MAX_COLLISION_OPS);
-
-    (digits, boxes)
-}
-
-pub fn resolve_collisions_reactive(
-    boxes: &mut [HintBox],
-    x_thres: f64,
-    y_thres: f64,
-    max_ops: usize,
-) {
-    if boxes.is_empty() {
-        return;
-    }
-
-    let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::with_capacity(boxes.len());
-    let mut cell_coords = vec![(0, 0); boxes.len()];
-    let mut queue = VecDeque::with_capacity(boxes.len());
-    let mut in_queue = vec![true; boxes.len()];
-
-    // Initial setup
-    for i in 0..boxes.len() {
-        let coords = (
-            (boxes[i].x / x_thres).floor() as i32,
-            (boxes[i].y / y_thres).floor() as i32,
-        );
-        cell_coords[i] = coords;
-        grid.entry(coords).or_default().push(i);
-        queue.push_back(i);
-    }
-
-    let mut ops_count = 0;
-
-    while let Some(i) = queue.pop_front() {
-        in_queue[i] = false;
-        ops_count += 1;
-        // Initial checking for each element doesn't count
-        if ops_count > max_ops + boxes.len() {
-            break;
-        }
-
-        let (cx, cy) = cell_coords[i];
-
-        // Check 9 neighboring cells
-        'outer: for dx in -1..=1 {
-            for dy in -1..=1 {
-                let target_cell = (cx + dx, cy + dy);
-
-                let Some(neighbors) = grid.get(&target_cell) else {
-                    continue;
-                };
-                for &j in neighbors {
-                    if i == j {
-                        continue;
-                    }
-
-                    let diff_x = boxes[i].x - boxes[j].x;
-                    let diff_y = boxes[i].y - boxes[j].y;
-                    let abs_dx = diff_x.abs();
-                    let abs_dy = diff_y.abs();
-
-                    if abs_dx < x_thres && abs_dy < y_thres {
-                        // Collision found! Resolve it.
-                        let (shift_x, shift_y) = (x_thres - abs_dx, y_thres - abs_dy);
-
-                        // Move in a less crowded direction
-                        let x_m_count = grid.get(&(cx - 1, cy)).map(|v| v.len()).unwrap_or(0);
-                        let x_p_count = grid.get(&(cx + 1, cy)).map(|v| v.len()).unwrap_or(0);
-                        let y_m_count = grid.get(&(cx, cy - 1)).map(|v| v.len()).unwrap_or(0);
-                        let y_p_count = grid.get(&(cx, cy + 1)).map(|v| v.len()).unwrap_or(0);
-
-                        if x_m_count + x_p_count <= y_m_count + y_p_count {
-                            let move_dist =
-                                (shift_x / 2.0) * (if diff_x >= 0.0 { 1.0 } else { -1.0 });
-                            boxes[i].x += move_dist;
-                            boxes[i].delta.0 += move_dist;
-                            boxes[j].x -= move_dist;
-                            boxes[j].delta.0 -= move_dist;
-                        } else {
-                            let move_dist =
-                                (shift_y / 2.0) * (if diff_y >= 0.0 { 1.0 } else { -1.0 });
-                            boxes[i].y += move_dist;
-                            boxes[i].delta.1 += move_dist;
-                            boxes[j].y -= move_dist;
-                            boxes[j].delta.1 -= move_dist;
-                        }
-
-                        // Update grid positions and mark both as dirty
-                        update_and_requeue(
-                            i,
-                            boxes,
-                            &mut cell_coords,
-                            &mut grid,
-                            &mut queue,
-                            &mut in_queue,
-                            (x_thres, y_thres),
-                        );
-                        update_and_requeue(
-                            j,
-                            boxes,
-                            &mut cell_coords,
-                            &mut grid,
-                            &mut queue,
-                            &mut in_queue,
-                            (x_thres, y_thres),
-                        );
-
-                        // After moving i, we should re-fetch its new neighbors
-                        // breaking here allows the next loop to handle i's new position
-                        break 'outer;
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn update_and_requeue(
-    idx: usize,
-    boxes: &[HintBox],
-    cell_coords: &mut [(i32, i32)],
-    grid: &mut HashMap<(i32, i32), Vec<usize>>,
-    queue: &mut VecDeque<usize>,
-    in_queue: &mut [bool],
-    thres: (f64, f64),
-) {
-    let old_c = cell_coords[idx];
-    let (xt, yt) = thres;
-    let new_c = (
-        (boxes[idx].x / xt).floor() as i32,
-        (boxes[idx].y / yt).floor() as i32,
-    );
-
-    if old_c != new_c {
-        if let Some(list) = grid.get_mut(&old_c)
-            && let Some(pos) = list.iter().position(|&x| x == idx)
-        {
-            list.swap_remove(pos);
-        }
-        grid.entry(new_c).or_default().push(idx);
-        cell_coords[idx] = new_c;
-    }
-
-    if !in_queue[idx] {
-        queue.push_back(idx);
-        in_queue[idx] = true;
-    }
 }
 
 #[cfg(test)]
@@ -620,6 +409,47 @@ mod frame_tests {
         assert_eq!(frames[1].top_left.x, 50.0);
         assert_eq!(frames[2].top_left.x, 100.0);
     }
+
+    #[test]
+    fn test_frame_ordering_horizontal_same_y() {
+        // frames with identical y-coordinates should be sorted by x (top_left.x)
+        let frame_left = Frame::new(10.0, 0.0, 20.0, 15.0);
+        let frame_right = Frame::new(50.0, 0.0, 60.0, 15.0);
+
+        assert_eq!(frame_left.cmp(&frame_right), Ordering::Less);
+        assert_eq!(frame_right.cmp(&frame_left), Ordering::Greater);
+    }
+
+    #[test]
+    fn test_total_order_violation_repro() {
+        // A: y=100, h=20, x=10
+        // B: y=105, h=5,  x=0
+        // C: y=110, h=20, x=0
+        let a = Frame {
+            top_left: CGPoint { x: 10.0, y: 80.0 },
+            bottom_right: CGPoint { x: 20.0, y: 100.0 },
+        };
+        let b = Frame {
+            top_left: CGPoint { x: 0.0, y: 100.0 },
+            bottom_right: CGPoint { x: 10.0, y: 105.0 },
+        };
+        let c = Frame {
+            top_left: CGPoint { x: 0.0, y: 90.0 },
+            bottom_right: CGPoint { x: 10.0, y: 110.0 },
+        };
+
+        // Strict order should be consistent: a < b < c
+        assert_eq!(a.cmp(&b), Ordering::Less);
+        assert_eq!(b.cmp(&c), Ordering::Less);
+        assert_eq!(a.cmp(&c), Ordering::Less);
+
+        let mut frames = [a, b, c];
+        // This should no longer panic as it's a proper total order
+        frames.sort();
+        assert_eq!(frames[0], a);
+        assert_eq!(frames[1], b);
+        assert_eq!(frames[2], c);
+    }
 }
 
 #[cfg(test)]
@@ -762,112 +592,6 @@ mod select_range_tests {
     }
 }
 
-#[cfg(test)]
-mod collision_tests {
-    use super::*;
-
-    fn mock_box(idx: usize, x: f64, y: f64) -> HintBox {
-        HintBox {
-            label: format!("Box{}", idx),
-            x,
-            y,
-            idx,
-            delta: (0.0, 0.0),
-            frame: None,
-            color: None,
-            text_layer: None,
-        }
-    }
-
-    #[test]
-    fn test_simple_collision_resolution() {
-        let mut boxes = vec![
-            mock_box(0, 100.0, 100.0),
-            mock_box(1, 105.0, 100.0), // 5px diff, threshold is 10
-        ];
-
-        resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 100);
-
-        let diff_x = (boxes[0].x - boxes[1].x).abs();
-        assert!(
-            diff_x >= 10.0,
-            "Boxes should be at least 10px apart, got {}",
-            diff_x
-        );
-        assert_eq!(
-            boxes[0].y, 100.0,
-            "Y coordinate shouldn't change if X move was smaller"
-        );
-    }
-
-    #[test]
-    fn test_chain_reaction() {
-        // A overlaps B, B overlaps C.
-        // Solving A-B should push B into C, which then needs solving.
-        let mut boxes = vec![
-            mock_box(0, 100.0, 100.0),
-            mock_box(1, 108.0, 100.0), // Overlaps 0 by 2px
-            mock_box(2, 116.0, 100.0), // Overlaps 1 by 2px
-        ];
-
-        resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 500);
-
-        // Verify all pairs
-        for i in 0..boxes.len() {
-            for j in i + 1..boxes.len() {
-                let dx = (boxes[i].x - boxes[j].x).abs();
-                let dy = (boxes[i].y - boxes[j].y).abs();
-                assert!(
-                    dx >= 10.0 || dy >= 10.0,
-                    "Collision found between {} and {}",
-                    i,
-                    j
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_no_collision_stays_put() {
-        let mut boxes = vec![mock_box(0, 100.0, 100.0), mock_box(1, 200.0, 200.0)];
-
-        let original_x = boxes[0].x;
-        resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 100);
-
-        assert_eq!(
-            boxes[0].x, original_x,
-            "Box should not move if no collision exists"
-        );
-    }
-
-    #[test]
-    fn test_spatial_grid_boundary() {
-        // Place boxes on either side of a grid cell boundary
-        // If x_thres is 10, cell boundary is at multiples of 10.
-        let mut boxes = vec![
-            mock_box(0, 9.9, 10.0),  // Cell (0, 1)
-            mock_box(1, 10.1, 10.0), // Cell (1, 1)
-        ];
-
-        resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 100);
-
-        let diff_x = (boxes[0].x - boxes[1].x).abs();
-        let diff_y = (boxes[0].y - boxes[1].y).abs();
-        assert!(
-            diff_x >= 10.0 || diff_y >= 10.0,
-            "Should resolve collisions even across grid boundaries"
-        );
-    }
-
-    #[test]
-    fn test_max_ops_safety() {
-        // Create a "Black Hole" of points that cannot be perfectly resolved
-        // to ensure we don't loop forever.
-        let mut boxes = (0..10)
-            .map(|i| mock_box(i, 100.0, 100.0))
-            .collect::<Vec<_>>();
-
-        // This should hit the max_ops and exit gracefully
-        resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 50);
-    }
+pub fn digits_by_length(len: usize) -> u32 {
+    if len <= 1 { 1 } else { (len - 1).ilog(26) + 1 }
 }

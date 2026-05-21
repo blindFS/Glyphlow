@@ -6,7 +6,8 @@ use crate::{
     action::perform_ocr,
     ax_element::{ElementOfInterest, Target},
     config::RoleOfInterest,
-    util::{Frame, hint_boxes_from_frames, select_range_helper},
+    user_interface::{HintBox, hint_boxes_from_frames},
+    util::{Frame, select_range_helper},
 };
 use log::Level;
 
@@ -30,18 +31,21 @@ impl AppEngine {
             };
             self.hint_width = digits;
             self.hint_boxes = ocr_hints;
-            self.draw_hints(false);
+            self.draw_hints();
         } else {
-            self.draw_hints(true);
+            self.update_hints();
         }
 
-        let filtered_idx = self.hint_boxes
+        let filtered_idx = self
+            .hint_boxes
             .iter()
             .filter(|b| b.label.starts_with(&self.key_prefix))
             .map(|b| b.idx)
             .collect::<Vec<_>>();
 
-        if self.key_prefix.len() == self.hint_width as usize && let Some(&hb_idx) = filtered_idx.first() {
+        if self.key_prefix.len() == self.hint_width as usize
+            && let Some(&hb_idx) = filtered_idx.first()
+        {
             if self.multi_selection.is_on {
                 if let Some((idx1, idx2)) = self.multi_selection.set_one_side(hb_idx) {
                     let choices: Vec<(String, Frame, bool)> = self
@@ -57,7 +61,7 @@ impl AppEngine {
                     self.update_selected_text_and_show_menu(text.clone());
                 } else {
                     self.key_prefix.clear();
-                    self.draw_hints(true);
+                    self.update_hints();
                 }
             } else {
                 let (selected_text, cg_rect) = self
@@ -110,7 +114,7 @@ impl AppEngine {
         // Only 1 remaining, take some actions
         if self.key_prefix.len() == self.hint_width as usize
             && filtered_boxes.len() == 1
-            && let Some(crate::util::HintBox { idx, .. }) = filtered_boxes.first()
+            && let Some(HintBox { idx, .. }) = filtered_boxes.first()
             && let Some(eoi) = self.element_cache.cache.get(*idx)
             && let Some(element) = eoi.element()
         {
@@ -155,7 +159,7 @@ impl AppEngine {
                         } else {
                             self.multi_selection.role = Some(role);
                             self.key_prefix.clear();
-                            self.draw_hints(true);
+                            self.update_hints();
                         }
                     } else if context.is_some() {
                         self.selected = Some(eoi.clone());
@@ -164,14 +168,14 @@ impl AppEngine {
                 }
                 Target::ChildElement => {
                     self.selected = Some(eoi.clone());
-                    self.ui_element_traverse_on_activation(Target::ChildElement);
+                    self.activate(Target::ChildElement);
                     // Quick follow if only 1 element remaining
                     // NOTE: use count to avoid circular pointer
                     let mut count = 0;
                     while self.element_cache.cache.len() == 1 && count < 10 {
                         count += 1;
-                        self.selected = Some(self.element_cache.cache[0].clone());
-                        self.ui_element_traverse_on_activation(Target::ChildElement);
+                        self.selected = Some(self.element_cache.cache[0].to_owned());
+                        self.activate(Target::ChildElement);
                     }
 
                     // Actions for current selected element
@@ -182,8 +186,6 @@ impl AppEngine {
                             .map(|eoi| eoi.role())
                             .unwrap_or_default();
                         self.draw_element_menu("", role, true);
-                    } else {
-                        self.draw_hints_from_cache();
                     }
                 }
                 Target::Scrollable => {
@@ -217,7 +219,7 @@ impl AppEngine {
                 }
             }
         } else {
-            self.draw_hints(true);
+            self.update_hints();
         }
     }
 
@@ -228,7 +230,7 @@ impl AppEngine {
         }
     }
 
-    async fn go_back_in_filtering(&mut self, mode: FilterMode) {
+    fn go_back_in_filtering(&mut self, mode: FilterMode) {
         match mode {
             // Go back 1 level in element explorer
             FilterMode::Generic if self.target == Target::ChildElement => {
@@ -255,7 +257,7 @@ impl AppEngine {
             }
             FilterMode::Generic if self.multi_selection.is_on => {
                 self.multi_selection.clear_one_side();
-                self.draw_hints(true);
+                self.update_hints();
             }
             FilterMode::OCR if self.multi_selection.is_on => {
                 self.multi_selection.clear_one_side();
@@ -268,7 +270,7 @@ impl AppEngine {
     pub(super) async fn perform_filtering(&mut self, key_char: char, mode: FilterMode) {
         if key_char == '-' {
             if self.key_prefix.is_empty() {
-                self.go_back_in_filtering(mode).await;
+                self.go_back_in_filtering(mode);
                 return;
             } else {
                 self.key_prefix.pop();

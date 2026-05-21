@@ -5,8 +5,8 @@ use core_foundation::{
 use glyphlow::{
     AppEngine, AppSignal, KeyListener, KeyState, Mode,
     config::{GlyphlowConfig, get_config_path},
-    drawer::{GlyphlowDrawingLayer, create_overlay_window, get_main_screen_size},
     os_util::check_accessibility_permissions,
+    user_interface::{GlyphlowDrawingLayer, create_overlay_window, get_main_screen_size},
 };
 use notify::RecursiveMode;
 use notify_debouncer_mini::{DebounceEventResult, new_debouncer};
@@ -35,7 +35,7 @@ async fn main() {
         return;
     }
 
-    let (tx, mut rx) = mpsc::channel::<AppSignal>(100);
+    let (tx, mut rx) = mpsc::channel::<AppSignal>(1000);
 
     let config_path = get_config_path();
     let config = match config_path

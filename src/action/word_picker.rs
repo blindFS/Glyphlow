@@ -1,8 +1,8 @@
 use crate::{
     action::html_to_attributed_string,
     config::{GlyphlowTheme, cgcolor_to_rgba},
-    drawer::GlyphlowDrawingLayer,
-    util::{estimate_frame_for_text, hint_label_from_index},
+    user_interface::{GlyphlowDrawingLayer, hint_label_from_index},
+    util::{digits_by_length, estimate_frame_for_text},
 };
 use objc2::rc::{Retained, autoreleasepool};
 use objc2_app_kit::{NSFont, NSFontAttributeName};
@@ -54,10 +54,10 @@ impl WordPicker {
         screen_size: CGSize,
     ) -> Self {
         let (word_strings, offsets) = multilingual_split(&text);
-        let digits = word_strings.len().ilog(26) + 1;
+        let digits = digits_by_length(word_strings.len());
         let mut words = Vec::new();
         for (i, text) in word_strings.into_iter().enumerate() {
-            let label = hint_label_from_index(i, digits);
+            let label = hint_label_from_index(i, Some(digits));
             words.push(Word { text, label });
         }
 

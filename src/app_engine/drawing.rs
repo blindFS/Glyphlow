@@ -4,11 +4,10 @@ use crate::{
     TEXT_ACTION_MENU_ITEMS,
     ax_element::{ElementOfInterest, Target},
     config::RoleOfInterest,
-    drawer::{GlyphlowDrawingLayer, update_hint_text},
-    util::Frame,
+    user_interface::GlyphlowDrawingLayer,
 };
-use objc2::rc::Retained;
-use objc2_quartz_core::{CALayer, CATransaction};
+use objc2::rc::{Retained, autoreleasepool};
+use objc2_quartz_core::CALayer;
 
 static MAX_TEXT_DISPLAY_LEN: usize = 30;
 
@@ -17,7 +16,7 @@ impl AppEngine {
         self.window.clear();
     }
 
-    fn draw_selected_frame(&self) {
+    pub(super) fn draw_selected_frame(&self) {
         if let Some(ElementOfInterest { frame, .. }) = self.selected.as_ref() {
             self.window.draw_frame_box(
                 &frame.invert_y(self.screen_size.height),
@@ -27,68 +26,42 @@ impl AppEngine {
     }
 
     /// Draw/Update hint boxes
-    pub(super) fn draw_hints(&mut self, incremental: bool) {
-        log::log!(
-            log::Level::Debug,
-            "Start drawing hints, incremental: {incremental}"
-        );
-        if !incremental {
+    pub(super) fn draw_hints(&mut self) {
+        autoreleasepool(|_| {
             self.clear_drawing();
-            self.window.draw_hints(
-                &mut self.hint_boxes,
-                &self.config.theme,
-                self.key_prefix.len(),
-                self.screen_size,
-            );
+            for hb in self.hint_boxes.iter_mut() {
+                hb.draw(
+                    &self.window,
+                    &self.config.theme,
+                    self.key_prefix.len(),
+                    self.screen_size,
+                );
+            }
             self.draw_selected_frame();
-        } else {
-            self.update_hints();
-        }
-        log::log!(log::Level::Debug, "Finish drawing hints");
+        })
     }
 
-    /// Show/Hide hint_boxes/colored_frames, update hint text
-    fn update_hints(&mut self) {
+    /// Show/Hide hint_boxes/colored_frames, update hint text and positions
+    pub(super) fn update_hints(&mut self) {
         let prefix_len = self.key_prefix.len();
-        let sublayers = unsafe { self.window.sublayers().unwrap_or_default() };
 
-        // NOTE: Safety check: if layers were cleared or out of sync, do nothing.
-        // Happens when an immediate filtering key pressed right after the activation signal.
-        if sublayers.count() < 2 {
-            return;
-        }
+        autoreleasepool(|_| {
+            for hb in self.hint_boxes.iter_mut() {
+                let visible = hb.label.starts_with(&self.key_prefix)
+                    && !(self.multi_selection.is_on
+                        && self
+                            .multi_selection
+                            .one_side_idex
+                            .is_some_and(|idx| idx == hb.idx));
 
-        let frames_root: Retained<CALayer> = sublayers.objectAtIndex(0);
-        let boxes_root: Retained<CALayer> = sublayers.objectAtIndex(1);
+                hb.set_visible(visible);
 
-        let frame_layers = unsafe { frames_root.sublayers().unwrap_or_default() };
-        let box_layers = unsafe { boxes_root.sublayers().unwrap_or_default() };
-
-        if frame_layers.count() < self.hint_boxes.len()
-            || box_layers.count() < self.hint_boxes.len()
-        {
-            return;
-        }
-
-        CATransaction::begin();
-        for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
-            let frame_layer: Retained<CALayer> = frame_layers.objectAtIndex(i);
-            let box_layer: Retained<CALayer> = box_layers.objectAtIndex(i);
-
-            let visible = hb.label.starts_with(&self.key_prefix)
-                && !(self.multi_selection.is_on
-                    && self
-                        .multi_selection
-                        .one_side_idex
-                        .is_some_and(|idx| idx == hb.idx));
-
-            frame_layer.setHidden(!visible);
-            box_layer.setHidden(!visible);
-            if visible && let Some(text_layer) = &hb.text_layer {
-                update_hint_text(text_layer, &hb.label, prefix_len, &self.config.theme);
+                if visible {
+                    hb.update_text(prefix_len, &self.config.theme);
+                    hb.update_position(self.screen_size, &self.config.theme);
+                }
             }
-        }
-        CATransaction::commit();
+        })
     }
 
     fn menu_format_helper(
@@ -243,49 +216,55 @@ impl AppEngine {
     }
 
     pub(super) fn draw_element_menu(&self, key_prefix: &str, role: RoleOfInterest, set_mode: bool) {
-        self.clear_drawing();
-        // Set mode before drawing to make it more responsive
-        if set_mode {
+        autoreleasepool(|_| {
+            self.clear_drawing();
+            // Set mode before drawing to make it more responsive
+            if set_mode {
+                match role {
+                    RoleOfInterest::Image => self.set_mode(Mode::ImageActionMenu),
+                    RoleOfInterest::ScrollBar => self.set_mode(Mode::Scrolling),
+                    RoleOfInterest::TextField
+                    | RoleOfInterest::StaticText
+                    | RoleOfInterest::PseudoText => self.set_mode(Mode::TextActionMenu),
+                    _ if self.target == Target::Text => self.set_mode(Mode::TextActionMenu),
+                    _ if self.target == Target::Scrollable => self.set_mode(Mode::Scrolling),
+                    _ => self.set_mode(Mode::DashBoard),
+                }
+            }
+
+            let text_action_helper = || {
+                let text = self
+                    .selected
+                    .as_ref()
+                    .and_then(|eoi| eoi.context.as_ref())
+                    .expect("Internal Error: selected text should be ready for text action menu");
+                self.draw_text_action_menu(text, key_prefix);
+            };
+
             match role {
-                RoleOfInterest::Image => self.set_mode(Mode::ImageActionMenu),
-                RoleOfInterest::ScrollBar => self.set_mode(Mode::Scrolling),
+                RoleOfInterest::Image => self.draw_image_action_menu(key_prefix),
+                RoleOfInterest::ScrollBar => self.draw_scrolling_menu(key_prefix),
                 RoleOfInterest::TextField
                 | RoleOfInterest::StaticText
-                | RoleOfInterest::PseudoText => self.set_mode(Mode::TextActionMenu),
-                _ if self.target == Target::Text => self.set_mode(Mode::TextActionMenu),
-                _ if self.target == Target::Scrollable => self.set_mode(Mode::Scrolling),
-                _ => self.set_mode(Mode::DashBoard),
+                | RoleOfInterest::PseudoText => {
+                    text_action_helper();
+                }
+                _ if self.target == Target::Text => text_action_helper(),
+                _ if self.target == Target::Scrollable => self.draw_scrolling_menu(key_prefix),
+                _ => self.draw_dashboard(key_prefix),
             }
-        }
-
-        let text_action_helper = || {
-            let text = self
-                .selected
-                .as_ref()
-                .and_then(|eoi| eoi.context.as_ref())
-                .expect("Internal Error: selected text should be ready for text action menu");
-            self.draw_text_action_menu(text, key_prefix);
-        };
-
-        match role {
-            RoleOfInterest::Image => self.draw_image_action_menu(key_prefix),
-            RoleOfInterest::ScrollBar => self.draw_scrolling_menu(key_prefix),
-            RoleOfInterest::TextField | RoleOfInterest::StaticText | RoleOfInterest::PseudoText => {
-                text_action_helper();
-            }
-            _ if self.target == Target::Text => text_action_helper(),
-            _ if self.target == Target::Scrollable => self.draw_scrolling_menu(key_prefix),
-            _ => self.draw_dashboard(key_prefix),
-        }
+        })
     }
 
     pub(super) fn menu_refresh(&self, key_prefix: &str, set_mode: bool) {
-        if let Some(eoi) = self.selected.as_ref() {
-            self.draw_element_menu(key_prefix, eoi.role(), set_mode);
-        } else {
-            self.clear_drawing();
-            self.draw_dashboard(key_prefix);
-        }
+        autoreleasepool(|_| {
+            if let Some(eoi) = self.selected.as_ref() {
+                self.draw_element_menu(key_prefix, eoi.role(), set_mode);
+            } else {
+                self.clear_drawing();
+                self.draw_dashboard(key_prefix);
+            }
+        })
     }
 
     pub(super) fn draw_word_picker(&mut self) {
@@ -295,16 +274,5 @@ impl AppEngine {
             .expect("Internal Error: No word picker set.");
 
         word_picker.update_text_layer(self.multi_selection.one_side_idex);
-    }
-
-    pub(super) fn draw_hints_from_cache(&mut self) {
-        let (hint_width, new_boxes) = self.element_cache.hint_boxes(
-            &Frame::from_origion(self.screen_size),
-            &self.config.theme,
-            self.config.colored_frame_min_size as f64,
-        );
-        self.hint_width = hint_width;
-        self.hint_boxes = new_boxes;
-        self.draw_hints(false);
     }
 }
