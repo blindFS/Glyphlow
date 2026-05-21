@@ -5,12 +5,13 @@ use crate::{
         ElementOfInterest, ElementSignal, GetAttribute, Target, ThreadSafeElement, traverse,
     },
     config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
-    drawer::GlyphlowDrawingLayer,
     os_util::{get_focused, get_system_alarm_window},
-    util::{Frame, HintBox, MAX_COLLISION_OPS, hint_label_from_index, resolve_collisions_reactive},
+    user_interface::{HintBox, hint_label_from_index, resolve_collisions},
+    util::Frame,
 };
 use accessibility::AXUIElementAttributes;
 use log::Level;
+use objc2_quartz_core::CATransaction;
 use std::{path::PathBuf, sync::mpsc::Receiver, time::Duration};
 use tokio::sync::mpsc::Sender;
 
@@ -40,6 +41,7 @@ impl AppEngine {
         self.clear_cache();
         self.clear_drawing();
         self.selected = None;
+        self.hint_width = 0;
         self.pending_workflow_actions.clear();
         self.set_mode(Mode::Idle);
     }
@@ -184,40 +186,39 @@ impl AppEngine {
         result_rx
     }
 
+    const HINTBOX_FLUSH_BATCH_SIZE: usize = 5;
+
     pub(super) fn activate(&mut self, target: Target) {
         log::log!(Level::Debug, "Start traversing, target: {target:?}");
         let result_rx = self.ui_element_traverse_on_activation(target);
         self.clear_drawing();
-        let roots = self.window.prepare_incremental_hints(self.screen_size);
-        self.incremental_drawing_roots = Some(roots);
 
-        for signal in result_rx {
+        let mut color_idx = 0;
+        for (idx, signal) in result_rx.iter().enumerate() {
             match signal {
-                ElementSignal::ElementFound(Some(ele)) => self.handle_element_found(ele),
+                ElementSignal::ElementFound(Some(ele)) => {
+                    let need_flush = (idx + 1) % Self::HINTBOX_FLUSH_BATCH_SIZE == 0;
+                    self.handle_element_found(ele, &mut color_idx, need_flush);
+                }
                 ElementSignal::TraversalFinished(target) => {
                     self.handle_traversal_finished(target);
+                    // For internal activations like workflow action / element explorer
                     self.set_mode(Mode::Filtering);
+                    log::log!(Level::Debug, "Finish traversing");
                 }
                 _ => (),
             }
         }
     }
 
-    fn handle_element_found(&mut self, ele: ElementOfInterest) {
-        let Some((frames_root, boxes_root)) = self.incremental_drawing_roots.as_ref() else {
-            return;
-        };
-
-        let is_child = self.target == Target::ChildElement;
-        let idx = self.element_cache.cache.len();
-        if is_child {
-            self.element_cache.force_add(ele);
-        } else {
-            self.element_cache.add(ele);
-        }
-
-        if self.element_cache.cache.len() > idx {
-            // New element added (not a duplicate)
+    fn handle_element_found(
+        &mut self,
+        ele: ElementOfInterest,
+        color_idx: &mut usize,
+        need_flush: bool,
+    ) {
+        // New element added (not a duplicate)
+        if let Some(idx) = self.element_cache.add_by_target(ele, &self.target) {
             let eoi = &self.element_cache.cache[idx];
 
             let screen_frame = Frame::from_origion(self.screen_size);
@@ -226,87 +227,58 @@ impl AppEngine {
             let (x, y) = frame.center();
             let (w, h) = frame.size();
 
-            // NOTE: we use 2 digits by default for incremental drawing
-            let digits = 2;
-            let mut color_idx = 0;
             let color_num = self.config.theme.frame_colors.len();
-            for hb in &self.hint_boxes {
-                if hb.frame.is_some() {
-                    color_idx += 1;
-                }
-            }
 
             // Draw frames for large enough elements
             let frame = if w.max(h) >= self.config.colored_frame_min_size as f64 {
-                color_idx += 1;
+                *color_idx += 1;
                 Some(eoi.frame.invert_y(self.screen_size.height))
             } else {
                 None
             };
-            let color = (color_num > 0)
+            let color = (color_num > 0 && frame.is_some())
                 .then(|| {
-                    frame.as_ref().and_then(|_| {
-                        self.config
-                            .theme
-                            .frame_colors
-                            .get(color_idx % color_num)
-                            .cloned()
-                    })
+                    self.config
+                        .theme
+                        .frame_colors
+                        .get(*color_idx % color_num)
+                        .cloned()
                 })
                 .flatten();
 
-            let mut hb = HintBox {
-                label: hint_label_from_index(idx, digits),
-                x,
-                y: (self.screen_size.height - y),
-                delta: (0.0, 0.0),
+            let mut hb = HintBox::new(
                 idx,
+                hint_label_from_index(idx, None),
+                x,
+                self.screen_size.height - y,
                 frame,
                 color,
-                text_layer: None,
-            };
-
-            use objc2_quartz_core::CATransaction;
-            CATransaction::begin();
-            self.window.draw_incremental_hint(
-                &mut hb,
-                &self.config.theme,
-                0,
-                self.screen_size,
-                frames_root,
-                boxes_root,
             );
-            CATransaction::commit();
-            CATransaction::flush();
+
+            hb.draw(&self.window, &self.config.theme, 0, self.screen_size);
+            if need_flush {
+                CATransaction::flush();
+            }
 
             self.hint_boxes.push(hb);
+            let digits = self.hint_boxes.len().ilog(26) + 1;
+
+            if digits > self.hint_width {
+                for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
+                    hb.label = hint_label_from_index(i, Some(digits));
+                }
+                self.hint_width = digits;
+            }
         }
     }
 
     fn handle_traversal_finished(&mut self, target: Target) {
         let need_help_msg = target == Target::ChildElement && self.selected.is_none();
-        self.incremental_drawing_roots = None;
 
         if !self.hint_boxes.is_empty() {
-            let final_len = self.hint_boxes.len();
-            let final_digits = final_len.ilog(26) + 1;
-
-            if final_digits != 2 {
-                for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
-                    hb.label = hint_label_from_index(i, final_digits);
-                }
-            }
-
-            let x_thres = self.config.theme.hint_font.pointSize() * final_digits as f64 * 0.8
-                + 2.0 * self.config.theme.hint_margin_size as f64;
-            let y_thres = self.config.theme.hint_font.pointSize() * 1.5
-                + 2.0 * self.config.theme.hint_margin_size as f64;
-
-            resolve_collisions_reactive(&mut self.hint_boxes, x_thres, y_thres, MAX_COLLISION_OPS);
-
+            resolve_collisions(&mut self.hint_boxes, self.hint_width, &self.config.theme);
             // Update layers to match final positions and labels without clearing (avoid flicker)
             self.draw_hints(true);
-            self.hint_width = final_digits;
 
             if need_help_msg {
                 self.notify("Press Enter to act.", Level::Trace);
@@ -323,7 +295,6 @@ impl AppEngine {
             self.clear_drawing();
             self.notify_then_deactivate("No relevant UI elements found.", Level::Warn);
         }
-        log::log!(Level::Debug, "Finish traversing");
     }
 
     pub(super) fn handle_file_update(&mut self, pb: PathBuf) {

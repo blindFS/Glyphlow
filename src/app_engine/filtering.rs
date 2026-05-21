@@ -6,7 +6,8 @@ use crate::{
     action::perform_ocr,
     ax_element::{ElementOfInterest, Target},
     config::RoleOfInterest,
-    util::{Frame, hint_boxes_from_frames, select_range_helper},
+    user_interface::{HintBox, hint_boxes_from_frames},
+    util::{Frame, select_range_helper},
 };
 use log::Level;
 
@@ -113,7 +114,7 @@ impl AppEngine {
         // Only 1 remaining, take some actions
         if self.key_prefix.len() == self.hint_width as usize
             && filtered_boxes.len() == 1
-            && let Some(crate::util::HintBox { idx, .. }) = filtered_boxes.first()
+            && let Some(HintBox { idx, .. }) = filtered_boxes.first()
             && let Some(eoi) = self.element_cache.cache.get(*idx)
             && let Some(element) = eoi.element()
         {

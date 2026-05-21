@@ -1,35 +1,16 @@
-use std::{
-    cmp::Ordering,
-    collections::{HashMap, VecDeque},
-};
+use std::cmp::Ordering;
 
-use core_foundation::{attributed_string::CFAttributedStringRef, base::CFRange};
-use core_graphics_types::geometry::CGSize;
+use core_foundation::attributed_string::CFAttributedStringRef;
 use core_text::framesetter::CTFramesetter;
 use objc2::rc::Retained;
-use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize as OCGSize};
-use objc2_core_graphics::CGColor;
+use objc2_core_foundation::{CGPoint, CGRect, CGSize as OCGSize};
 use objc2_foundation::{NSMutableAttributedString, NSSize};
 use unicode_width::UnicodeWidthStr;
 
-use crate::config::GlyphlowTheme;
-
-pub fn hint_label_from_index(i: usize, digits: u32) -> String {
-    let mut n = i;
-    let mut result = Vec::new();
-
-    while n > 0 {
-        let remainder = (n % 26) as u8;
-        let char = (b'A' + remainder) as char;
-        result.push(char);
-        n /= 26;
-    }
-
-    // pad to fixed length
-    while result.len() < digits as usize {
-        result.push('A');
-    }
-    result.iter().collect()
+#[derive(Debug, Clone, PartialEq, Copy)]
+pub struct Frame {
+    pub top_left: CGPoint,
+    pub bottom_right: CGPoint,
 }
 
 pub fn estimate_frame_for_text(
@@ -38,36 +19,16 @@ pub fn estimate_frame_for_text(
 ) -> (OCGSize, isize) {
     let cf_attr_string = Retained::as_ptr(attr_string) as CFAttributedStringRef;
     let framesetter = CTFramesetter::new_with_attributed_string(cf_attr_string);
-    let (CGSize { width, height }, range) = framesetter.suggest_frame_size_with_constraints(
-        CFRange {
-            location: 0,
-            length: 0,
-        },
-        std::ptr::null(),
-        CGSize::new(size.0, size.1),
-    );
+    let (core_graphics_types::geometry::CGSize { width, height }, range) = framesetter
+        .suggest_frame_size_with_constraints(
+            core_foundation::base::CFRange {
+                location: 0,
+                length: 0,
+            },
+            std::ptr::null(),
+            core_graphics_types::geometry::CGSize::new(size.0, size.1),
+        );
     (OCGSize::new(width, height), range.length)
-}
-
-use objc2_quartz_core::CATextLayer;
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct HintBox {
-    pub label: String,
-    pub x: f64,
-    pub y: f64,
-    pub idx: usize,
-    /// Moved distance to avoid collision
-    pub delta: (f64, f64),
-    pub frame: Option<Frame>,
-    pub color: Option<CFRetained<CGColor>>,
-    pub text_layer: Option<Retained<CATextLayer>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Copy)]
-pub struct Frame {
-    pub top_left: CGPoint,
-    pub bottom_right: CGPoint,
 }
 
 impl Eq for Frame {}
@@ -305,213 +266,6 @@ pub fn select_range_helper(
         x_max = x_max.max(f.bottom_right.x);
     }
     Some((text, Frame::new(x_min, y_min, x_max, y_max)))
-}
-
-pub const MAX_COLLISION_OPS: usize = 150;
-
-pub fn hint_boxes_from_frames(
-    len: usize,
-    frames: impl Iterator<Item = Frame>,
-    screen_frame: &Frame,
-    theme: &GlyphlowTheme,
-    colored_frame_min_size: f64,
-) -> (u32, Vec<HintBox>) {
-    if len == 0 {
-        return (0, Vec::new());
-    }
-    let digits = len.ilog(26) + 1;
-    let color_num = theme.frame_colors.len();
-    let mut color_idx = 0;
-
-    let mut boxes = frames
-        .enumerate()
-        .map(|(idx, frame)| {
-            // NOTE: better positioning
-            let (_, screen_height) = screen_frame.size();
-            let frame = frame.intersect(screen_frame).unwrap_or(*screen_frame);
-
-            let (x, y) = frame.center();
-            let (w, h) = frame.size();
-
-            // Draw frames for large enough elements
-            let frame = if w.max(h) >= colored_frame_min_size {
-                color_idx += 1;
-                Some(frame.invert_y(screen_height))
-            } else {
-                None
-            };
-            let color = (color_num > 0)
-                .then(|| {
-                    frame
-                        .as_ref()
-                        .and_then(|_| theme.frame_colors.get(color_idx % color_num).cloned())
-                })
-                .flatten();
-
-            HintBox {
-                label: hint_label_from_index(idx, digits),
-                x,
-                y: (screen_height - y),
-                delta: (0.0, 0.0),
-                idx,
-                frame,
-                color,
-                text_layer: None,
-            }
-        })
-        .collect::<Vec<_>>();
-
-    // Estimate box size
-    let x_thres =
-        theme.hint_font.pointSize() * digits as f64 * 0.8 + 2.0 * theme.hint_margin_size as f64;
-    let y_thres = theme.hint_font.pointSize() * 1.5 + 2.0 * theme.hint_margin_size as f64;
-    resolve_collisions_reactive(&mut boxes, x_thres, y_thres, MAX_COLLISION_OPS);
-
-    (digits, boxes)
-}
-
-pub fn resolve_collisions_reactive(
-    boxes: &mut [HintBox],
-    x_thres: f64,
-    y_thres: f64,
-    max_ops: usize,
-) {
-    if boxes.is_empty() {
-        return;
-    }
-
-    let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::with_capacity(boxes.len());
-    let mut cell_coords = vec![(0, 0); boxes.len()];
-    let mut queue = VecDeque::with_capacity(boxes.len());
-    let mut in_queue = vec![true; boxes.len()];
-
-    // Initial setup
-    for i in 0..boxes.len() {
-        let coords = (
-            (boxes[i].x / x_thres).floor() as i32,
-            (boxes[i].y / y_thres).floor() as i32,
-        );
-        cell_coords[i] = coords;
-        grid.entry(coords).or_default().push(i);
-        queue.push_back(i);
-    }
-
-    let mut ops_count = 0;
-
-    while let Some(i) = queue.pop_front() {
-        in_queue[i] = false;
-        ops_count += 1;
-        // Initial checking for each element doesn't count
-        if ops_count > max_ops + boxes.len() {
-            break;
-        }
-
-        let (cx, cy) = cell_coords[i];
-
-        // Check 9 neighboring cells
-        'outer: for dx in -1..=1 {
-            for dy in -1..=1 {
-                let target_cell = (cx + dx, cy + dy);
-
-                let Some(neighbors) = grid.get(&target_cell) else {
-                    continue;
-                };
-                for &j in neighbors {
-                    if i == j {
-                        continue;
-                    }
-
-                    let diff_x = boxes[i].x - boxes[j].x;
-                    let diff_y = boxes[i].y - boxes[j].y;
-                    let abs_dx = diff_x.abs();
-                    let abs_dy = diff_y.abs();
-
-                    if abs_dx < x_thres && abs_dy < y_thres {
-                        // Collision found! Resolve it.
-                        let (shift_x, shift_y) = (x_thres - abs_dx, y_thres - abs_dy);
-
-                        // Move in a less crowded direction
-                        let x_m_count = grid.get(&(cx - 1, cy)).map(|v| v.len()).unwrap_or(0);
-                        let x_p_count = grid.get(&(cx + 1, cy)).map(|v| v.len()).unwrap_or(0);
-                        let y_m_count = grid.get(&(cx, cy - 1)).map(|v| v.len()).unwrap_or(0);
-                        let y_p_count = grid.get(&(cx, cy + 1)).map(|v| v.len()).unwrap_or(0);
-
-                        if x_m_count + x_p_count <= y_m_count + y_p_count {
-                            let move_dist =
-                                (shift_x / 2.0) * (if diff_x >= 0.0 { 1.0 } else { -1.0 });
-                            boxes[i].x += move_dist;
-                            boxes[i].delta.0 += move_dist;
-                            boxes[j].x -= move_dist;
-                            boxes[j].delta.0 -= move_dist;
-                        } else {
-                            let move_dist =
-                                (shift_y / 2.0) * (if diff_y >= 0.0 { 1.0 } else { -1.0 });
-                            boxes[i].y += move_dist;
-                            boxes[i].delta.1 += move_dist;
-                            boxes[j].y -= move_dist;
-                            boxes[j].delta.1 -= move_dist;
-                        }
-
-                        // Update grid positions and mark both as dirty
-                        update_and_requeue(
-                            i,
-                            boxes,
-                            &mut cell_coords,
-                            &mut grid,
-                            &mut queue,
-                            &mut in_queue,
-                            (x_thres, y_thres),
-                        );
-                        update_and_requeue(
-                            j,
-                            boxes,
-                            &mut cell_coords,
-                            &mut grid,
-                            &mut queue,
-                            &mut in_queue,
-                            (x_thres, y_thres),
-                        );
-
-                        // After moving i, we should re-fetch its new neighbors
-                        // breaking here allows the next loop to handle i's new position
-                        break 'outer;
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn update_and_requeue(
-    idx: usize,
-    boxes: &[HintBox],
-    cell_coords: &mut [(i32, i32)],
-    grid: &mut HashMap<(i32, i32), Vec<usize>>,
-    queue: &mut VecDeque<usize>,
-    in_queue: &mut [bool],
-    thres: (f64, f64),
-) {
-    let old_c = cell_coords[idx];
-    let (xt, yt) = thres;
-    let new_c = (
-        (boxes[idx].x / xt).floor() as i32,
-        (boxes[idx].y / yt).floor() as i32,
-    );
-
-    if old_c != new_c {
-        if let Some(list) = grid.get_mut(&old_c)
-            && let Some(pos) = list.iter().position(|&x| x == idx)
-        {
-            list.swap_remove(pos);
-        }
-        grid.entry(new_c).or_default().push(idx);
-        cell_coords[idx] = new_c;
-    }
-
-    if !in_queue[idx] {
-        queue.push_back(idx);
-        in_queue[idx] = true;
-    }
 }
 
 #[cfg(test)]
@@ -835,115 +589,5 @@ mod select_range_tests {
         let height = estimate_font_height("any text", &frame);
 
         assert_eq!(height, 0.5);
-    }
-}
-
-#[cfg(test)]
-mod collision_tests {
-    use super::*;
-
-    fn mock_box(idx: usize, x: f64, y: f64) -> HintBox {
-        HintBox {
-            label: format!("Box{}", idx),
-            x,
-            y,
-            idx,
-            delta: (0.0, 0.0),
-            frame: None,
-            color: None,
-            text_layer: None,
-        }
-    }
-
-    #[test]
-    fn test_simple_collision_resolution() {
-        let mut boxes = vec![
-            mock_box(0, 100.0, 100.0),
-            mock_box(1, 105.0, 100.0), // 5px diff, threshold is 10
-        ];
-
-        resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 100);
-
-        let diff_x = (boxes[0].x - boxes[1].x).abs();
-        assert!(
-            diff_x >= 10.0,
-            "Boxes should be at least 10px apart, got {}",
-            diff_x
-        );
-        assert_eq!(
-            boxes[0].y, 100.0,
-            "Y coordinate shouldn't change if X move was smaller"
-        );
-    }
-
-    #[test]
-    fn test_chain_reaction() {
-        // A overlaps B, B overlaps C.
-        // Solving A-B should push B into C, which then needs solving.
-        let mut boxes = vec![
-            mock_box(0, 100.0, 100.0),
-            mock_box(1, 108.0, 100.0), // Overlaps 0 by 2px
-            mock_box(2, 116.0, 100.0), // Overlaps 1 by 2px
-        ];
-
-        resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 500);
-
-        // Verify all pairs
-        for i in 0..boxes.len() {
-            for j in i + 1..boxes.len() {
-                let dx = (boxes[i].x - boxes[j].x).abs();
-                let dy = (boxes[i].y - boxes[j].y).abs();
-                assert!(
-                    dx >= 10.0 || dy >= 10.0,
-                    "Collision found between {} and {}",
-                    i,
-                    j
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_no_collision_stays_put() {
-        let mut boxes = vec![mock_box(0, 100.0, 100.0), mock_box(1, 200.0, 200.0)];
-
-        let original_x = boxes[0].x;
-        resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 100);
-
-        assert_eq!(
-            boxes[0].x, original_x,
-            "Box should not move if no collision exists"
-        );
-    }
-
-    #[test]
-    fn test_spatial_grid_boundary() {
-        // Place boxes on either side of a grid cell boundary
-        // If x_thres is 10, cell boundary is at multiples of 10.
-        let mut boxes = vec![
-            mock_box(0, 9.9, 10.0),  // Cell (0, 1)
-            mock_box(1, 10.1, 10.0), // Cell (1, 1)
-        ];
-
-        resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 100);
-
-        let diff_x = (boxes[0].x - boxes[1].x).abs();
-        let diff_y = (boxes[0].y - boxes[1].y).abs();
-        assert!(
-            diff_x >= 10.0 || diff_y >= 10.0,
-            "Should resolve collisions even across grid boundaries"
-        );
-    }
-
-    #[test]
-    fn test_max_ops_safety() {
-        // Create a "Black Hole" of points that cannot be perfectly resolved
-        // to ensure we don't loop forever.
-        let mut boxes = (0..10)
-            .map(|i| mock_box(i, 100.0, 100.0))
-            .collect::<Vec<_>>();
-
-        // This should hit the max_ops and exit gracefully
-        resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 50);
     }
 }

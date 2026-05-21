@@ -1,8 +1,6 @@
 use crate::{
-    config::{
-        CustomTarget, GlyphlowConfig, GlyphlowTheme, RoleOfInterest, VisibilityCheckingLevel,
-    },
-    util::{Frame, HintBox, hint_boxes_from_frames, select_range_helper},
+    config::{CustomTarget, GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
+    util::{Frame, select_range_helper},
 };
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
@@ -232,7 +230,17 @@ impl ElementCache {
         self.seen_center.clear();
     }
 
-    pub fn force_add(&mut self, eoi: ElementOfInterest) {
+    pub fn add_by_target(&mut self, ele: ElementOfInterest, target: &Target) -> Option<usize> {
+        let idx = self.cache.len();
+        if *target == Target::ChildElement {
+            self.force_add(ele);
+            Some(idx)
+        } else {
+            self.add(ele)
+        }
+    }
+
+    fn force_add(&mut self, eoi: ElementOfInterest) {
         let ElementOfInterest { frame, .. } = &eoi;
         let (x, y) = frame.center();
         // f64 to u64 for hashing
@@ -242,14 +250,14 @@ impl ElementCache {
         self.cache.push(eoi);
     }
 
-    pub fn add(&mut self, eoi: ElementOfInterest) {
+    fn add(&mut self, eoi: ElementOfInterest) -> Option<usize> {
         let ElementOfInterest {
             kind: ElementKind::Standard { element, role },
             context,
             frame,
         } = &eoi
         else {
-            return;
+            return None;
         };
 
         // NOTE: Use parent frames for scroll bars,
@@ -275,7 +283,7 @@ impl ElementCache {
             // may have zero sized shadows, skip them to keep the workflow going
             RoleOfInterest::CustomTarget if w != 0.0 && h != 0.0 => {}
             RoleOfInterest::Image if w.min(h) < self.image_min_size => {
-                return;
+                return None;
             }
             // Keep large enough images
             RoleOfInterest::Image => (),
@@ -283,7 +291,7 @@ impl ElementCache {
             RoleOfInterest::TextField
                 if (w < self.element_min_width || h < self.element_min_height) =>
             {
-                return;
+                return None;
             }
             RoleOfInterest::TextField => (),
             // Check text before size, keep small texts
@@ -295,11 +303,11 @@ impl ElementCache {
                             .chars()
                             .all(|c| c.is_ascii_punctuation() || c.is_whitespace())
                 }) {
-                    return;
+                    return None;
                 }
             }
             _ if (w < self.element_min_width || h < self.element_min_height) => {
-                return;
+                return None;
             }
             _ => (),
         }
@@ -311,27 +319,14 @@ impl ElementCache {
         // NOTE: de-duplication for DOM elements
         if let Some(idx) = self.seen_center.get(&center) {
             self.cache[*idx] = eoi;
+            None
         } else {
             self.seen_center.insert(center, self.cache.len());
             let mut eoi = eoi;
             eoi.frame = frame;
             self.cache.push(eoi);
+            Some(self.cache.len() - 1)
         }
-    }
-
-    pub fn hint_boxes(
-        &self,
-        screen_frame: &Frame,
-        theme: &GlyphlowTheme,
-        colored_frame_min_size: f64,
-    ) -> (u32, Vec<HintBox>) {
-        hint_boxes_from_frames(
-            self.cache.len(),
-            self.cache.iter().map(|it| it.frame),
-            screen_frame,
-            theme,
-            colored_frame_min_size,
-        )
     }
 
     pub fn select_range(

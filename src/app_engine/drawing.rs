@@ -4,12 +4,10 @@ use crate::{
     TEXT_ACTION_MENU_ITEMS,
     ax_element::{ElementOfInterest, Target},
     config::RoleOfInterest,
-    drawer::{GlyphlowDrawingLayer, update_hint_text},
+    user_interface::GlyphlowDrawingLayer,
 };
 use objc2::rc::Retained;
-use objc2_core_graphics::CGMutablePath;
-use objc2_foundation::{NSPoint, NSRect};
-use objc2_quartz_core::{CALayer, CAShapeLayer, CATransaction};
+use objc2_quartz_core::{CALayer, CATransaction};
 
 static MAX_TEXT_DISPLAY_LEN: usize = 30;
 
@@ -35,12 +33,14 @@ impl AppEngine {
         );
         if !incremental {
             self.clear_drawing();
-            self.window.draw_hints(
-                &mut self.hint_boxes,
-                &self.config.theme,
-                self.key_prefix.len(),
-                self.screen_size,
-            );
+            for hb in self.hint_boxes.iter_mut() {
+                hb.draw(
+                    &self.window,
+                    &self.config.theme,
+                    self.key_prefix.len(),
+                    self.screen_size,
+                );
+            }
             self.draw_selected_frame();
         } else {
             self.update_hints();
@@ -51,35 +51,9 @@ impl AppEngine {
     /// Show/Hide hint_boxes/colored_frames, update hint text and positions
     fn update_hints(&mut self) {
         let prefix_len = self.key_prefix.len();
-        let sublayers = unsafe { self.window.sublayers().unwrap_or_default() };
-
-        // NOTE: Safety check: if layers were cleared or out of sync, do nothing.
-        // Happens when an immediate filtering key pressed right after the activation signal.
-        if sublayers.count() < 2 {
-            return;
-        }
-
-        let frames_root: Retained<CALayer> = sublayers.objectAtIndex(0);
-        let boxes_root: Retained<CALayer> = sublayers.objectAtIndex(1);
-
-        let frame_layers = unsafe { frames_root.sublayers().unwrap_or_default() };
-        let box_layers = unsafe { boxes_root.sublayers().unwrap_or_default() };
-
-        if frame_layers.count() < self.hint_boxes.len()
-            || box_layers.count() < self.hint_boxes.len()
-        {
-            return;
-        }
-
-        let font_size = &self.config.theme.hint_font.pointSize();
-        let tri_height = font_size / 2.0;
-        let tri_width = font_size / 2.0;
 
         CATransaction::begin();
-        for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
-            let frame_layer: Retained<CALayer> = frame_layers.objectAtIndex(i);
-            let box_layer: Retained<CALayer> = box_layers.objectAtIndex(i);
-
+        for hb in self.hint_boxes.iter_mut() {
             let visible = hb.label.starts_with(&self.key_prefix)
                 && !(self.multi_selection.is_on
                     && self
@@ -87,66 +61,11 @@ impl AppEngine {
                         .one_side_idex
                         .is_some_and(|idx| idx == hb.idx));
 
-            frame_layer.setHidden(!visible);
-            box_layer.setHidden(!visible);
+            hb.set_visible(visible);
 
             if visible {
-                if let Some(text_layer) = &hb.text_layer {
-                    update_hint_text(text_layer, &hb.label, prefix_len, &self.config.theme);
-                }
-
-                // Update positions for collision resolution
-                let box_size = box_layer.bounds().size;
-                let box_width = box_size.width;
-                let box_height = box_size.height;
-
-                let (o_x, o_y) = (hb.x - box_width / 2.0, hb.y - tri_height - box_height);
-                let o_x_move = o_x.min(self.screen_size.width - box_width).max(0.0);
-                let o_y_move = o_y.max(0.0).min(self.screen_size.height - box_height);
-
-                let origin = NSPoint::new(o_x_move, o_y_move);
-                box_layer.setFrame(NSRect::new(origin, box_size));
-
-                // Update triangle
-                if let Some(tri_sublayers) = unsafe { box_layer.sublayers() }
-                    && tri_sublayers.count() > 0
-                {
-                    let tri_layer: Retained<CALayer> = tri_sublayers.objectAtIndex(0);
-                    let tri_x_offset = (box_width - tri_width) / 2.0;
-                    let tri_y_offset = box_height;
-
-                    let mut tri_frame = tri_layer.frame();
-                    tri_frame.origin.x = tri_x_offset;
-                    tri_frame.origin.y = tri_y_offset;
-                    tri_layer.setFrame(tri_frame);
-
-                    // Re-path the triangle to point to exact hint center
-                    if let Ok(tri_shape_layer) = tri_layer.downcast::<CAShapeLayer>() {
-                        let path = CGMutablePath::new();
-                        let delta_x = hb.delta.0;
-                        let delta_y = hb.delta.1;
-                        let x_offset = o_x - o_x_move;
-                        let y_offset = o_y - o_y_move;
-
-                        unsafe {
-                            CGMutablePath::move_to_point(Some(&path), std::ptr::null(), 0.0, 0.0);
-                            CGMutablePath::add_line_to_point(
-                                Some(&path),
-                                std::ptr::null(),
-                                tri_width / 2.0 - delta_x + x_offset,
-                                tri_height - delta_y + y_offset,
-                            );
-                            CGMutablePath::add_line_to_point(
-                                Some(&path),
-                                std::ptr::null(),
-                                tri_width,
-                                0.0,
-                            );
-                        }
-                        CGMutablePath::close_subpath(Some(&path));
-                        tri_shape_layer.setPath(Some(&path));
-                    }
-                }
+                hb.update_text(prefix_len, &self.config.theme);
+                hb.update_position(self.screen_size, &self.config.theme);
             }
         }
         CATransaction::commit();
