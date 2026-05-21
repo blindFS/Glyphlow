@@ -270,8 +270,13 @@ impl HintBox {
             fl.setHidden(!visible);
         }
     }
+}
 
-    pub fn remove_from_superlayer(&self) {
+impl Drop for HintBox {
+    fn drop(&mut self) {
+        // Automatically detaches itself from the screen whenever Rust drops it
+        self.text_layer.removeFromSuperlayer();
+        self.tri_layer.removeFromSuperlayer();
         self.box_layer.removeFromSuperlayer();
         if let Some(fl) = &self.frame_layer {
             fl.removeFromSuperlayer();

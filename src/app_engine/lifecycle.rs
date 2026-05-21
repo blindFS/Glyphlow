@@ -11,6 +11,7 @@ use crate::{
 };
 use accessibility::AXUIElementAttributes;
 use log::Level;
+use objc2::rc::autoreleasepool;
 use objc2_quartz_core::CATransaction;
 use std::{path::PathBuf, sync::mpsc::Receiver, time::Duration};
 use tokio::sync::mpsc::Sender;
@@ -197,7 +198,7 @@ impl AppEngine {
 
         let mut color_idx = 0;
         for (idx, signal) in result_rx.iter().enumerate() {
-            match signal {
+            autoreleasepool(|_| match signal {
                 ElementSignal::ElementFound(Some(ele)) => {
                     let need_flush = (idx + 1) % Self::HINTBOX_FLUSH_BATCH_SIZE == 0;
                     self.handle_element_found(ele, &mut color_idx, need_flush);
@@ -206,7 +207,7 @@ impl AppEngine {
                     self.handle_traversal_finished(target);
                 }
                 _ => (),
-            }
+            })
         }
         log::log!(Level::Debug, "Finish traversing");
     }

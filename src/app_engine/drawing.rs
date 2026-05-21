@@ -6,7 +6,7 @@ use crate::{
     config::RoleOfInterest,
     user_interface::GlyphlowDrawingLayer,
 };
-use objc2::rc::Retained;
+use objc2::rc::{Retained, autoreleasepool};
 use objc2_quartz_core::CALayer;
 
 static MAX_TEXT_DISPLAY_LEN: usize = 30;
@@ -27,37 +27,41 @@ impl AppEngine {
 
     /// Draw/Update hint boxes
     pub(super) fn draw_hints(&mut self) {
-        self.clear_drawing();
-        for hb in self.hint_boxes.iter_mut() {
-            hb.draw(
-                &self.window,
-                &self.config.theme,
-                self.key_prefix.len(),
-                self.screen_size,
-            );
-        }
-        self.draw_selected_frame();
+        autoreleasepool(|_| {
+            self.clear_drawing();
+            for hb in self.hint_boxes.iter_mut() {
+                hb.draw(
+                    &self.window,
+                    &self.config.theme,
+                    self.key_prefix.len(),
+                    self.screen_size,
+                );
+            }
+            self.draw_selected_frame();
+        })
     }
 
     /// Show/Hide hint_boxes/colored_frames, update hint text and positions
     pub(super) fn update_hints(&mut self) {
         let prefix_len = self.key_prefix.len();
 
-        for hb in self.hint_boxes.iter_mut() {
-            let visible = hb.label.starts_with(&self.key_prefix)
-                && !(self.multi_selection.is_on
-                    && self
-                        .multi_selection
-                        .one_side_idex
-                        .is_some_and(|idx| idx == hb.idx));
+        autoreleasepool(|_| {
+            for hb in self.hint_boxes.iter_mut() {
+                let visible = hb.label.starts_with(&self.key_prefix)
+                    && !(self.multi_selection.is_on
+                        && self
+                            .multi_selection
+                            .one_side_idex
+                            .is_some_and(|idx| idx == hb.idx));
 
-            hb.set_visible(visible);
+                hb.set_visible(visible);
 
-            if visible {
-                hb.update_text(prefix_len, &self.config.theme);
-                hb.update_position(self.screen_size, &self.config.theme);
+                if visible {
+                    hb.update_text(prefix_len, &self.config.theme);
+                    hb.update_position(self.screen_size, &self.config.theme);
+                }
             }
-        }
+        })
     }
 
     fn menu_format_helper(
@@ -212,49 +216,55 @@ impl AppEngine {
     }
 
     pub(super) fn draw_element_menu(&self, key_prefix: &str, role: RoleOfInterest, set_mode: bool) {
-        self.clear_drawing();
-        // Set mode before drawing to make it more responsive
-        if set_mode {
+        autoreleasepool(|_| {
+            self.clear_drawing();
+            // Set mode before drawing to make it more responsive
+            if set_mode {
+                match role {
+                    RoleOfInterest::Image => self.set_mode(Mode::ImageActionMenu),
+                    RoleOfInterest::ScrollBar => self.set_mode(Mode::Scrolling),
+                    RoleOfInterest::TextField
+                    | RoleOfInterest::StaticText
+                    | RoleOfInterest::PseudoText => self.set_mode(Mode::TextActionMenu),
+                    _ if self.target == Target::Text => self.set_mode(Mode::TextActionMenu),
+                    _ if self.target == Target::Scrollable => self.set_mode(Mode::Scrolling),
+                    _ => self.set_mode(Mode::DashBoard),
+                }
+            }
+
+            let text_action_helper = || {
+                let text = self
+                    .selected
+                    .as_ref()
+                    .and_then(|eoi| eoi.context.as_ref())
+                    .expect("Internal Error: selected text should be ready for text action menu");
+                self.draw_text_action_menu(text, key_prefix);
+            };
+
             match role {
-                RoleOfInterest::Image => self.set_mode(Mode::ImageActionMenu),
-                RoleOfInterest::ScrollBar => self.set_mode(Mode::Scrolling),
+                RoleOfInterest::Image => self.draw_image_action_menu(key_prefix),
+                RoleOfInterest::ScrollBar => self.draw_scrolling_menu(key_prefix),
                 RoleOfInterest::TextField
                 | RoleOfInterest::StaticText
-                | RoleOfInterest::PseudoText => self.set_mode(Mode::TextActionMenu),
-                _ if self.target == Target::Text => self.set_mode(Mode::TextActionMenu),
-                _ if self.target == Target::Scrollable => self.set_mode(Mode::Scrolling),
-                _ => self.set_mode(Mode::DashBoard),
+                | RoleOfInterest::PseudoText => {
+                    text_action_helper();
+                }
+                _ if self.target == Target::Text => text_action_helper(),
+                _ if self.target == Target::Scrollable => self.draw_scrolling_menu(key_prefix),
+                _ => self.draw_dashboard(key_prefix),
             }
-        }
-
-        let text_action_helper = || {
-            let text = self
-                .selected
-                .as_ref()
-                .and_then(|eoi| eoi.context.as_ref())
-                .expect("Internal Error: selected text should be ready for text action menu");
-            self.draw_text_action_menu(text, key_prefix);
-        };
-
-        match role {
-            RoleOfInterest::Image => self.draw_image_action_menu(key_prefix),
-            RoleOfInterest::ScrollBar => self.draw_scrolling_menu(key_prefix),
-            RoleOfInterest::TextField | RoleOfInterest::StaticText | RoleOfInterest::PseudoText => {
-                text_action_helper();
-            }
-            _ if self.target == Target::Text => text_action_helper(),
-            _ if self.target == Target::Scrollable => self.draw_scrolling_menu(key_prefix),
-            _ => self.draw_dashboard(key_prefix),
-        }
+        })
     }
 
     pub(super) fn menu_refresh(&self, key_prefix: &str, set_mode: bool) {
-        if let Some(eoi) = self.selected.as_ref() {
-            self.draw_element_menu(key_prefix, eoi.role(), set_mode);
-        } else {
-            self.clear_drawing();
-            self.draw_dashboard(key_prefix);
-        }
+        autoreleasepool(|_| {
+            if let Some(eoi) = self.selected.as_ref() {
+                self.draw_element_menu(key_prefix, eoi.role(), set_mode);
+            } else {
+                self.clear_drawing();
+                self.draw_dashboard(key_prefix);
+            }
+        })
     }
 
     pub(super) fn draw_word_picker(&mut self) {
