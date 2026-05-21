@@ -7,7 +7,7 @@ use crate::{
     config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
     os_util::{get_focused, get_system_alarm_window},
     user_interface::{HintBox, hint_label_from_index, resolve_collisions},
-    util::Frame,
+    util::{Frame, digits_by_length},
 };
 use accessibility::AXUIElementAttributes;
 use log::Level;
@@ -191,7 +191,9 @@ impl AppEngine {
     pub(super) fn activate(&mut self, target: Target) {
         log::log!(Level::Debug, "Start traversing, target: {target:?}");
         let result_rx = self.ui_element_traverse_on_activation(target);
+
         self.clear_drawing();
+        self.draw_selected_frame();
 
         let mut color_idx = 0;
         for (idx, signal) in result_rx.iter().enumerate() {
@@ -204,11 +206,11 @@ impl AppEngine {
                     self.handle_traversal_finished(target);
                     // For internal activations like workflow action / element explorer
                     self.set_mode(Mode::Filtering);
-                    log::log!(Level::Debug, "Finish traversing");
                 }
                 _ => (),
             }
         }
+        log::log!(Level::Debug, "Finish traversing");
     }
 
     fn handle_element_found(
@@ -261,14 +263,14 @@ impl AppEngine {
             }
 
             self.hint_boxes.push(hb);
-            let digits = self.hint_boxes.len().ilog(26) + 1;
+            let digits = digits_by_length(self.hint_boxes.len());
 
             if digits > self.hint_width {
                 for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
                     hb.label = hint_label_from_index(i, Some(digits));
                 }
-                self.hint_width = digits;
             }
+            self.hint_width = digits;
         }
     }
 
@@ -278,7 +280,7 @@ impl AppEngine {
         if !self.hint_boxes.is_empty() {
             resolve_collisions(&mut self.hint_boxes, self.hint_width, &self.config.theme);
             // Update layers to match final positions and labels without clearing (avoid flicker)
-            self.draw_hints(true);
+            self.update_hints();
 
             if need_help_msg {
                 self.notify("Press Enter to act.", Level::Trace);

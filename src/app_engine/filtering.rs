@@ -31,9 +31,9 @@ impl AppEngine {
             };
             self.hint_width = digits;
             self.hint_boxes = ocr_hints;
-            self.draw_hints(false);
+            self.draw_hints();
         } else {
-            self.draw_hints(true);
+            self.update_hints();
         }
 
         let filtered_idx = self
@@ -61,7 +61,7 @@ impl AppEngine {
                     self.update_selected_text_and_show_menu(text.clone());
                 } else {
                     self.key_prefix.clear();
-                    self.draw_hints(true);
+                    self.update_hints();
                 }
             } else {
                 let (selected_text, cg_rect) = self
@@ -159,7 +159,7 @@ impl AppEngine {
                         } else {
                             self.multi_selection.role = Some(role);
                             self.key_prefix.clear();
-                            self.draw_hints(true);
+                            self.update_hints();
                         }
                     } else if context.is_some() {
                         self.selected = Some(eoi.clone());
@@ -169,6 +169,24 @@ impl AppEngine {
                 Target::ChildElement => {
                     self.selected = Some(eoi.clone());
                     self.activate(Target::ChildElement);
+                    // Quick follow if only 1 element remaining
+                    // NOTE: use count to avoid circular pointer
+                    let mut count = 0;
+                    while self.element_cache.cache.len() == 1 && count < 10 {
+                        count += 1;
+                        self.selected = Some(self.element_cache.cache[0].to_owned());
+                        self.activate(Target::ChildElement);
+                    }
+
+                    // Actions for current selected element
+                    if self.element_cache.cache.is_empty() {
+                        let role = self
+                            .selected
+                            .as_ref()
+                            .map(|eoi| eoi.role())
+                            .unwrap_or_default();
+                        self.draw_element_menu("", role, true);
+                    }
                 }
                 Target::Scrollable => {
                     self.selected = Some(eoi.clone());
@@ -201,7 +219,7 @@ impl AppEngine {
                 }
             }
         } else {
-            self.draw_hints(true);
+            self.update_hints();
         }
     }
 
@@ -239,7 +257,7 @@ impl AppEngine {
             }
             FilterMode::Generic if self.multi_selection.is_on => {
                 self.multi_selection.clear_one_side();
-                self.draw_hints(true);
+                self.update_hints();
             }
             FilterMode::OCR if self.multi_selection.is_on => {
                 self.multi_selection.clear_one_side();

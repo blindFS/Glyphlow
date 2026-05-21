@@ -16,7 +16,7 @@ impl AppEngine {
         self.window.clear();
     }
 
-    fn draw_selected_frame(&self) {
+    pub(super) fn draw_selected_frame(&self) {
         if let Some(ElementOfInterest { frame, .. }) = self.selected.as_ref() {
             self.window.draw_frame_box(
                 &frame.invert_y(self.screen_size.height),
@@ -26,30 +26,21 @@ impl AppEngine {
     }
 
     /// Draw/Update hint boxes
-    pub(super) fn draw_hints(&mut self, incremental: bool) {
-        log::log!(
-            log::Level::Debug,
-            "Start drawing hints, incremental: {incremental}"
-        );
-        if !incremental {
-            self.clear_drawing();
-            for hb in self.hint_boxes.iter_mut() {
-                hb.draw(
-                    &self.window,
-                    &self.config.theme,
-                    self.key_prefix.len(),
-                    self.screen_size,
-                );
-            }
-            self.draw_selected_frame();
-        } else {
-            self.update_hints();
+    pub(super) fn draw_hints(&mut self) {
+        self.clear_drawing();
+        for hb in self.hint_boxes.iter_mut() {
+            hb.draw(
+                &self.window,
+                &self.config.theme,
+                self.key_prefix.len(),
+                self.screen_size,
+            );
         }
-        log::log!(log::Level::Debug, "Finish drawing hints");
+        self.draw_selected_frame();
     }
 
     /// Show/Hide hint_boxes/colored_frames, update hint text and positions
-    fn update_hints(&mut self) {
+    pub(super) fn update_hints(&mut self) {
         let prefix_len = self.key_prefix.len();
 
         CATransaction::begin();

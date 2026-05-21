@@ -7,7 +7,7 @@ use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRect, NSSize, NSStr
 use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer, kCAAlignmentCenter};
 
 use crate::config::GlyphlowTheme;
-use crate::util::{Frame, estimate_frame_for_text};
+use crate::util::{Frame, digits_by_length, estimate_frame_for_text};
 
 pub fn hint_label_from_index(i: usize, digits: Option<u32>) -> String {
     if i == 0 && digits.is_none() {
@@ -289,7 +289,7 @@ pub fn hint_boxes_from_frames(
     if len == 0 {
         return (0, Vec::new());
     }
-    let digits = len.ilog(26) + 1;
+    let digits = digits_by_length(len);
     let color_num = theme.frame_colors.len();
     let mut color_idx = 0;
 

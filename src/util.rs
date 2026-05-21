@@ -591,3 +591,7 @@ mod select_range_tests {
         assert_eq!(height, 0.5);
     }
 }
+
+pub fn digits_by_length(len: usize) -> u32 {
+    if len <= 1 { 1 } else { (len - 1).ilog(26) + 1 }
+}
