@@ -272,18 +272,6 @@ impl HintBox {
     }
 }
 
-impl Drop for HintBox {
-    fn drop(&mut self) {
-        // Automatically detaches itself from the screen whenever Rust drops it
-        self.text_layer.removeFromSuperlayer();
-        self.tri_layer.removeFromSuperlayer();
-        self.box_layer.removeFromSuperlayer();
-        if let Some(fl) = &self.frame_layer {
-            fl.removeFromSuperlayer();
-        }
-    }
-}
-
 pub fn hint_boxes_from_frames(
     len: usize,
     frames: impl Iterator<Item = Frame>,
