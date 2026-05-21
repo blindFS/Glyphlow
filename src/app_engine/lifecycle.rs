@@ -193,6 +193,7 @@ impl AppEngine {
         let result_rx = self.ui_element_traverse_on_activation(target);
 
         self.clear_drawing();
+        self.draw_selected_frame();
 
         let mut color_idx = 0;
         for (idx, signal) in result_rx.iter().enumerate() {

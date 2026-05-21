@@ -7,7 +7,7 @@ use crate::{
     user_interface::GlyphlowDrawingLayer,
 };
 use objc2::rc::Retained;
-use objc2_quartz_core::{CALayer, CATransaction};
+use objc2_quartz_core::CALayer;
 
 static MAX_TEXT_DISPLAY_LEN: usize = 30;
 
@@ -43,7 +43,6 @@ impl AppEngine {
     pub(super) fn update_hints(&mut self) {
         let prefix_len = self.key_prefix.len();
 
-        CATransaction::begin();
         for hb in self.hint_boxes.iter_mut() {
             let visible = hb.label.starts_with(&self.key_prefix)
                 && !(self.multi_selection.is_on
@@ -59,7 +58,6 @@ impl AppEngine {
                 hb.update_position(self.screen_size, &self.config.theme);
             }
         }
-        CATransaction::commit();
     }
 
     fn menu_format_helper(
