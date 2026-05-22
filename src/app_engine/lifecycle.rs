@@ -310,8 +310,7 @@ impl AppEngine {
                 Ok(mut new_config) => {
                     self.element_cache.reload_config(&new_config);
                     let need_warning = !self.config.safe_reload(&mut new_config);
-                    // TODO: Reload theme in UIDrawer
-                    // self.drawer.reload_theme(&new_config.theme);
+                    self.drawer.reload_theme(&new_config.theme);
                     self.config = new_config;
 
                     if need_warning {
