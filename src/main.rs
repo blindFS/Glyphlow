@@ -6,13 +6,9 @@ use glyphlow::{
     AppEngine, AppSignal, KeyListener, KeyState, Mode,
     config::{GlyphlowConfig, get_config_path},
     os_util::check_accessibility_permissions,
-    user_interface::{GlyphlowDrawingLayer, create_overlay_window, get_main_screen_size},
 };
 use notify::RecursiveMode;
 use notify_debouncer_mini::{DebounceEventResult, new_debouncer};
-use objc2::MainThreadMarker;
-use objc2_app_kit::NSWindowCollectionBehavior;
-use objc2_quartz_core::CALayer;
 use rdev::{EventType, grab};
 use std::{
     collections::HashSet,
@@ -60,18 +56,6 @@ async fn main() {
     // Need this because rdev::grab takes a Fn not FnMut
     let key_state = Arc::new(Mutex::new(KeyState::default()));
 
-    let mtm = MainThreadMarker::new().expect("Not on main thread");
-    let screen_size = get_main_screen_size(mtm);
-    let window = create_overlay_window(mtm, screen_size);
-    // To work across different macOS native workspaces
-    window.setCollectionBehavior(
-        NSWindowCollectionBehavior::CanJoinAllSpaces
-            | NSWindowCollectionBehavior::Stationary
-            | NSWindowCollectionBehavior::IgnoresCycle,
-    );
-    window.makeKeyAndOrderFront(None);
-    let window = CALayer::from_window(&window).expect("Failed to get root layer of window.");
-
     // Listen to temp file updates
     let cache_file = create_cache_file().expect("Failed to create temp file.");
     let (ftx, mut frx) = mpsc::channel::<PathBuf>(100);
@@ -111,15 +95,7 @@ async fn main() {
 
     // Listen to notification timeout
     let (ttx, mut trx) = mpsc::channel::<()>(100);
-    let mut app_engine = AppEngine::new(
-        state.clone(),
-        key_state.clone(),
-        config,
-        window,
-        screen_size,
-        cache_file,
-        ttx,
-    );
+    let mut app_engine = AppEngine::new(state.clone(), key_state.clone(), config, cache_file, ttx);
 
     thread::spawn(move || {
         let key_state = key_state.clone();

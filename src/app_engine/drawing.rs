@@ -4,42 +4,45 @@ use crate::{
     TEXT_ACTION_MENU_ITEMS,
     ax_element::{ElementOfInterest, Target},
     config::RoleOfInterest,
-    user_interface::GlyphlowDrawingLayer,
 };
-use objc2::rc::{Retained, autoreleasepool};
-use objc2_quartz_core::CALayer;
+use objc2::rc::autoreleasepool;
 
 static MAX_TEXT_DISPLAY_LEN: usize = 30;
 
 impl AppEngine {
-    pub(super) fn clear_drawing(&self) {
-        self.window.clear();
+    pub(super) fn clear_drawing(&mut self) {
+        self.drawer.clear();
     }
 
-    pub(super) fn draw_selected_frame(&self) {
-        autoreleasepool(|_| {
-            if let Some(ElementOfInterest { frame, .. }) = self.selected.as_ref() {
-                self.window.draw_frame_box(
-                    &frame.invert_y(self.screen_size.height),
-                    &self.config.theme.hint_bg_color,
-                );
-            }
-        })
+    /// Clear hint drawings
+    /// Should only be called on:
+    /// 1. Deactivation
+    /// 2. Only 1 matching remained while hint-based filtering
+    pub(super) fn clear_hints(&self) {
+        for hb in self.hint_boxes.iter() {
+            hb.free();
+        }
+    }
+
+    /// Change selected element of interest
+    /// Draw/Update the frame box of selected element
+    pub(super) fn select(&mut self, eoi: ElementOfInterest) {
+        self.drawer
+            .draw_frame(&eoi.frame.invert_y(self.screen_size.height));
+        self.selected = Some(eoi);
     }
 
     /// Draw/Update hint boxes
     pub(super) fn draw_hints(&mut self) {
         autoreleasepool(|_| {
-            self.clear_drawing();
             for hb in self.hint_boxes.iter_mut() {
                 hb.draw(
-                    &self.window,
+                    &self.drawer.root,
                     &self.config.theme,
                     self.key_prefix.len(),
                     self.screen_size,
                 );
             }
-            self.draw_selected_frame();
         })
     }
 
@@ -149,13 +152,6 @@ impl AppEngine {
         msg
     }
 
-    pub(super) fn draw_menu(&self, msg: &str) -> Retained<CALayer> {
-        autoreleasepool(|_| {
-            self.window
-                .draw_menu(msg, self.screen_size, &self.config.theme)
-        })
-    }
-
     fn draw_dashboard(&self, key_prefix: &str) {
         let msg = self.menu_msg_alignment_helper(
             "Pick a Target:",
@@ -166,9 +162,7 @@ impl AppEngine {
             key_prefix,
         );
 
-        self.clear_drawing();
-        self.draw_selected_frame();
-        self.draw_menu(&msg);
+        self.drawer.draw_menu(&msg);
     }
 
     fn draw_image_action_menu(&self, key_prefix: &str) {
@@ -181,7 +175,7 @@ impl AppEngine {
             key_prefix,
         );
 
-        self.draw_menu(&msg);
+        self.drawer.draw_menu(&msg);
     }
 
     fn draw_text_action_menu(&self, text: &str, key_prefix: &str) {
@@ -201,7 +195,7 @@ impl AppEngine {
             key_prefix,
         );
 
-        self.draw_menu(&msg);
+        self.drawer.draw_menu(&msg);
     }
 
     fn draw_scrolling_menu(&self, key_prefix: &str) {
@@ -214,13 +208,11 @@ impl AppEngine {
                 false,
                 key_prefix,
             );
-            self.draw_menu(&msg);
+            self.drawer.draw_menu(&msg);
         }
-        self.draw_selected_frame();
     }
 
     pub(super) fn draw_element_menu(&self, key_prefix: &str, role: RoleOfInterest, set_mode: bool) {
-        self.clear_drawing();
         // Set mode before drawing to make it more responsive
         if set_mode {
             match role {
@@ -260,7 +252,6 @@ impl AppEngine {
         if let Some(eoi) = self.selected.as_ref() {
             self.draw_element_menu(key_prefix, eoi.role(), set_mode);
         } else {
-            self.clear_drawing();
             self.draw_dashboard(key_prefix);
         }
     }

@@ -1,16 +1,15 @@
 use crate::{
     action::html_to_attributed_string,
     config::{GlyphlowTheme, cgcolor_to_rgba},
-    user_interface::{GlyphlowDrawingLayer, hint_label_from_index},
-    util::{digits_by_length, estimate_frame_for_text},
+    user_interface::{UIDrawer, hint_label_from_index},
+    util::digits_by_length,
 };
 use objc2::rc::{Retained, autoreleasepool};
-use objc2_app_kit::{NSFont, NSFontAttributeName};
+use objc2_app_kit::NSFontAttributeName;
 use objc2_core_foundation::CGSize;
 use objc2_foundation::{NSMutableAttributedString, NSRange};
-use objc2_quartz_core::{CALayer, CATextLayer};
 use regex::Regex;
-use std::sync::OnceLock;
+use std::{rc::Rc, sync::OnceLock};
 use unicode_width::UnicodeWidthStr;
 
 const WORD_PICKER_STYLE: &str = r#"
@@ -40,18 +39,18 @@ pub struct WordPicker {
     pub text_prefix: String,
     screen_ratio: f64,
     theme: GlyphlowTheme,
+    drawer: Rc<UIDrawer>,
     pub is_searching: bool,
     pub digits: u32,
-    pub text_layer: Option<Retained<CATextLayer>>,
     matched: Vec<usize>,
 }
 
 impl WordPicker {
     pub fn new(
         text: String,
-        window: &Retained<CALayer>,
-        theme: &GlyphlowTheme,
         screen_size: CGSize,
+        theme: GlyphlowTheme,
+        drawer: Rc<UIDrawer>,
     ) -> Self {
         let (word_strings, offsets) = multilingual_split(&text);
         let digits = digits_by_length(word_strings.len());
@@ -62,7 +61,7 @@ impl WordPicker {
         }
 
         let CGSize { width, height } = screen_size;
-        let mut word_picker = Self {
+        let word_picker = Self {
             raw: text,
             words,
             offsets,
@@ -71,16 +70,16 @@ impl WordPicker {
             label_prefix: String::new(),
             text_prefix: String::new(),
             screen_ratio: width / (height + 0.01),
-            theme: theme.clone(),
-            text_layer: None,
+            theme,
+            drawer,
             matched: Vec::new(),
         };
 
-        if let Some((attr_string, _)) = word_picker.get_attributed_string(None) {
-            let text_size = word_picker.estimate_text_size(&attr_string, theme, screen_size);
-            word_picker.text_layer =
-                Some(window.draw_attributed_string(attr_string, screen_size, text_size, theme));
-        }
+        autoreleasepool(|_| {
+            if let Some((attr_string, _)) = word_picker.get_attributed_string(None) {
+                word_picker.drawer.draw_attributed_string(attr_string);
+            }
+        });
 
         word_picker
     }
@@ -98,12 +97,9 @@ impl WordPicker {
 
     pub fn update_text_layer(&mut self, multi_selection_idx: Option<usize>) {
         autoreleasepool(|_| {
-            if let Some(text_layer) = self.text_layer.as_ref()
-                && let Some((attr_string, matched)) =
-                    self.get_attributed_string(multi_selection_idx)
-            {
+            if let Some((attr_string, matched)) = self.get_attributed_string(multi_selection_idx) {
                 self.matched = matched;
-                unsafe { text_layer.setString(Some(&attr_string)) };
+                self.drawer.draw_attributed_string(attr_string);
             };
         })
     }
@@ -250,39 +246,6 @@ impl WordPicker {
         }
 
         Some((attr_string, matched))
-    }
-
-    fn estimate_text_size(
-        &mut self,
-        attr_string: &Retained<NSMutableAttributedString>,
-        theme: &GlyphlowTheme,
-        screen_size: CGSize,
-    ) -> CGSize {
-        let CGSize { width, height } = screen_size;
-        let (size, _) = estimate_frame_for_text(attr_string, (width * 3.0, height * 3.0));
-
-        // In case the default font size is too large
-        let shrinkage = (width / size.width).min(height / size.height);
-        if shrinkage < 1.0 {
-            // Don't shrink too much
-            let font_size = shrinkage * theme.menu_font.pointSize().max(10.0);
-            if let Some(new_font) =
-                NSFont::fontWithName_size(&theme.menu_font.fontName(), font_size)
-            {
-                self.theme.menu_font = new_font.clone();
-                unsafe {
-                    attr_string.addAttribute_value_range(
-                        NSFontAttributeName,
-                        &new_font,
-                        NSRange::new(0, attr_string.length()),
-                    );
-                }
-
-                let (size, _) = estimate_frame_for_text(attr_string, (width, height));
-                return size;
-            };
-        }
-        size
     }
 }
 

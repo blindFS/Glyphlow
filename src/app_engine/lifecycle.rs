@@ -50,7 +50,7 @@ impl AppEngine {
     pub(super) fn clear_cache(&mut self) {
         self.word_picker = None;
         self.ocr_cache = None;
-        self.notification_layers.clear();
+        self.clear_hints();
         self.hint_boxes.clear();
         self.element_cache.clear();
         self.key_prefix.clear();
@@ -69,8 +69,7 @@ impl AppEngine {
             _ => LONG_TIMEOUT,
         };
         log::log!(log_level, "{msg}");
-        let notification_layer = self.draw_menu(msg);
-        self.notification_layers.push(notification_layer);
+        self.drawer.notify(msg);
         let sender = self.timeout_sender.clone();
         tokio::spawn(async move { delay(sender, timeout_secs).await });
     }
@@ -87,7 +86,7 @@ impl AppEngine {
             self.last_window_frame = frame;
             self.is_electron = false;
 
-            self.selected = Some(ElementOfInterest::new(
+            self.select(ElementOfInterest::new(
                 window,
                 None,
                 RoleOfInterest::Generic,
@@ -131,7 +130,7 @@ impl AppEngine {
         };
         self.last_window_frame = window_frame;
 
-        self.selected = Some(ElementOfInterest::new(
+        self.select(ElementOfInterest::new(
             focused_window,
             None,
             RoleOfInterest::Generic,
@@ -162,7 +161,6 @@ impl AppEngine {
             self.select_app_window(vis_level);
         }
 
-        self.clear_cache();
         let (result_tx, result_rx) = std::sync::mpsc::channel();
 
         if let Some(selected) = self.selected.as_ref()
@@ -191,10 +189,9 @@ impl AppEngine {
 
     pub(super) fn activate(&mut self, target: Target) {
         log::log!(Level::Debug, "Start traversing, target: {target:?}");
+        self.clear_cache();
+        self.drawer.clear_menus();
         let result_rx = self.ui_element_traverse_on_activation(target);
-
-        self.clear_drawing();
-        self.draw_selected_frame();
 
         let mut color_idx = 0;
         autoreleasepool(|_| {
@@ -258,7 +255,7 @@ impl AppEngine {
                 color,
             );
 
-            hb.draw(&self.window, &self.config.theme, 0, self.screen_size);
+            hb.draw(&self.drawer.root, &self.config.theme, 0, self.screen_size);
             if need_flush {
                 CATransaction::flush();
             }
@@ -294,9 +291,8 @@ impl AppEngine {
             // Fallback to mouse scroll if no scrollbar found
             let (x, y) = eoi.frame.center();
             self.simulate_event(&rdev::EventType::MouseMove { x, y });
-            self.clear_cache();
             self.draw_element_menu("", RoleOfInterest::ScrollBar, true);
-        } else {
+        } else if target != Target::ChildElement {
             self.clear_drawing();
             self.notify_then_deactivate("No relevant UI elements found.", Level::Warn);
         }
@@ -312,6 +308,8 @@ impl AppEngine {
                 Ok(mut new_config) => {
                     self.element_cache.reload_config(&new_config);
                     let need_warning = !self.config.safe_reload(&mut new_config);
+                    // TODO: Reload theme in UIDrawer
+                    // self.drawer.reload_theme(&new_config.theme);
                     self.config = new_config;
 
                     if need_warning {

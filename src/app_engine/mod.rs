@@ -3,16 +3,16 @@ use crate::{
     action::{OCRResult, WordPicker, screen_shot, text_from_clipboard},
     ax_element::{ElementCache, ElementOfInterest, Target},
     config::{GlyphlowConfig, RoleOfInterest, WorkFlowAction},
-    user_interface::HintBox,
+    user_interface::{HintBox, UIDrawer, get_main_screen_size},
     util::Frame,
 };
 use log::Level;
-use objc2::rc::Retained;
+use objc2::MainThreadMarker;
 use objc2_core_foundation::CGSize;
-use objc2_quartz_core::CALayer;
 use std::{
     collections::VecDeque,
     path::PathBuf,
+    rc::Rc,
     sync::{Arc, Mutex},
 };
 use tokio::sync::mpsc::Sender;
@@ -67,9 +67,7 @@ pub struct AppEngine {
     pub(super) element_cache: ElementCache,
     pub(super) key_prefix: String,
     pub(super) screen_size: CGSize,
-    pub(super) window: Retained<CALayer>,
-    /// Useful for notification clearing
-    pub(super) notification_layers: Vec<Retained<CALayer>>,
+    pub(super) drawer: Rc<UIDrawer>,
     /// Which elements of interest to look for
     pub(super) target: Target,
     pub(super) config: GlyphlowConfig,
@@ -99,11 +97,13 @@ impl AppEngine {
         state: Arc<Mutex<Mode>>,
         key_state: Arc<Mutex<KeyState>>,
         config: GlyphlowConfig,
-        window: Retained<CALayer>,
-        screen_size: CGSize,
         temp_file: PathBuf,
         timeout_sender: Sender<()>,
     ) -> Self {
+        let mtm = MainThreadMarker::new().expect("Not on main thread");
+        let screen_size = get_main_screen_size(mtm);
+        let drawer = Rc::new(UIDrawer::new(screen_size, mtm, &config.theme));
+
         Self {
             state,
             key_state,
@@ -117,8 +117,7 @@ impl AppEngine {
             target: Target::default(),
             hint_width: 0,
             screen_size,
-            window,
-            notification_layers: Vec::new(),
+            drawer,
             config,
             timeout_sender,
             selected: None,
@@ -149,6 +148,7 @@ impl AppEngine {
                 self.deactivate();
             }
             AppSignal::RunWorkFlow(idx) => {
+                self.drawer.clear_menus();
                 self.execute_workflow(idx);
             }
             AppSignal::MenuRefresh(key_prefix) => {
@@ -206,13 +206,11 @@ impl AppEngine {
                     self.target = Target::ImageOCR;
                     self.perform_ocr_on_frame(*frame).await;
                 } else {
-                    self.clear_drawing();
                     self.activate(Target::ImageOCR);
                 }
             }
             AppSignal::FileUpdate(pb) => self.handle_file_update(pb),
             AppSignal::ReadClipboard => {
-                self.clear_drawing();
                 if let Some(text) = text_from_clipboard() {
                     self.selected = Some(ElementOfInterest::pseudo(
                         None,
@@ -227,11 +225,8 @@ impl AppEngine {
                 if self.check_mode(Mode::WaitAndDeactivate) {
                     self.deactivate();
                 } else {
-                    for nl in &self.notification_layers {
-                        nl.removeFromSuperlayer();
-                    }
+                    self.drawer.clear_notifications();
                 }
-                self.notification_layers.clear();
             }
         }
     }

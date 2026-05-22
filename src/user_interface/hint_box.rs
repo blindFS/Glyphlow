@@ -3,7 +3,7 @@ use std::collections::{HashMap, VecDeque};
 use objc2::{AnyThread, rc::Retained};
 use objc2_core_foundation::{CFRetained, CGSize};
 use objc2_core_graphics::{CGColor, CGMutablePath};
-use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRect, NSSize, NSString};
+use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer, kCAAlignmentCenter};
 
 use crate::config::GlyphlowTheme;
@@ -270,6 +270,15 @@ impl HintBox {
             fl.setHidden(!visible);
         }
     }
+
+    pub fn free(&self) {
+        self.tri_layer.removeFromSuperlayer();
+        self.text_layer.removeFromSuperlayer();
+        self.box_layer.removeFromSuperlayer();
+        if let Some(fl) = self.frame_layer.as_ref() {
+            fl.removeFromSuperlayer();
+        }
+    }
 }
 
 pub fn hint_boxes_from_frames(
@@ -506,17 +515,17 @@ pub fn update_hint_text_with_attr(
         attr_string.addAttribute_value_range(
             objc2_app_kit::NSForegroundColorAttributeName,
             hl_color.as_ref(),
-            objc2_foundation::NSRange::new(0, key_prefix_len),
+            NSRange::new(0, key_prefix_len),
         );
         attr_string.addAttribute_value_range(
             objc2_app_kit::NSForegroundColorAttributeName,
             fg_color.as_ref(),
-            objc2_foundation::NSRange::new(key_prefix_len, label.len() - key_prefix_len),
+            NSRange::new(key_prefix_len, label.len() - key_prefix_len),
         );
         attr_string.addAttribute_value_range(
             objc2_app_kit::NSFontAttributeName,
             font,
-            objc2_foundation::NSRange::new(0, label.len()),
+            NSRange::new(0, label.len()),
         );
     }
 }

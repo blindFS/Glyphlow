@@ -42,8 +42,8 @@ impl AppEngine {
                 self.selected = None;
                 self.activate(Target::Custom(ct.clone()));
                 if self.element_cache.cache.len() == 1 {
-                    self.clear_drawing();
-                    self.selected = Some(self.element_cache.cache[0].clone());
+                    self.clear_hints();
+                    self.select(self.element_cache.cache[0].clone());
                 } else if self.element_cache.cache.len() > 1 {
                     return true;
                 } else {
@@ -125,7 +125,6 @@ impl AppEngine {
                 };
             }
             WorkFlowAction::Debug => {
-                self.clear_drawing();
                 self.notify(&element.inspect(), Level::Debug);
                 // HACK: break the loop so the notification will be kept,
                 // basically `Debug` should be a terminal op
@@ -145,16 +144,12 @@ impl AppEngine {
     }
 
     pub(super) fn execute_pending_workflow_actions(&mut self) {
-        self.clear_drawing();
         while let Some(act) = self.pending_workflow_actions.pop_front() {
             if self.execute_workflow_action(&act) {
                 return;
             };
         }
-        self.clear_drawing();
-        if self.notification_layers.is_empty() {
-            self.notify_then_deactivate("Done", Level::Trace);
-        }
+        self.notify_then_deactivate("Done", Level::Trace);
     }
 
     pub(super) fn execute_workflow(&mut self, idx: usize) {
