@@ -82,7 +82,8 @@ impl AppEngine {
     }
 
     pub(super) async fn perform_ocr_on_frame(&mut self, frame: Frame) {
-        self.hint_boxes.clear();
+        self.drawer.clear_menus_instant();
+        self.clear_cache();
         // NOTE: for images with parts out of sight
         let frame = frame
             .intersect(&Frame::from_origion(self.screen_size))

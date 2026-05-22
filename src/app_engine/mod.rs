@@ -207,8 +207,6 @@ impl AppEngine {
             AppSignal::FrameOCR => {
                 if let Some(ElementOfInterest { frame, .. }) = self.selected.as_ref() {
                     self.target = Target::ImageOCR;
-                    self.drawer.clear_menus();
-                    self.clear_hints();
                     self.perform_ocr_on_frame(*frame).await;
                 } else {
                     self.activate(Target::ImageOCR);

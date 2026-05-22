@@ -288,6 +288,15 @@ impl UIDrawer {
         CATransaction::flush();
     }
 
+    pub fn clear_menus_instant(&mut self) {
+        CATransaction::begin();
+        CATransaction::setDisableActions(true);
+        self.menu.hide();
+        self.clear_notifications();
+        CATransaction::commit();
+        CATransaction::flush();
+    }
+
     pub fn clear(&mut self) {
         self.menu.hide();
         self.selected_frame.setHidden(true);
