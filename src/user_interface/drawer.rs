@@ -1,3 +1,7 @@
+use crate::{
+    config::GlyphlowTheme,
+    util::{Frame, estimate_frame_for_text},
+};
 use objc2::{
     AnyThread, MainThreadMarker, MainThreadOnly,
     rc::{DefaultRetained, Retained, autoreleasepool},
@@ -10,11 +14,7 @@ use objc2_app_kit::{
 use objc2_core_foundation::CGSize;
 use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CALayer, CATextLayer, CATransaction};
-
-use crate::{
-    config::GlyphlowTheme,
-    util::{Frame, estimate_frame_for_text},
-};
+use std::cell::RefCell;
 
 struct Menu {
     container: Retained<CALayer>,
@@ -173,8 +173,6 @@ impl Menu {
     }
 }
 
-use std::cell::RefCell;
-
 pub struct UIDrawer {
     theme: GlyphlowTheme,
     pub root: Retained<CALayer>,
@@ -247,6 +245,13 @@ impl UIDrawer {
         let frame = NSRect::new(origin, NSSize::new(w, h));
         self.selected_frame.setFrame(frame);
         self.selected_frame.setHidden(false);
+    }
+
+    pub fn draw_frame_instant(&self, frame: &Frame) {
+        CATransaction::begin();
+        CATransaction::setDisableActions(true);
+        self.draw_frame(frame);
+        CATransaction::commit();
     }
 
     pub fn notify(&self, msg: &str) {

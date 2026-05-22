@@ -86,12 +86,13 @@ impl AppEngine {
             self.last_window_frame = frame;
             self.is_electron = false;
 
-            self.select(ElementOfInterest::new(
+            self.selected = Some(ElementOfInterest::new(
                 window,
                 None,
                 RoleOfInterest::Generic,
                 frame,
             ));
+            self.draw_frame_instant(&frame);
 
             return Some(frame);
         }
@@ -130,12 +131,13 @@ impl AppEngine {
         };
         self.last_window_frame = window_frame;
 
-        self.select(ElementOfInterest::new(
+        self.selected = Some(ElementOfInterest::new(
             focused_window,
             None,
             RoleOfInterest::Generic,
             window_frame,
         ));
+        self.draw_frame_instant(&window_frame);
 
         Some(window_frame)
     }

@@ -47,6 +47,7 @@ pub enum AppSignal {
     DeActivate,
     Filter(char, FilterMode),
     MenuRefresh(String),
+    ActOnSelected,
     // Sub state signals
     FileUpdate(PathBuf),
     ClearNotification,
@@ -355,6 +356,7 @@ impl KeyListener {
             Mode::DashBoard => self.menu_helper(&key, MenuType::Dashboard, state, key_state),
             // To act on selected parent node
             Mode::Filtering if key == Key::Return => {
+                self.send(AppSignal::ActOnSelected);
                 self.send(AppSignal::MenuRefresh("".into()));
                 *state = Mode::DashBoard;
                 true

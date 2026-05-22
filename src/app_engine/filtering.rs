@@ -58,6 +58,7 @@ impl AppEngine {
                     let (text, frame) = select_range_helper(&choices, idx1, idx2)
                         .expect("Internal Error: wrong ocr hint indexing.");
                     self.select(ElementOfInterest::pseudo(None, frame));
+                    self.clear_hints();
                     self.update_selected_text_and_show_menu(text.clone());
                 } else {
                     self.key_prefix.clear();
@@ -74,6 +75,7 @@ impl AppEngine {
                 let frame = Frame::from_cgrect(cg_rect);
                 // Context initialized as None, but updated right after
                 self.select(ElementOfInterest::pseudo(None, frame));
+                self.clear_hints();
                 self.update_selected_text_and_show_menu(selected_text);
             }
         }
@@ -117,7 +119,9 @@ impl AppEngine {
             && let Some(eoi) = self.element_cache.cache.get(*idx)
             && let Some(element) = eoi.element()
         {
-            self.clear_hints();
+            if !self.multi_selection.is_on {
+                self.clear_hints();
+            }
 
             let role = eoi.role();
             let context = &eoi.context;
@@ -156,6 +160,7 @@ impl AppEngine {
                                 .select_range(idx1, idx2, role_ref)
                                 .expect("Internal Error: wrong indexing of hints.");
                             self.select(ElementOfInterest::pseudo(None, frame));
+                            self.clear_hints();
                             self.update_selected_text_and_show_menu(text);
                         } else {
                             self.multi_selection.role = Some(role);

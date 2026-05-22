@@ -154,6 +154,9 @@ impl AppEngine {
             AppSignal::MenuRefresh(key_prefix) => {
                 self.menu_refresh(&key_prefix, false);
             }
+            AppSignal::ActOnSelected => {
+                self.clear_cache();
+            }
             AppSignal::ToggleMultiSelection => match self.target {
                 Target::Text | Target::ImageOCR => {
                     self.toggle_multiselection();
@@ -186,6 +189,7 @@ impl AppEngine {
                 self.check_word_picker();
             }
             AppSignal::ScreenShot => {
+                self.clear_cache();
                 self.clear_drawing();
                 let frame = if let Some(eoi) = self.selected.as_ref() {
                     &eoi.frame
@@ -204,6 +208,8 @@ impl AppEngine {
             AppSignal::FrameOCR => {
                 if let Some(ElementOfInterest { frame, .. }) = self.selected.as_ref() {
                     self.target = Target::ImageOCR;
+                    self.drawer.clear_menus();
+                    self.clear_hints();
                     self.perform_ocr_on_frame(*frame).await;
                 } else {
                     self.activate(Target::ImageOCR);

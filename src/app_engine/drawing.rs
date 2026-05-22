@@ -4,6 +4,7 @@ use crate::{
     TEXT_ACTION_MENU_ITEMS,
     ax_element::{ElementOfInterest, Target},
     config::RoleOfInterest,
+    util::Frame,
 };
 use objc2::rc::autoreleasepool;
 
@@ -30,6 +31,11 @@ impl AppEngine {
         self.drawer
             .draw_frame(&eoi.frame.invert_y(self.screen_size.height));
         self.selected = Some(eoi);
+    }
+
+    pub(super) fn draw_frame_instant(&mut self, frame: &Frame) {
+        self.drawer
+            .draw_frame_instant(&frame.invert_y(self.screen_size.height));
     }
 
     /// Draw/Update hint boxes
