@@ -36,7 +36,6 @@ unsafe extern "C" {
     pub fn DCSRecordCopyData(record: CFTypeRef, version: u8) -> CFStringRef;
 }
 
-// TODO: Dynamic font-size?
 // TODO: Indentation, might require regex replacing
 pub fn get_dictionary_attributed_string(
     word: &str,

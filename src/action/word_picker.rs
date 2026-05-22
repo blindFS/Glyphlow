@@ -70,7 +70,7 @@ impl WordPicker {
 
         autoreleasepool(|_| {
             if let Some((attr_string, _)) = word_picker.get_attributed_string(None) {
-                drawer.draw_attributed_string(attr_string);
+                drawer.draw_attributed_string(attr_string, true);
             }
         });
 
@@ -92,7 +92,7 @@ impl WordPicker {
         autoreleasepool(|_| {
             if let Some((attr_string, matched)) = self.get_attributed_string(multi_selection_idx) {
                 self.matched = matched;
-                drawer.draw_attributed_string(attr_string);
+                drawer.draw_attributed_string(attr_string, true);
             };
         })
     }

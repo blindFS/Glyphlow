@@ -92,16 +92,21 @@ impl Menu {
         }
     }
 
-    fn estimate_text_size(&self, screen_size: CGSize, theme: &GlyphlowTheme) -> CGSize {
+    fn estimate_text_size(
+        &self,
+        screen_size: CGSize,
+        theme: &GlyphlowTheme,
+        auto_resize: bool,
+    ) -> CGSize {
         let CGSize { width, height } = screen_size;
-        let (size, visible_len) = estimate_frame_for_text(&self.menu_string, (width, height));
+        let (size, visible_len) = estimate_frame_for_text(&self.menu_string, (f64::MAX, f64::MAX));
         let shrinkage = (width / size.width)
             .min(height / size.height)
             .min(visible_len as f64 / self.menu_string.length() as f64);
         let font = &theme.menu_font;
 
         // NOTE: if estimated size is too large, reduce font size and re-estimate
-        if shrinkage < 1.0 {
+        if auto_resize && shrinkage < 1.0 {
             // Don't make it too small
             let font_size = (font.pointSize() * shrinkage).max(MIN_FONT_SIZE);
             unsafe {
@@ -117,8 +122,8 @@ impl Menu {
         }
     }
 
-    fn resize_and_show(&self, screen_size: CGSize, theme: &GlyphlowTheme) {
-        let size = self.estimate_text_size(screen_size, theme);
+    fn resize_and_show(&self, screen_size: CGSize, theme: &GlyphlowTheme, auto_resize: bool) {
+        let size = self.estimate_text_size(screen_size, theme, auto_resize);
         let CGSize { width, height } = size;
         let margin = theme.menu_margin_size as f64;
         let box_width = width + (margin * 2.0);
@@ -151,19 +156,21 @@ impl Menu {
             let ns_string = NSString::from_str(text);
             self.menu_string.mutableString().setString(&ns_string);
             self.initialize_string_attributes(theme);
-            self.resize_and_show(screen_size, theme);
+            self.resize_and_show(screen_size, theme, true);
         })
     }
 
+    /// Shrink font size on large estimated frame size if `auto_resize` is true
     fn draw_attributed_string(
         &self,
         attr_string: Retained<NSMutableAttributedString>,
         screen_size: CGSize,
         theme: &GlyphlowTheme,
+        auto_resize: bool,
     ) {
         autoreleasepool(|_| {
             self.menu_string.setAttributedString(&attr_string);
-            self.resize_and_show(screen_size, theme);
+            self.resize_and_show(screen_size, theme, auto_resize);
         })
     }
 
@@ -232,9 +239,14 @@ impl UIDrawer {
         self.menu.draw(msg, self.screen_size, &self.theme);
     }
 
-    pub fn draw_attributed_string(&self, attr_string: Retained<NSMutableAttributedString>) {
+    /// Shrink font size on large estimated frame size if `auto_resize` is true
+    pub fn draw_attributed_string(
+        &self,
+        attr_string: Retained<NSMutableAttributedString>,
+        auto_resize: bool,
+    ) {
         self.menu
-            .draw_attributed_string(attr_string, self.screen_size, &self.theme);
+            .draw_attributed_string(attr_string, self.screen_size, &self.theme, auto_resize);
     }
 
     pub fn draw_frame(&self, frame: &Frame) {
