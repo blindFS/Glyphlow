@@ -246,7 +246,7 @@ impl AppEngine {
                 if let Some(wp) = self.word_picker.as_mut()
                     && wp.is_searching
                 {
-                    wp.finish_searching(self.multi_selection.one_side_idex);
+                    wp.finish_searching(&self.drawer, self.multi_selection.one_side_idex);
                     self.key_prefix = wp.label_prefix.clone();
                 } else if !self.multi_selection.is_on
                     || self.multi_selection.one_side_idex.is_none()

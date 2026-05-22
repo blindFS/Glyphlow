@@ -149,7 +149,7 @@ impl AppEngine {
                     text,
                     self.screen_size,
                     self.config.theme.clone(),
-                    self.drawer.clone(),
+                    &self.drawer,
                 );
                 self.hint_width = word_picker.digits;
 

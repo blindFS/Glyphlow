@@ -12,7 +12,6 @@ use objc2_core_foundation::CGSize;
 use std::{
     collections::VecDeque,
     path::PathBuf,
-    rc::Rc,
     sync::{Arc, Mutex},
 };
 use tokio::sync::mpsc::Sender;
@@ -67,7 +66,7 @@ pub struct AppEngine {
     pub(super) element_cache: ElementCache,
     pub(super) key_prefix: String,
     pub(super) screen_size: CGSize,
-    pub(super) drawer: Rc<UIDrawer>,
+    pub(super) drawer: UIDrawer,
     /// Which elements of interest to look for
     pub(super) target: Target,
     pub(super) config: GlyphlowConfig,
@@ -102,7 +101,7 @@ impl AppEngine {
     ) -> Self {
         let mtm = MainThreadMarker::new().expect("Not on main thread");
         let screen_size = get_main_screen_size(mtm);
-        let drawer = Rc::new(UIDrawer::new(screen_size, mtm, &config.theme));
+        let drawer = UIDrawer::new(screen_size, mtm, &config.theme);
 
         Self {
             state,
@@ -177,13 +176,13 @@ impl AppEngine {
             AppSignal::TextAction(ta) => self.perform_text_action(ta),
             AppSignal::WordPickerStartSearch => {
                 if let Some(wp) = self.word_picker.as_mut() {
-                    wp.start_searching(self.multi_selection.one_side_idex);
+                    wp.start_searching(&self.drawer, self.multi_selection.one_side_idex);
                     self.key_prefix.clear();
                 }
             }
             AppSignal::WordPickerFinishSearch => {
                 if let Some(wp) = self.word_picker.as_mut() {
-                    wp.finish_searching(self.multi_selection.one_side_idex);
+                    wp.finish_searching(&self.drawer, self.multi_selection.one_side_idex);
                     self.key_prefix = wp.label_prefix.clone();
                 }
                 self.check_word_picker();

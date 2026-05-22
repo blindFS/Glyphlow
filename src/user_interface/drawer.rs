@@ -14,7 +14,6 @@ use objc2_app_kit::{
 use objc2_core_foundation::CGSize;
 use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CALayer, CATextLayer, CATransaction};
-use std::cell::RefCell;
 
 struct Menu {
     container: Retained<CALayer>,
@@ -178,7 +177,7 @@ pub struct UIDrawer {
     pub root: Retained<CALayer>,
     screen_size: CGSize,
     /// Useful for notification clearing
-    notification_layers: RefCell<Vec<Menu>>,
+    notification_layers: Vec<Menu>,
     selected_frame: Retained<CALayer>,
     menu: Menu,
 }
@@ -216,7 +215,7 @@ impl UIDrawer {
             theme: theme.clone(),
             root,
             screen_size,
-            notification_layers: RefCell::new(vec![]),
+            notification_layers: vec![],
             selected_frame,
             menu,
         }
@@ -254,28 +253,28 @@ impl UIDrawer {
         CATransaction::commit();
     }
 
-    pub fn notify(&self, msg: &str) {
+    pub fn notify(&mut self, msg: &str) {
         let nl = Menu::new(&self.theme);
         self.root.addSublayer(&nl.container);
         nl.draw(msg, self.screen_size, &self.theme);
-        self.notification_layers.borrow_mut().push(nl);
+        self.notification_layers.push(nl);
     }
 
     // TODO: per notification clearing
-    pub fn clear_notifications(&self) {
-        for nl in self.notification_layers.borrow().iter() {
+    pub fn clear_notifications(&mut self) {
+        for nl in self.notification_layers.iter() {
             nl.free();
         }
-        self.notification_layers.borrow_mut().clear();
+        self.notification_layers.clear();
     }
 
-    pub fn clear_menus(&self) {
+    pub fn clear_menus(&mut self) {
         self.menu.hide();
         self.clear_notifications();
         CATransaction::flush();
     }
 
-    pub fn clear(&self) {
+    pub fn clear(&mut self) {
         self.menu.hide();
         self.selected_frame.setHidden(true);
         self.clear_notifications();

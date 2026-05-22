@@ -268,6 +268,6 @@ impl AppEngine {
             .as_mut()
             .expect("Internal Error: No word picker set.");
 
-        word_picker.update_text_layer(self.multi_selection.one_side_idex);
+        word_picker.update_text_layer(&self.drawer, self.multi_selection.one_side_idex);
     }
 }

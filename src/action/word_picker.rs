@@ -9,7 +9,7 @@ use objc2_app_kit::NSFontAttributeName;
 use objc2_core_foundation::CGSize;
 use objc2_foundation::{NSMutableAttributedString, NSRange};
 use regex::Regex;
-use std::{rc::Rc, sync::OnceLock};
+use std::sync::OnceLock;
 use unicode_width::UnicodeWidthStr;
 
 const WORD_PICKER_STYLE: &str = r#"
@@ -39,19 +39,13 @@ pub struct WordPicker {
     pub text_prefix: String,
     screen_ratio: f64,
     theme: GlyphlowTheme,
-    drawer: Rc<UIDrawer>,
     pub is_searching: bool,
     pub digits: u32,
     matched: Vec<usize>,
 }
 
 impl WordPicker {
-    pub fn new(
-        text: String,
-        screen_size: CGSize,
-        theme: GlyphlowTheme,
-        drawer: Rc<UIDrawer>,
-    ) -> Self {
+    pub fn new(text: String, screen_size: CGSize, theme: GlyphlowTheme, drawer: &UIDrawer) -> Self {
         let (word_strings, offsets) = multilingual_split(&text);
         let digits = digits_by_length(word_strings.len());
         let mut words = Vec::new();
@@ -71,35 +65,34 @@ impl WordPicker {
             text_prefix: String::new(),
             screen_ratio: width / (height + 0.01),
             theme,
-            drawer,
             matched: Vec::new(),
         };
 
         autoreleasepool(|_| {
             if let Some((attr_string, _)) = word_picker.get_attributed_string(None) {
-                word_picker.drawer.draw_attributed_string(attr_string);
+                drawer.draw_attributed_string(attr_string);
             }
         });
 
         word_picker
     }
 
-    pub fn start_searching(&mut self, multi_selection_idx: Option<usize>) {
+    pub fn start_searching(&mut self, drawer: &UIDrawer, multi_selection_idx: Option<usize>) {
         self.is_searching = true;
         self.text_prefix.clear();
-        self.update_text_layer(multi_selection_idx);
+        self.update_text_layer(drawer, multi_selection_idx);
     }
 
-    pub fn finish_searching(&mut self, multi_selection_idx: Option<usize>) {
+    pub fn finish_searching(&mut self, drawer: &UIDrawer, multi_selection_idx: Option<usize>) {
         self.is_searching = false;
-        self.update_text_layer(multi_selection_idx);
+        self.update_text_layer(drawer, multi_selection_idx);
     }
 
-    pub fn update_text_layer(&mut self, multi_selection_idx: Option<usize>) {
+    pub fn update_text_layer(&mut self, drawer: &UIDrawer, multi_selection_idx: Option<usize>) {
         autoreleasepool(|_| {
             if let Some((attr_string, matched)) = self.get_attributed_string(multi_selection_idx) {
                 self.matched = matched;
-                self.drawer.draw_attributed_string(attr_string);
+                drawer.draw_attributed_string(attr_string);
             };
         })
     }
