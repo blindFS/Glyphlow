@@ -355,6 +355,9 @@ impl AppEngine {
                         &format!("External stderr: {}", String::from_utf8_lossy(&o.stderr)),
                         Level::Error,
                     );
+                } else {
+                    // Normal exit without new context
+                    self.deactivate();
                 }
             }
             Err(e) => {
