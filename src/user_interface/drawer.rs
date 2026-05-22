@@ -26,30 +26,32 @@ static MIN_FONT_SIZE: f64 = 10.0;
 
 impl Menu {
     fn new(theme: &GlyphlowTheme) -> Self {
-        let text_layer = CATextLayer::new();
-        text_layer.setContentsScale(2.0);
-        text_layer.setWrapped(true);
+        autoreleasepool(|_| {
+            let text_layer = CATextLayer::new();
+            text_layer.setContentsScale(2.0);
+            text_layer.setWrapped(true);
 
-        let container = CALayer::new();
-        container.setBorderWidth(BORDER_WIDTH);
-        container.addSublayer(&text_layer);
-        // Hidden by default
-        container.setHidden(true);
+            let container = CALayer::new();
+            container.setBorderWidth(BORDER_WIDTH);
+            container.addSublayer(&text_layer);
+            // Hidden by default
+            container.setHidden(true);
 
-        // Init mutable attributed string, need a dummy place holder to keep attributes
-        let ns_string = NSString::from_str("n");
-        let attr_string = NSMutableAttributedString::initWithString(
-            NSMutableAttributedString::alloc(),
-            &ns_string,
-        );
-        let menu = Self {
-            container,
-            text_layer,
-            menu_string: attr_string,
-        };
+            // Init mutable attributed string, need a dummy place holder to keep attributes
+            let ns_string = NSString::from_str("n");
+            let attr_string = NSMutableAttributedString::initWithString(
+                NSMutableAttributedString::alloc(),
+                &ns_string,
+            );
+            let menu = Self {
+                container,
+                text_layer,
+                menu_string: attr_string,
+            };
 
-        menu.load_theme(theme);
-        menu
+            menu.load_theme(theme);
+            menu
+        })
     }
 
     fn free(&self) {

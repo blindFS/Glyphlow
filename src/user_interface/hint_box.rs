@@ -484,23 +484,6 @@ fn update_and_requeue(
     }
 }
 
-pub fn update_hint_text(
-    text_layer: &CATextLayer,
-    label: &str,
-    key_prefix_len: usize,
-    theme: &GlyphlowTheme,
-) {
-    let label_string = NSString::from_str(label);
-    let attr_string = NSMutableAttributedString::initWithString(
-        NSMutableAttributedString::alloc(),
-        &label_string,
-    );
-    update_hint_text_with_attr(&attr_string, label, key_prefix_len, theme);
-    unsafe {
-        text_layer.setString(Some(&attr_string));
-    }
-}
-
 pub fn update_hint_text_with_attr(
     attr_string: &Retained<NSMutableAttributedString>,
     label: &str,
