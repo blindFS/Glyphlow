@@ -304,7 +304,7 @@ impl AppEngine {
         if pb == self.temp_file
             && let Ok(new_text) = std::fs::read_to_string(&self.temp_file)
         {
-            self.update_editing_text(new_text);
+            self.update_editing_text(new_text.trim_end_matches('\n').into());
         } else if pb != self.temp_file {
             match GlyphlowConfig::load_config(&pb) {
                 Ok(mut new_config) => {
