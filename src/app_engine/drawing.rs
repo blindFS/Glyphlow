@@ -68,8 +68,7 @@ impl AppEngine {
                 hb.set_visible(visible);
 
                 if visible {
-                    hb.update_text(prefix_len, &self.config.theme);
-                    hb.update_position(self.screen_size, &self.config.theme);
+                    hb.refresh(prefix_len, self.screen_size, &self.config.theme);
                 }
             }
         })
