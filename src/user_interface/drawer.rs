@@ -186,7 +186,8 @@ pub struct UIDrawer {
     pub root: Retained<CALayer>,
     screen_size: CGSize,
     /// Useful for notification clearing
-    notification_layers: Vec<Menu>,
+    notifications: Vec<(usize, Menu)>,
+    next_notification_id: usize,
     selected_frame: Retained<CALayer>,
     menu: Menu,
 }
@@ -224,7 +225,8 @@ impl UIDrawer {
             theme: theme.clone(),
             root,
             screen_size,
-            notification_layers: vec![],
+            notifications: vec![],
+            next_notification_id: 0,
             selected_frame,
             menu,
         }
@@ -267,19 +269,29 @@ impl UIDrawer {
         CATransaction::commit();
     }
 
-    pub fn notify(&mut self, msg: &str) {
+    pub fn notify(&mut self, msg: &str) -> usize {
+        let id = self.next_notification_id;
+        self.next_notification_id += 1;
         let nl = Menu::new(&self.theme);
         self.root.addSublayer(&nl.container);
         nl.draw(msg, self.screen_size, &self.theme);
-        self.notification_layers.push(nl);
+        self.notifications.push((id, nl));
+        id
     }
 
-    // TODO: per notification clearing
+    pub fn clear_notification(&mut self, id: usize) {
+        if let Some(pos) = self.notifications.iter().position(|(nid, _)| *nid == id) {
+            let (_, nl) = self.notifications.remove(pos);
+            nl.free();
+            CATransaction::flush();
+        }
+    }
+
     pub fn clear_notifications(&mut self) {
-        for nl in self.notification_layers.iter() {
+        for (_, nl) in self.notifications.iter() {
             nl.free();
         }
-        self.notification_layers.clear();
+        self.notifications.clear();
     }
 
     pub fn clear_menus(&mut self) {
