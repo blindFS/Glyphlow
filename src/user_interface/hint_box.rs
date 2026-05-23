@@ -3,7 +3,7 @@ use std::collections::{HashMap, VecDeque};
 use objc2::{AnyThread, rc::Retained};
 use objc2_core_foundation::{CFRetained, CGSize};
 use objc2_core_graphics::{CGColor, CGMutablePath};
-use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRect, NSSize, NSString};
+use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer, kCAAlignmentCenter};
 
 use crate::config::GlyphlowTheme;
@@ -214,7 +214,8 @@ impl HintBox {
         }
     }
 
-    pub fn update_text(&self, prefix_len: usize, theme: &GlyphlowTheme) {
+    /// Updates the text and re-estimates the size, returns true if the size changed
+    pub fn update_text(&self, prefix_len: usize, theme: &GlyphlowTheme) -> bool {
         let attr_string = self.attributed_string(prefix_len, theme);
         unsafe {
             self.text_layer.setString(Some(&attr_string));
@@ -225,31 +226,34 @@ impl HintBox {
             &attr_string,
             (f64::MAX, f64::MAX), // No constraints for label
         );
+
         let current_text_size = self.text_layer.frame().size;
-        if text_size.width > current_text_size.width || text_size.height > current_text_size.height
-        {
-            let margin = theme.hint_margin_size as f64;
-            let new_box_size = CGSize::new(
-                text_size.width + (margin * 2.0),
-                text_size.height + (margin * 2.0),
-            );
-
-            let mut box_frame = self.box_layer.frame();
-            box_frame.size = new_box_size;
-            self.box_layer.setFrame(box_frame);
-
-            let mut text_frame = self.text_layer.frame();
-            text_frame.size = text_size;
-            self.text_layer.setFrame(text_frame);
+        if text_size == current_text_size {
+            return false;
         }
+
+        let margin = theme.hint_margin_size as f64;
+        let new_box_size = CGSize::new(
+            text_size.width + (margin * 2.0),
+            text_size.height + (margin * 2.0),
+        );
+
+        let mut box_frame = self.box_layer.frame();
+        box_frame.size = new_box_size;
+        self.box_layer.setFrame(box_frame);
+
+        let mut text_frame = self.text_layer.frame();
+        text_frame.size = text_size;
+        self.text_layer.setFrame(text_frame);
+        true
     }
 
-    pub fn update_position(&self, screen_size: CGSize, theme: &GlyphlowTheme) {
-        if self.delta == (0.0, 0.0) {
+    pub fn update_position(&self, has_resized: bool, screen_size: CGSize, theme: &GlyphlowTheme) {
+        if self.delta == (0.0, 0.0) && !has_resized {
             return;
         }
         let (tri_width, tri_height) = Self::geometry(theme);
-        let box_size = self.box_layer.bounds().size;
+        let box_size = self.box_layer.frame().size;
         let (origin, x_offset, y_offset) = self.calculate_origin(box_size, screen_size, tri_height);
 
         self.box_layer.setFrame(NSRect::new(origin, box_size));
@@ -264,10 +268,25 @@ impl HintBox {
         self.tri_layer.setPath(Some(&path));
     }
 
+    /// Update text, then refresh
+    pub fn refresh(&self, prefix_len: usize, screen_size: CGSize, theme: &GlyphlowTheme) {
+        let has_resized = self.update_text(prefix_len, theme);
+        self.update_position(has_resized, screen_size, theme);
+    }
+
     pub fn set_visible(&self, visible: bool) {
         self.box_layer.setHidden(!visible);
         if let Some(fl) = &self.frame_layer {
             fl.setHidden(!visible);
+        }
+    }
+
+    pub fn free(&self) {
+        self.tri_layer.removeFromSuperlayer();
+        self.text_layer.removeFromSuperlayer();
+        self.box_layer.removeFromSuperlayer();
+        if let Some(fl) = self.frame_layer.as_ref() {
+            fl.removeFromSuperlayer();
         }
     }
 }
@@ -475,23 +494,6 @@ fn update_and_requeue(
     }
 }
 
-pub fn update_hint_text(
-    text_layer: &CATextLayer,
-    label: &str,
-    key_prefix_len: usize,
-    theme: &GlyphlowTheme,
-) {
-    let label_string = NSString::from_str(label);
-    let attr_string = NSMutableAttributedString::initWithString(
-        NSMutableAttributedString::alloc(),
-        &label_string,
-    );
-    update_hint_text_with_attr(&attr_string, label, key_prefix_len, theme);
-    unsafe {
-        text_layer.setString(Some(&attr_string));
-    }
-}
-
 pub fn update_hint_text_with_attr(
     attr_string: &Retained<NSMutableAttributedString>,
     label: &str,
@@ -506,17 +508,17 @@ pub fn update_hint_text_with_attr(
         attr_string.addAttribute_value_range(
             objc2_app_kit::NSForegroundColorAttributeName,
             hl_color.as_ref(),
-            objc2_foundation::NSRange::new(0, key_prefix_len),
+            NSRange::new(0, key_prefix_len),
         );
         attr_string.addAttribute_value_range(
             objc2_app_kit::NSForegroundColorAttributeName,
             fg_color.as_ref(),
-            objc2_foundation::NSRange::new(key_prefix_len, label.len() - key_prefix_len),
+            NSRange::new(key_prefix_len, label.len() - key_prefix_len),
         );
         attr_string.addAttribute_value_range(
             objc2_app_kit::NSFontAttributeName,
             font,
-            objc2_foundation::NSRange::new(0, label.len()),
+            NSRange::new(0, label.len()),
         );
     }
 }

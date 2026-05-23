@@ -3,13 +3,12 @@ use crate::{
     action::{OCRResult, WordPicker, screen_shot, text_from_clipboard},
     ax_element::{ElementCache, ElementOfInterest, Target},
     config::{GlyphlowConfig, RoleOfInterest, WorkFlowAction},
-    user_interface::HintBox,
+    user_interface::{HintBox, UIDrawer, get_main_screen_size},
     util::Frame,
 };
 use log::Level;
-use objc2::rc::Retained;
+use objc2::MainThreadMarker;
 use objc2_core_foundation::CGSize;
-use objc2_quartz_core::CALayer;
 use std::{
     collections::VecDeque,
     path::PathBuf,
@@ -67,9 +66,7 @@ pub struct AppEngine {
     pub(super) element_cache: ElementCache,
     pub(super) key_prefix: String,
     pub(super) screen_size: CGSize,
-    pub(super) window: Retained<CALayer>,
-    /// Useful for notification clearing
-    pub(super) notification_layers: Vec<Retained<CALayer>>,
+    pub(super) drawer: UIDrawer,
     /// Which elements of interest to look for
     pub(super) target: Target,
     pub(super) config: GlyphlowConfig,
@@ -99,11 +96,13 @@ impl AppEngine {
         state: Arc<Mutex<Mode>>,
         key_state: Arc<Mutex<KeyState>>,
         config: GlyphlowConfig,
-        window: Retained<CALayer>,
-        screen_size: CGSize,
         temp_file: PathBuf,
         timeout_sender: Sender<()>,
     ) -> Self {
+        let mtm = MainThreadMarker::new().expect("Not on main thread");
+        let screen_size = get_main_screen_size(mtm);
+        let drawer = UIDrawer::new(screen_size, mtm, &config.theme);
+
         Self {
             state,
             key_state,
@@ -117,8 +116,7 @@ impl AppEngine {
             target: Target::default(),
             hint_width: 0,
             screen_size,
-            window,
-            notification_layers: Vec::new(),
+            drawer,
             config,
             timeout_sender,
             selected: None,
@@ -149,10 +147,14 @@ impl AppEngine {
                 self.deactivate();
             }
             AppSignal::RunWorkFlow(idx) => {
+                self.drawer.clear_menus();
                 self.execute_workflow(idx);
             }
             AppSignal::MenuRefresh(key_prefix) => {
                 self.menu_refresh(&key_prefix, false);
+            }
+            AppSignal::ActOnSelected => {
+                self.clear_cache();
             }
             AppSignal::ToggleMultiSelection => match self.target {
                 Target::Text | Target::ImageOCR => {
@@ -174,18 +176,19 @@ impl AppEngine {
             AppSignal::TextAction(ta) => self.perform_text_action(ta),
             AppSignal::WordPickerStartSearch => {
                 if let Some(wp) = self.word_picker.as_mut() {
-                    wp.start_searching(self.multi_selection.one_side_idex);
+                    wp.start_searching(&self.drawer, self.multi_selection.one_side_idex);
                     self.key_prefix.clear();
                 }
             }
             AppSignal::WordPickerFinishSearch => {
                 if let Some(wp) = self.word_picker.as_mut() {
-                    wp.finish_searching(self.multi_selection.one_side_idex);
+                    wp.finish_searching(&self.drawer, self.multi_selection.one_side_idex);
                     self.key_prefix = wp.label_prefix.clone();
                 }
                 self.check_word_picker();
             }
             AppSignal::ScreenShot => {
+                self.clear_cache();
                 self.clear_drawing();
                 let frame = if let Some(eoi) = self.selected.as_ref() {
                     &eoi.frame
@@ -206,13 +209,11 @@ impl AppEngine {
                     self.target = Target::ImageOCR;
                     self.perform_ocr_on_frame(*frame).await;
                 } else {
-                    self.clear_drawing();
                     self.activate(Target::ImageOCR);
                 }
             }
             AppSignal::FileUpdate(pb) => self.handle_file_update(pb),
             AppSignal::ReadClipboard => {
-                self.clear_drawing();
                 if let Some(text) = text_from_clipboard() {
                     self.selected = Some(ElementOfInterest::pseudo(
                         None,
@@ -227,11 +228,8 @@ impl AppEngine {
                 if self.check_mode(Mode::WaitAndDeactivate) {
                     self.deactivate();
                 } else {
-                    for nl in &self.notification_layers {
-                        nl.removeFromSuperlayer();
-                    }
+                    self.drawer.clear_notifications();
                 }
-                self.notification_layers.clear();
             }
         }
     }

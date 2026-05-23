@@ -1,23 +1,308 @@
-use objc2::{
-    AnyThread, MainThreadMarker, MainThreadOnly,
-    rc::{DefaultRetained, Retained},
-};
-use objc2_app_kit::{
-    NSBackingStoreType, NSColor, NSFont, NSFontAttributeName, NSForegroundColorAttributeName,
-    NSMutableParagraphStyle, NSParagraphStyleAttributeName, NSScreen, NSWindow, NSWindowStyleMask,
-};
-use objc2_core_foundation::{CFRetained, CGSize};
-use objc2_core_graphics::CGColor;
-use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
-use objc2_quartz_core::{CALayer, CATextLayer, CATransaction, kCAAlignmentCenter};
-
 use crate::{
     config::GlyphlowTheme,
     util::{Frame, estimate_frame_for_text},
 };
+use objc2::{
+    AnyThread, MainThreadMarker, MainThreadOnly,
+    rc::{DefaultRetained, Retained, autoreleasepool},
+};
+use objc2_app_kit::{
+    NSBackingStoreType, NSColor, NSFont, NSFontAttributeName, NSForegroundColorAttributeName,
+    NSMutableParagraphStyle, NSParagraphStyleAttributeName, NSScreen, NSWindow,
+    NSWindowCollectionBehavior, NSWindowStyleMask,
+};
+use objc2_core_foundation::CGSize;
+use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
+use objc2_quartz_core::{CALayer, CATextLayer, CATransaction};
 
-enum Center {
-    Middle(f64, f64),
+struct Menu {
+    container: Retained<CALayer>,
+    text_layer: Retained<CATextLayer>,
+    menu_string: Retained<NSMutableAttributedString>,
+}
+
+static BORDER_WIDTH: f64 = 2.0;
+static MIN_FONT_SIZE: f64 = 10.0;
+
+impl Menu {
+    fn new(theme: &GlyphlowTheme) -> Self {
+        autoreleasepool(|_| {
+            let text_layer = CATextLayer::new();
+            text_layer.setContentsScale(2.0);
+            text_layer.setWrapped(true);
+
+            let container = CALayer::new();
+            container.setBorderWidth(BORDER_WIDTH);
+            container.addSublayer(&text_layer);
+            // Hidden by default
+            container.setHidden(true);
+
+            // Init mutable attributed string, need a dummy place holder to keep attributes
+            let ns_string = NSString::from_str("n");
+            let attr_string = NSMutableAttributedString::initWithString(
+                NSMutableAttributedString::alloc(),
+                &ns_string,
+            );
+            let menu = Self {
+                container,
+                text_layer,
+                menu_string: attr_string,
+            };
+
+            menu.load_theme(theme);
+            menu
+        })
+    }
+
+    fn free(&self) {
+        self.text_layer.removeFromSuperlayer();
+        self.container.removeFromSuperlayer();
+    }
+
+    fn load_theme(&self, theme: &GlyphlowTheme) {
+        self.container.setBorderColor(Some(&theme.menu_fg_color));
+        self.container
+            .setBackgroundColor(Some(&theme.menu_bg_color));
+        self.container
+            .setCornerRadius(theme.menu_margin_size as f64);
+    }
+
+    fn initialize_string_attributes(&self, theme: &GlyphlowTheme) {
+        let full_range = NSRange::new(0, self.menu_string.length());
+
+        unsafe {
+            self.menu_string.addAttribute_value_range(
+                NSForegroundColorAttributeName,
+                theme.menu_fg_color.as_ref(),
+                full_range,
+            );
+
+            let font = &theme.menu_font;
+            self.menu_string
+                .addAttribute_value_range(NSFontAttributeName, font, full_range);
+
+            // HACK: For multilingual text, height is underestimated due to fallback fonts.
+            // This ensures more vertical spacing.
+            let style = NSMutableParagraphStyle::default_retained();
+            style.setLineSpacing(1.0);
+            // style.setLineHeightMultiple(1.2);
+            self.menu_string.addAttribute_value_range(
+                NSParagraphStyleAttributeName,
+                &style,
+                full_range,
+            );
+        }
+    }
+
+    fn estimate_text_size(
+        &self,
+        screen_size: CGSize,
+        theme: &GlyphlowTheme,
+        auto_resize: bool,
+    ) -> CGSize {
+        let CGSize { width, height } = screen_size;
+        let (size, visible_len) = estimate_frame_for_text(&self.menu_string, (f64::MAX, f64::MAX));
+        let shrinkage = (width / size.width)
+            .min(height / size.height)
+            .min(visible_len as f64 / self.menu_string.length() as f64);
+        let font = &theme.menu_font;
+
+        // NOTE: if estimated size is too large, reduce font size and re-estimate
+        if auto_resize && shrinkage < 1.0 {
+            // Don't make it too small
+            let font_size = (font.pointSize() * shrinkage).max(MIN_FONT_SIZE);
+            unsafe {
+                self.menu_string.addAttribute_value_range(
+                    NSFontAttributeName,
+                    &NSFont::fontWithName_size(&font.fontName(), font_size).unwrap(),
+                    NSRange::new(0, self.menu_string.length()),
+                )
+            };
+            estimate_frame_for_text(&self.menu_string, (width, height)).0
+        } else {
+            size
+        }
+    }
+
+    fn resize_and_show(&self, screen_size: CGSize, theme: &GlyphlowTheme, auto_resize: bool) {
+        let size = self.estimate_text_size(screen_size, theme, auto_resize);
+        let CGSize { width, height } = size;
+        let margin = theme.menu_margin_size as f64;
+        let box_width = width + (margin * 2.0);
+        let box_height = height + (margin * 2.0);
+
+        let (o_x, o_y) = (
+            (screen_size.width - box_width) / 2.0,
+            (screen_size.height - box_height) / 2.0,
+        );
+
+        let o_x_move = o_x.min(screen_size.width - box_width).max(0.0);
+        let o_y_move = o_y.max(0.0).min(screen_size.height - box_height);
+        let origin = NSPoint::new(o_x_move, o_y_move);
+
+        self.container
+            .setFrame(NSRect::new(origin, NSSize::new(box_width, box_height)));
+        self.text_layer.setFrame(NSRect::new(
+            NSPoint::new(margin, margin), // Positioned exactly at margin
+            size,
+        ));
+
+        unsafe {
+            self.text_layer.setString(Some(&self.menu_string));
+        }
+        self.container.setHidden(false);
+    }
+
+    fn draw(&self, text: &str, screen_size: CGSize, theme: &GlyphlowTheme) {
+        autoreleasepool(|_| {
+            let ns_string = NSString::from_str(text);
+            self.menu_string.mutableString().setString(&ns_string);
+            self.initialize_string_attributes(theme);
+            self.resize_and_show(screen_size, theme, true);
+        })
+    }
+
+    /// Shrink font size on large estimated frame size if `auto_resize` is true
+    fn draw_attributed_string(
+        &self,
+        attr_string: Retained<NSMutableAttributedString>,
+        screen_size: CGSize,
+        theme: &GlyphlowTheme,
+        auto_resize: bool,
+    ) {
+        autoreleasepool(|_| {
+            self.menu_string.setAttributedString(&attr_string);
+            self.resize_and_show(screen_size, theme, auto_resize);
+        })
+    }
+
+    fn hide(&self) {
+        self.container.setHidden(true);
+    }
+}
+
+pub struct UIDrawer {
+    theme: GlyphlowTheme,
+    pub root: Retained<CALayer>,
+    screen_size: CGSize,
+    /// Useful for notification clearing
+    notification_layers: Vec<Menu>,
+    selected_frame: Retained<CALayer>,
+    menu: Menu,
+}
+
+impl UIDrawer {
+    pub fn new(screen_size: CGSize, mtm: MainThreadMarker, theme: &GlyphlowTheme) -> Self {
+        let ns_window = create_overlay_window(mtm, screen_size);
+        // To work across different macOS native workspaces
+        ns_window.setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::Stationary
+                | NSWindowCollectionBehavior::IgnoresCycle,
+        );
+        ns_window.makeKeyAndOrderFront(None);
+        let root = CALayer::from_window(&ns_window).expect("Failed to get root layer of window.");
+
+        let menu = Menu::new(theme);
+        let selected_frame = CALayer::new();
+        selected_frame.setBorderWidth(BORDER_WIDTH);
+        selected_frame.setBorderColor(Some(&theme.hint_bg_color));
+        selected_frame.setZPosition(-1.0);
+        // Hide on init
+        selected_frame.setHidden(true);
+
+        // Initialized to middle point on screen
+        let middle = NSPoint::new(screen_size.width / 2.0, screen_size.height / 2.0);
+        let middle_rect = NSRect::new(middle, NSSize::new(0.0, 0.0));
+        menu.container.setFrame(middle_rect);
+        selected_frame.setFrame(middle_rect);
+
+        root.addSublayer(&selected_frame);
+        root.addSublayer(&menu.container);
+
+        Self {
+            theme: theme.clone(),
+            root,
+            screen_size,
+            notification_layers: vec![],
+            selected_frame,
+            menu,
+        }
+    }
+
+    pub fn reload_theme(&mut self, new_theme: &GlyphlowTheme) {
+        self.selected_frame
+            .setBorderColor(Some(&new_theme.hint_bg_color));
+        self.menu.load_theme(new_theme);
+        self.theme = new_theme.clone();
+    }
+
+    pub fn draw_menu(&self, msg: &str) {
+        self.menu.draw(msg, self.screen_size, &self.theme);
+    }
+
+    /// Shrink font size on large estimated frame size if `auto_resize` is true
+    pub fn draw_attributed_string(
+        &self,
+        attr_string: Retained<NSMutableAttributedString>,
+        auto_resize: bool,
+    ) {
+        self.menu
+            .draw_attributed_string(attr_string, self.screen_size, &self.theme, auto_resize);
+    }
+
+    pub fn draw_frame(&self, frame: &Frame) {
+        let origin = frame.top_left;
+        let origin = NSPoint::new(origin.x, origin.y);
+        let (w, h) = frame.size();
+        let frame = NSRect::new(origin, NSSize::new(w, h));
+        self.selected_frame.setFrame(frame);
+        self.selected_frame.setHidden(false);
+    }
+
+    pub fn draw_frame_instant(&self, frame: &Frame) {
+        CATransaction::begin();
+        CATransaction::setDisableActions(true);
+        self.draw_frame(frame);
+        CATransaction::commit();
+    }
+
+    pub fn notify(&mut self, msg: &str) {
+        let nl = Menu::new(&self.theme);
+        self.root.addSublayer(&nl.container);
+        nl.draw(msg, self.screen_size, &self.theme);
+        self.notification_layers.push(nl);
+    }
+
+    // TODO: per notification clearing
+    pub fn clear_notifications(&mut self) {
+        for nl in self.notification_layers.iter() {
+            nl.free();
+        }
+        self.notification_layers.clear();
+    }
+
+    pub fn clear_menus(&mut self) {
+        self.menu.hide();
+        self.clear_notifications();
+        CATransaction::flush();
+    }
+
+    pub fn clear_menus_instant(&mut self) {
+        CATransaction::begin();
+        CATransaction::setDisableActions(true);
+        self.menu.hide();
+        self.clear_notifications();
+        CATransaction::commit();
+        CATransaction::flush();
+    }
+
+    pub fn clear(&mut self) {
+        self.menu.hide();
+        self.selected_frame.setHidden(true);
+        self.clear_notifications();
+        CATransaction::flush();
+    }
 }
 
 pub fn get_main_screen_size(mtm: MainThreadMarker) -> CGSize {
@@ -52,211 +337,15 @@ pub fn create_overlay_window(mtm: MainThreadMarker, screen_size: CGSize) -> Reta
     }
 }
 
-pub trait GlyphlowDrawingLayer {
+trait GlyphlowDrawingLayer {
     fn from_window(window: &Retained<NSWindow>) -> Option<Retained<CALayer>>;
-    fn clear(&self);
-    fn draw_menu(
-        &self,
-        text: &str,
-        screen_size: CGSize,
-        theme: &GlyphlowTheme,
-    ) -> Retained<CALayer>;
-    fn draw_frame_box(&self, frames: &Frame, color: &CFRetained<CGColor>);
-    fn draw_attributed_string(
-        &self,
-        attr_string: Retained<NSMutableAttributedString>,
-        screen_size: CGSize,
-        text_size: CGSize,
-        theme: &GlyphlowTheme,
-    ) -> Retained<CATextLayer>;
 }
 
 impl GlyphlowDrawingLayer for CALayer {
-    fn clear(&self) {
-        unsafe {
-            self.setSublayers(None);
-            // Force cleared after calling
-            CATransaction::flush();
-        }
-    }
-
     fn from_window(window: &Retained<NSWindow>) -> Option<Retained<CALayer>> {
         let content_view = window.contentView()?;
         content_view.setWantsLayer(true);
         let root_layer = content_view.layer()?;
-        // Clear existing sublayers
-        root_layer.clear();
         Some(root_layer)
     }
-
-    fn draw_attributed_string(
-        &self,
-        attr_string: Retained<NSMutableAttributedString>,
-        screen_size: CGSize,
-        text_size: CGSize,
-        theme: &GlyphlowTheme,
-    ) -> Retained<CATextLayer> {
-        let (_, _, text_layer, text_box) = text_box_with_attributed_string(
-            attr_string,
-            false,
-            &theme.menu_bg_color,
-            theme.menu_margin_size as f64,
-            Center::Middle(screen_size.width / 2.0, screen_size.height / 2.0),
-            screen_size,
-            text_size,
-        );
-        text_box.setBorderWidth(2.0);
-        text_box.setBorderColor(Some(&theme.menu_fg_color));
-        self.addSublayer(&text_box);
-        text_layer
-    }
-
-    fn draw_menu(
-        &self,
-        text: &str,
-        screen_size: CGSize,
-        theme: &GlyphlowTheme,
-    ) -> Retained<CALayer> {
-        let text_box = draw_text_box(
-            text,
-            false,
-            &theme.menu_font,
-            &theme.menu_fg_color,
-            &theme.menu_bg_color,
-            theme.menu_margin_size as f64,
-            Center::Middle(screen_size.width / 2.0, screen_size.height / 2.0),
-            screen_size,
-        );
-        text_box.setBorderWidth(2.0);
-        text_box.setBorderColor(Some(&theme.menu_fg_color));
-        self.addSublayer(&text_box);
-        text_box
-    }
-
-    fn draw_frame_box(&self, frame: &Frame, color: &CFRetained<CGColor>) {
-        let container = frame_box_layer(frame, color);
-        self.addSublayer(&container);
-    }
-}
-
-fn frame_box_layer(frame: &Frame, color: &CFRetained<CGColor>) -> Retained<CALayer> {
-    let container = CALayer::new();
-    let origin = frame.top_left;
-    let origin = NSPoint::new(origin.x, origin.y);
-    let (w, h) = frame.size();
-    container.setFrame(NSRect::new(origin, NSSize::new(w, h)));
-    container.setBorderWidth(2.0);
-    container.setBorderColor(Some(color));
-    container.setZPosition(-1.0);
-    container
-}
-
-#[allow(clippy::too_many_arguments)]
-fn draw_text_box(
-    text: &str,
-    center_text: bool,
-    font: &Retained<NSFont>,
-    fg_color: &CFRetained<CGColor>,
-    bg_color: &CFRetained<CGColor>,
-    margin: f64,
-    center: Center,
-    screen_size: CGSize,
-) -> Retained<CALayer> {
-    unsafe {
-        // Estimate text size with attributed string
-        let ns_string = NSString::from_str(text);
-        let attr_string = NSMutableAttributedString::initWithString(
-            NSMutableAttributedString::alloc(),
-            &ns_string,
-        );
-        let full_range = NSRange::new(0, attr_string.length());
-
-        attr_string.addAttribute_value_range(
-            NSForegroundColorAttributeName,
-            fg_color.as_ref(),
-            full_range,
-        );
-
-        attr_string.addAttribute_value_range(NSFontAttributeName, font, full_range);
-
-        // HACK: For multilingual text, height is underestimated due to fallback fonts.
-        // This ensures more vertical spacing.
-        let style = NSMutableParagraphStyle::default_retained();
-        style.setLineSpacing(1.0);
-        // style.setLineHeightMultiple(1.2);
-        attr_string.addAttribute_value_range(NSParagraphStyleAttributeName, &style, full_range);
-
-        let (mut size, visible_len) =
-            estimate_frame_for_text(&attr_string, (screen_size.width, screen_size.height * 2.0));
-
-        // NOTE: if estimated size is too large, reduce font size and retry
-        if size.height + 2.0 * margin > screen_size.height {
-            let font_size = font.pointSize() * visible_len as f64 / ns_string.len() as f64;
-            // Don't make it too small
-            let font_size = font_size.max(10.0);
-            attr_string.addAttribute_value_range(
-                NSFontAttributeName,
-                &NSFont::fontWithName_size(&font.fontName(), font_size).unwrap(),
-                full_range,
-            );
-            size = estimate_frame_for_text(&attr_string, (screen_size.width, screen_size.height)).0;
-        }
-
-        text_box_with_attributed_string(
-            attr_string,
-            center_text,
-            bg_color,
-            margin,
-            center,
-            screen_size,
-            size,
-        )
-        .3
-    }
-}
-
-fn text_box_with_attributed_string(
-    attr_string: Retained<NSMutableAttributedString>,
-    center_text: bool,
-    bg_color: &CFRetained<CGColor>,
-    margin: f64,
-    center: Center,
-    screen_size: CGSize,
-    frame_size: CGSize,
-) -> (f64, f64, Retained<CATextLayer>, Retained<CALayer>) {
-    let CGSize { width, height } = frame_size;
-
-    let box_width = width + (margin * 2.0);
-    let box_height = height + (margin * 2.0);
-
-    let (o_x, o_y) = match center {
-        Center::Middle(x, y) => (x - box_width / 2.0, y - box_height / 2.0),
-    };
-
-    let o_x_move = o_x.min(screen_size.width - box_width).max(0.0);
-    let o_y_move = o_y.max(0.0).min(screen_size.height - box_height);
-    let origin = NSPoint::new(o_x_move, o_y_move);
-
-    let container = CALayer::new();
-    container.setFrame(NSRect::new(origin, NSSize::new(box_width, box_height)));
-    container.setBackgroundColor(Some(bg_color));
-
-    let text_layer = CATextLayer::new();
-    text_layer.setFrame(NSRect::new(
-        NSPoint::new(margin, margin), // Positioned exactly at margin
-        frame_size,
-    ));
-    text_layer.setWrapped(true);
-
-    unsafe {
-        text_layer.setString(Some(&attr_string));
-        if center_text {
-            text_layer.setAlignmentMode(kCAAlignmentCenter);
-        }
-    }
-
-    text_layer.setContentsScale(2.0); // Retina crispness
-    container.addSublayer(&text_layer);
-    container.setCornerRadius(margin);
-    (o_x - o_x_move, o_y - o_y_move, text_layer, container)
 }

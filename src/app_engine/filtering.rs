@@ -57,7 +57,8 @@ impl AppEngine {
                         .collect::<Vec<_>>();
                     let (text, frame) = select_range_helper(&choices, idx1, idx2)
                         .expect("Internal Error: wrong ocr hint indexing.");
-                    self.selected = Some(ElementOfInterest::pseudo(None, frame));
+                    self.select(ElementOfInterest::pseudo(None, frame));
+                    self.clear_hints();
                     self.update_selected_text_and_show_menu(text.clone());
                 } else {
                     self.key_prefix.clear();
@@ -73,15 +74,16 @@ impl AppEngine {
                 let selected_text = selected_text.clone();
                 let frame = Frame::from_cgrect(cg_rect);
                 // Context initialized as None, but updated right after
-                self.selected = Some(ElementOfInterest::pseudo(None, frame));
+                self.select(ElementOfInterest::pseudo(None, frame));
+                self.clear_hints();
                 self.update_selected_text_and_show_menu(selected_text);
             }
         }
     }
 
     pub(super) async fn perform_ocr_on_frame(&mut self, frame: Frame) {
-        self.clear_drawing();
-        self.hint_boxes.clear();
+        self.drawer.clear_menus_instant();
+        self.clear_cache();
         // NOTE: for images with parts out of sight
         let frame = frame
             .intersect(&Frame::from_origion(self.screen_size))
@@ -118,6 +120,10 @@ impl AppEngine {
             && let Some(eoi) = self.element_cache.cache.get(*idx)
             && let Some(element) = eoi.element()
         {
+            if !self.multi_selection.is_on {
+                self.clear_hints();
+            }
+
             let role = eoi.role();
             let context = &eoi.context;
             let frame = &eoi.frame;
@@ -128,11 +134,11 @@ impl AppEngine {
                     self.deactivate();
                 }
                 Target::Image => {
-                    self.selected = Some(eoi.clone());
+                    self.select(eoi.clone());
                     self.draw_element_menu("", role, true);
                 }
                 Target::Custom(_) => {
-                    self.selected = Some(eoi.clone());
+                    self.select(eoi.clone());
                     self.execute_pending_workflow_actions();
                 }
                 Target::ImageOCR => self.perform_ocr_on_frame(*frame).await,
@@ -154,7 +160,8 @@ impl AppEngine {
                                 .element_cache
                                 .select_range(idx1, idx2, role_ref)
                                 .expect("Internal Error: wrong indexing of hints.");
-                            self.selected = Some(ElementOfInterest::pseudo(None, frame));
+                            self.select(ElementOfInterest::pseudo(None, frame));
+                            self.clear_hints();
                             self.update_selected_text_and_show_menu(text);
                         } else {
                             self.multi_selection.role = Some(role);
@@ -162,19 +169,19 @@ impl AppEngine {
                             self.update_hints();
                         }
                     } else if context.is_some() {
-                        self.selected = Some(eoi.clone());
+                        self.select(eoi.clone());
                         self.draw_element_menu("", role, true);
                     }
                 }
                 Target::ChildElement => {
-                    self.selected = Some(eoi.clone());
+                    self.select(eoi.clone());
                     self.activate(Target::ChildElement);
                     // Quick follow if only 1 element remaining
                     // NOTE: use count to avoid circular pointer
                     let mut count = 0;
                     while self.element_cache.cache.len() == 1 && count < 10 {
                         count += 1;
-                        self.selected = Some(self.element_cache.cache[0].to_owned());
+                        self.select(self.element_cache.cache[0].to_owned());
                         self.activate(Target::ChildElement);
                     }
 
@@ -189,8 +196,7 @@ impl AppEngine {
                     }
                 }
                 Target::Scrollable => {
-                    self.selected = Some(eoi.clone());
-                    self.clear_cache();
+                    self.select(eoi.clone());
                     self.draw_element_menu("", RoleOfInterest::ScrollBar, true);
                 }
                 Target::Editable => {
@@ -215,7 +221,6 @@ impl AppEngine {
                             );
                         }
                     }
-                    self.clear_drawing();
                 }
             }
         } else {
@@ -242,7 +247,7 @@ impl AppEngine {
                 if let Some(wp) = self.word_picker.as_mut()
                     && wp.is_searching
                 {
-                    wp.finish_searching(self.multi_selection.one_side_idex);
+                    wp.finish_searching(&self.drawer, self.multi_selection.one_side_idex);
                     self.key_prefix = wp.label_prefix.clone();
                 } else if !self.multi_selection.is_on
                     || self.multi_selection.one_side_idex.is_none()

@@ -4,40 +4,51 @@ use crate::{
     TEXT_ACTION_MENU_ITEMS,
     ax_element::{ElementOfInterest, Target},
     config::RoleOfInterest,
-    user_interface::GlyphlowDrawingLayer,
+    util::Frame,
 };
-use objc2::rc::{Retained, autoreleasepool};
-use objc2_quartz_core::CALayer;
+use objc2::rc::autoreleasepool;
 
 static MAX_TEXT_DISPLAY_LEN: usize = 30;
 
 impl AppEngine {
-    pub(super) fn clear_drawing(&self) {
-        self.window.clear();
+    pub(super) fn clear_drawing(&mut self) {
+        self.drawer.clear();
     }
 
-    pub(super) fn draw_selected_frame(&self) {
-        if let Some(ElementOfInterest { frame, .. }) = self.selected.as_ref() {
-            self.window.draw_frame_box(
-                &frame.invert_y(self.screen_size.height),
-                &self.config.theme.hint_bg_color,
-            );
+    /// Clear hint drawings
+    /// Should only be called on:
+    /// 1. Deactivation
+    /// 2. Only 1 matching remained while hint-based filtering
+    pub(super) fn clear_hints(&self) {
+        for hb in self.hint_boxes.iter() {
+            hb.free();
         }
+    }
+
+    /// Change selected element of interest
+    /// Draw/Update the frame box of selected element
+    pub(super) fn select(&mut self, eoi: ElementOfInterest) {
+        self.drawer
+            .draw_frame(&eoi.frame.invert_y(self.screen_size.height));
+        self.selected = Some(eoi);
+    }
+
+    pub(super) fn draw_frame_instant(&mut self, frame: &Frame) {
+        self.drawer
+            .draw_frame_instant(&frame.invert_y(self.screen_size.height));
     }
 
     /// Draw/Update hint boxes
     pub(super) fn draw_hints(&mut self) {
         autoreleasepool(|_| {
-            self.clear_drawing();
             for hb in self.hint_boxes.iter_mut() {
                 hb.draw(
-                    &self.window,
+                    &self.drawer.root,
                     &self.config.theme,
                     self.key_prefix.len(),
                     self.screen_size,
                 );
             }
-            self.draw_selected_frame();
         })
     }
 
@@ -57,8 +68,7 @@ impl AppEngine {
                 hb.set_visible(visible);
 
                 if visible {
-                    hb.update_text(prefix_len, &self.config.theme);
-                    hb.update_position(self.screen_size, &self.config.theme);
+                    hb.refresh(prefix_len, self.screen_size, &self.config.theme);
                 }
             }
         })
@@ -147,11 +157,6 @@ impl AppEngine {
         msg
     }
 
-    pub(super) fn draw_menu(&self, msg: &str) -> Retained<CALayer> {
-        self.window
-            .draw_menu(msg, self.screen_size, &self.config.theme)
-    }
-
     fn draw_dashboard(&self, key_prefix: &str) {
         let msg = self.menu_msg_alignment_helper(
             "Pick a Target:",
@@ -162,9 +167,7 @@ impl AppEngine {
             key_prefix,
         );
 
-        self.clear_drawing();
-        self.draw_selected_frame();
-        self.draw_menu(&msg);
+        self.drawer.draw_menu(&msg);
     }
 
     fn draw_image_action_menu(&self, key_prefix: &str) {
@@ -177,7 +180,7 @@ impl AppEngine {
             key_prefix,
         );
 
-        self.draw_menu(&msg);
+        self.drawer.draw_menu(&msg);
     }
 
     fn draw_text_action_menu(&self, text: &str, key_prefix: &str) {
@@ -197,7 +200,7 @@ impl AppEngine {
             key_prefix,
         );
 
-        self.draw_menu(&msg);
+        self.drawer.draw_menu(&msg);
     }
 
     fn draw_scrolling_menu(&self, key_prefix: &str) {
@@ -210,61 +213,52 @@ impl AppEngine {
                 false,
                 key_prefix,
             );
-            self.draw_menu(&msg);
+            self.drawer.draw_menu(&msg);
         }
-        self.draw_selected_frame();
     }
 
     pub(super) fn draw_element_menu(&self, key_prefix: &str, role: RoleOfInterest, set_mode: bool) {
-        autoreleasepool(|_| {
-            self.clear_drawing();
-            // Set mode before drawing to make it more responsive
-            if set_mode {
-                match role {
-                    RoleOfInterest::Image => self.set_mode(Mode::ImageActionMenu),
-                    RoleOfInterest::ScrollBar => self.set_mode(Mode::Scrolling),
-                    RoleOfInterest::TextField
-                    | RoleOfInterest::StaticText
-                    | RoleOfInterest::PseudoText => self.set_mode(Mode::TextActionMenu),
-                    _ if self.target == Target::Text => self.set_mode(Mode::TextActionMenu),
-                    _ if self.target == Target::Scrollable => self.set_mode(Mode::Scrolling),
-                    _ => self.set_mode(Mode::DashBoard),
-                }
-            }
-
-            let text_action_helper = || {
-                let text = self
-                    .selected
-                    .as_ref()
-                    .and_then(|eoi| eoi.context.as_ref())
-                    .expect("Internal Error: selected text should be ready for text action menu");
-                self.draw_text_action_menu(text, key_prefix);
-            };
-
+        // Set mode before drawing to make it more responsive
+        if set_mode {
             match role {
-                RoleOfInterest::Image => self.draw_image_action_menu(key_prefix),
-                RoleOfInterest::ScrollBar => self.draw_scrolling_menu(key_prefix),
+                RoleOfInterest::Image => self.set_mode(Mode::ImageActionMenu),
+                RoleOfInterest::ScrollBar => self.set_mode(Mode::Scrolling),
                 RoleOfInterest::TextField
                 | RoleOfInterest::StaticText
-                | RoleOfInterest::PseudoText => {
-                    text_action_helper();
-                }
-                _ if self.target == Target::Text => text_action_helper(),
-                _ if self.target == Target::Scrollable => self.draw_scrolling_menu(key_prefix),
-                _ => self.draw_dashboard(key_prefix),
+                | RoleOfInterest::PseudoText => self.set_mode(Mode::TextActionMenu),
+                _ if self.target == Target::Text => self.set_mode(Mode::TextActionMenu),
+                _ if self.target == Target::Scrollable => self.set_mode(Mode::Scrolling),
+                _ => self.set_mode(Mode::DashBoard),
             }
-        })
+        }
+
+        let text_action_helper = || {
+            let text = self
+                .selected
+                .as_ref()
+                .and_then(|eoi| eoi.context.as_ref())
+                .expect("Internal Error: selected text should be ready for text action menu");
+            self.draw_text_action_menu(text, key_prefix);
+        };
+
+        match role {
+            RoleOfInterest::Image => self.draw_image_action_menu(key_prefix),
+            RoleOfInterest::ScrollBar => self.draw_scrolling_menu(key_prefix),
+            RoleOfInterest::TextField | RoleOfInterest::StaticText | RoleOfInterest::PseudoText => {
+                text_action_helper();
+            }
+            _ if self.target == Target::Text => text_action_helper(),
+            _ if self.target == Target::Scrollable => self.draw_scrolling_menu(key_prefix),
+            _ => self.draw_dashboard(key_prefix),
+        }
     }
 
     pub(super) fn menu_refresh(&self, key_prefix: &str, set_mode: bool) {
-        autoreleasepool(|_| {
-            if let Some(eoi) = self.selected.as_ref() {
-                self.draw_element_menu(key_prefix, eoi.role(), set_mode);
-            } else {
-                self.clear_drawing();
-                self.draw_dashboard(key_prefix);
-            }
-        })
+        if let Some(eoi) = self.selected.as_ref() {
+            self.draw_element_menu(key_prefix, eoi.role(), set_mode);
+        } else {
+            self.draw_dashboard(key_prefix);
+        }
     }
 
     pub(super) fn draw_word_picker(&mut self) {
@@ -273,6 +267,6 @@ impl AppEngine {
             .as_mut()
             .expect("Internal Error: No word picker set.");
 
-        word_picker.update_text_layer(self.multi_selection.one_side_idex);
+        word_picker.update_text_layer(&self.drawer, self.multi_selection.one_side_idex);
     }
 }

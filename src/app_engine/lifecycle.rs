@@ -50,7 +50,7 @@ impl AppEngine {
     pub(super) fn clear_cache(&mut self) {
         self.word_picker = None;
         self.ocr_cache = None;
-        self.notification_layers.clear();
+        self.clear_hints();
         self.hint_boxes.clear();
         self.element_cache.clear();
         self.key_prefix.clear();
@@ -69,8 +69,7 @@ impl AppEngine {
             _ => LONG_TIMEOUT,
         };
         log::log!(log_level, "{msg}");
-        let notification_layer = self.draw_menu(msg);
-        self.notification_layers.push(notification_layer);
+        self.drawer.notify(msg);
         let sender = self.timeout_sender.clone();
         tokio::spawn(async move { delay(sender, timeout_secs).await });
     }
@@ -93,6 +92,7 @@ impl AppEngine {
                 RoleOfInterest::Generic,
                 frame,
             ));
+            self.draw_frame_instant(&frame);
 
             return Some(frame);
         }
@@ -137,6 +137,7 @@ impl AppEngine {
             RoleOfInterest::Generic,
             window_frame,
         ));
+        self.draw_frame_instant(&window_frame);
 
         Some(window_frame)
     }
@@ -162,7 +163,6 @@ impl AppEngine {
             self.select_app_window(vis_level);
         }
 
-        self.clear_cache();
         let (result_tx, result_rx) = std::sync::mpsc::channel();
 
         if let Some(selected) = self.selected.as_ref()
@@ -191,24 +191,25 @@ impl AppEngine {
 
     pub(super) fn activate(&mut self, target: Target) {
         log::log!(Level::Debug, "Start traversing, target: {target:?}");
+        self.clear_cache();
+        self.drawer.clear_menus();
         let result_rx = self.ui_element_traverse_on_activation(target);
 
-        self.clear_drawing();
-        self.draw_selected_frame();
-
         let mut color_idx = 0;
-        for (idx, signal) in result_rx.iter().enumerate() {
-            autoreleasepool(|_| match signal {
-                ElementSignal::ElementFound(Some(ele)) => {
-                    let need_flush = (idx + 1) % Self::HINTBOX_FLUSH_BATCH_SIZE == 0;
-                    self.handle_element_found(ele, &mut color_idx, need_flush);
+        autoreleasepool(|_| {
+            for (idx, signal) in result_rx.iter().enumerate() {
+                match signal {
+                    ElementSignal::ElementFound(Some(ele)) => {
+                        let need_flush = (idx + 1) % Self::HINTBOX_FLUSH_BATCH_SIZE == 0;
+                        self.handle_element_found(ele, &mut color_idx, need_flush);
+                    }
+                    ElementSignal::TraversalFinished(target) => {
+                        self.handle_traversal_finished(target);
+                    }
+                    _ => (),
                 }
-                ElementSignal::TraversalFinished(target) => {
-                    self.handle_traversal_finished(target);
-                }
-                _ => (),
-            })
-        }
+            }
+        });
         log::log!(Level::Debug, "Finish traversing");
     }
 
@@ -256,7 +257,7 @@ impl AppEngine {
                 color,
             );
 
-            hb.draw(&self.window, &self.config.theme, 0, self.screen_size);
+            hb.draw(&self.drawer.root, &self.config.theme, 0, self.screen_size);
             if need_flush {
                 CATransaction::flush();
             }
@@ -292,9 +293,8 @@ impl AppEngine {
             // Fallback to mouse scroll if no scrollbar found
             let (x, y) = eoi.frame.center();
             self.simulate_event(&rdev::EventType::MouseMove { x, y });
-            self.clear_cache();
             self.draw_element_menu("", RoleOfInterest::ScrollBar, true);
-        } else {
+        } else if target != Target::ChildElement {
             self.clear_drawing();
             self.notify_then_deactivate("No relevant UI elements found.", Level::Warn);
         }
@@ -304,12 +304,13 @@ impl AppEngine {
         if pb == self.temp_file
             && let Ok(new_text) = std::fs::read_to_string(&self.temp_file)
         {
-            self.update_editing_text(new_text);
+            self.update_editing_text(new_text.trim_end_matches('\n').into());
         } else if pb != self.temp_file {
             match GlyphlowConfig::load_config(&pb) {
                 Ok(mut new_config) => {
                     self.element_cache.reload_config(&new_config);
                     let need_warning = !self.config.safe_reload(&mut new_config);
+                    self.drawer.reload_theme(&new_config.theme);
                     self.config = new_config;
 
                     if need_warning {

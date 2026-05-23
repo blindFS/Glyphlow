@@ -2,7 +2,6 @@ use super::AppEngine;
 use crate::action::{WordPicker, get_dictionary_attributed_string};
 use crate::ax_element::{ElementOfInterest, GetAttribute, SetAttribute};
 use crate::config::RoleOfInterest;
-use crate::user_interface::GlyphlowDrawingLayer;
 use crate::util::Frame;
 use crate::{Mode, ScrollAction, TextAction};
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
@@ -11,7 +10,6 @@ use accessibility_sys::{
 };
 use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber};
 use log::Level;
-use objc2_core_foundation::CGSize;
 use rdev::{Button, EventType, simulate};
 use std::time::Duration;
 
@@ -101,7 +99,7 @@ impl AppEngine {
         {
             let screen_frame = Frame::from_origion(self.screen_size);
             let frame = parent_element.get_frame(screen_frame);
-            self.selected = Some(ElementOfInterest::new(
+            self.select(ElementOfInterest::new(
                 parent_element,
                 None,
                 RoleOfInterest::Generic,
@@ -123,9 +121,6 @@ impl AppEngine {
 
         let text = text.clone();
 
-        // Clear old menu no matter which action is taken
-        self.clear_drawing();
-
         // TODO:
         // 1. URL handling
         let keep_drawing = match ta {
@@ -141,15 +136,7 @@ impl AppEngine {
                     &self.config.dictionaries,
                     &self.config.theme,
                 ) {
-                    let CGSize { width, height } = self.screen_size;
-                    let (text_size, _) =
-                        crate::util::estimate_frame_for_text(&attr_string, (width, height));
-                    self.window.draw_attributed_string(
-                        attr_string,
-                        self.screen_size,
-                        text_size,
-                        &self.config.theme,
-                    );
+                    self.drawer.draw_attributed_string(attr_string, false);
                 } else {
                     self.notify_then_deactivate("No definition found.", Level::Warn);
                 }
@@ -157,12 +144,15 @@ impl AppEngine {
             }
             TextAction::Split => {
                 self.set_mode(Mode::WordPicking);
-                self.clear_drawing();
-                let word_picker =
-                    WordPicker::new(text, &self.window, &self.config.theme, self.screen_size);
+                self.clear_cache();
+                let word_picker = WordPicker::new(
+                    text,
+                    self.screen_size,
+                    self.config.theme.clone(),
+                    &self.drawer,
+                );
                 self.hint_width = word_picker.digits;
 
-                self.clear_cache();
                 self.word_picker = Some(word_picker);
                 true
             }
@@ -365,6 +355,9 @@ impl AppEngine {
                         &format!("External stderr: {}", String::from_utf8_lossy(&o.stderr)),
                         Level::Error,
                     );
+                } else {
+                    // Normal exit without new context
+                    self.deactivate();
                 }
             }
             Err(e) => {
