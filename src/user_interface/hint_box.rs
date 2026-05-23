@@ -37,17 +37,17 @@ pub fn hint_label_from_index(i: usize, digits: Option<u32>) -> String {
 #[derive(Debug, Clone, PartialEq)]
 pub struct HintBox {
     pub label: String,
-    pub x: f64,
-    pub y: f64,
+    x: f64,
+    y: f64,
     pub idx: usize,
     /// Moved distance to avoid collision
-    pub delta: (f64, f64),
-    pub frame: Option<Frame>,
-    pub color: Option<CFRetained<CGColor>>,
-    pub text_layer: Retained<CATextLayer>,
-    pub box_layer: Retained<CALayer>,
-    pub tri_layer: Retained<CAShapeLayer>,
-    pub frame_layer: Option<Retained<CALayer>>,
+    delta: (f64, f64),
+    frame: Option<Frame>,
+    color: Option<CFRetained<CGColor>>,
+    text_layer: Retained<CATextLayer>,
+    box_layer: Retained<CALayer>,
+    tri_layer: Retained<CAShapeLayer>,
+    frame_layer: Option<Retained<CALayer>>,
 }
 
 impl HintBox {
@@ -71,13 +71,12 @@ impl HintBox {
         let tri_layer = CAShapeLayer::new();
         bl.insertSublayer_atIndex(&tri_layer, 0);
 
-        let mut frame_layer = None;
-        if frame.is_some() {
+        let frame_layer = frame.map(|_| {
             let fl = CALayer::new();
             fl.setBorderWidth(2.0);
             fl.setZPosition(-1.0);
-            frame_layer = Some(fl);
-        }
+            fl
+        });
 
         Self {
             label,
@@ -215,7 +214,7 @@ impl HintBox {
     }
 
     /// Updates the text and re-estimates the size, returns true if the size changed
-    pub fn update_text(&self, prefix_len: usize, theme: &GlyphlowTheme) -> bool {
+    fn update_text(&self, prefix_len: usize, theme: &GlyphlowTheme) -> bool {
         let attr_string = self.attributed_string(prefix_len, theme);
         unsafe {
             self.text_layer.setString(Some(&attr_string));
@@ -248,7 +247,7 @@ impl HintBox {
         true
     }
 
-    pub fn update_position(&self, has_resized: bool, screen_size: CGSize, theme: &GlyphlowTheme) {
+    fn update_position(&self, has_resized: bool, screen_size: CGSize, theme: &GlyphlowTheme) {
         if self.delta == (0.0, 0.0) && !has_resized {
             return;
         }
@@ -494,7 +493,7 @@ fn update_and_requeue(
     }
 }
 
-pub fn update_hint_text_with_attr(
+fn update_hint_text_with_attr(
     attr_string: &Retained<NSMutableAttributedString>,
     label: &str,
     key_prefix_len: usize,

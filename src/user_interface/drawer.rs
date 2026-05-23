@@ -312,7 +312,7 @@ pub fn get_main_screen_size(mtm: MainThreadMarker) -> CGSize {
     screens.objectAtIndex(0).frame().size
 }
 
-pub fn create_overlay_window(mtm: MainThreadMarker, screen_size: CGSize) -> Retained<NSWindow> {
+fn create_overlay_window(mtm: MainThreadMarker, screen_size: CGSize) -> Retained<NSWindow> {
     unsafe {
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), screen_size);
 
