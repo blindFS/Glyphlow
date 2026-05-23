@@ -18,6 +18,7 @@ use core_foundation::{
     boolean::CFBoolean,
     string::CFString,
 };
+use objc2::rc::autoreleasepool;
 use objc2_core_foundation::{CGPoint, CGSize};
 use std::{collections::HashMap, sync::mpsc::Sender};
 
@@ -1020,16 +1021,18 @@ pub fn traverse(
     vis_level: VisibilityCheckingLevel,
     result_tx: Sender<ElementSignal>,
 ) {
-    let target_c = target.clone();
-    let tx_c = result_tx.clone();
-    traverse_elements(
-        root,
-        &parent_frame,
-        &window_frame,
-        &target_c,
-        vis_level,
-        tx_c,
-        0,
-    );
-    let _ = result_tx.send(ElementSignal::TraversalFinished(target));
+    autoreleasepool(|_| {
+        let target_c = target.clone();
+        let tx_c = result_tx.clone();
+        traverse_elements(
+            root,
+            &parent_frame,
+            &window_frame,
+            &target_c,
+            vis_level,
+            tx_c,
+            0,
+        );
+        let _ = result_tx.send(ElementSignal::TraversalFinished(target));
+    })
 }

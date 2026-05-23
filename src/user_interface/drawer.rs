@@ -21,8 +21,8 @@ struct Menu {
     menu_string: Retained<NSMutableAttributedString>,
 }
 
-static BORDER_WIDTH: f64 = 2.0;
-static MIN_FONT_SIZE: f64 = 10.0;
+const BORDER_WIDTH: f64 = 2.0;
+const MIN_FONT_SIZE: f64 = 10.0;
 
 impl Menu {
     fn new(theme: &GlyphlowTheme) -> Self {

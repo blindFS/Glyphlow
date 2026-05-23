@@ -8,7 +8,7 @@ use crate::{
 };
 use objc2::rc::autoreleasepool;
 
-static MAX_TEXT_DISPLAY_LEN: usize = 30;
+const MAX_TEXT_DISPLAY_LEN: usize = 30;
 
 impl AppEngine {
     pub(super) fn clear_drawing(&mut self) {

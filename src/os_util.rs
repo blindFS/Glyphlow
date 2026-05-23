@@ -33,12 +33,23 @@ const APPLE_ALARM_BUNDLE_IDS: [&str; 3] = [
     "com.apple.CoreLocationAgent",
 ];
 
+const APPLE_NOTIFICATION_CENTER_BUNDLE_ID: &str = "com.apple.notificationcenterui";
+
 pub fn get_system_alarm_window() -> Option<AXUIElement> {
-    APPLE_ALARM_BUNDLE_IDS.iter().find_map(|bundle_id| {
-        AXUIElement::application_with_bundle(bundle_id)
-            .and_then(|app| app.focused_window())
-            .ok()
-    })
+    APPLE_ALARM_BUNDLE_IDS
+        .iter()
+        .find_map(|bundle_id| {
+            AXUIElement::application_with_bundle(bundle_id)
+                .and_then(|app| app.focused_window())
+                .ok()
+        })
+        .or_else(|| {
+            let app =
+                AXUIElement::application_with_bundle(APPLE_NOTIFICATION_CENTER_BUNDLE_ID).ok()?;
+            // Notification banners are not focused, so we need to get the first window
+            let windows = app.windows().ok()?;
+            windows.iter().next().as_deref().cloned()
+        })
 }
 
 pub fn get_focused() -> Option<(i32, AXUIElement, bool)> {
