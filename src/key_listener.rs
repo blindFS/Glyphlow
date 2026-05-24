@@ -50,7 +50,7 @@ pub enum AppSignal {
     ActOnSelected,
     // Sub state signals
     FileUpdate(PathBuf),
-    ClearNotification,
+    ClearNotification(usize),
     ToggleMultiSelection,
     // Menu specific
     TextAction(TextAction),

@@ -79,7 +79,7 @@ pub struct AppEngine {
     pub(super) temp_file: PathBuf,
     pub(super) word_picker: Option<WordPicker>,
     pub(super) ocr_cache: Option<OCRResult>,
-    pub(super) timeout_sender: Sender<()>,
+    pub(super) timeout_sender: Sender<usize>,
     /// Special treatment for Electron based apps.
     /// Like simulate mouse clicking instead of `element.press()`
     pub(super) is_electron: bool,
@@ -97,7 +97,7 @@ impl AppEngine {
         key_state: Arc<Mutex<KeyState>>,
         config: GlyphlowConfig,
         temp_file: PathBuf,
-        timeout_sender: Sender<()>,
+        timeout_sender: Sender<usize>,
     ) -> Self {
         let mtm = MainThreadMarker::new().expect("Not on main thread");
         let screen_size = get_main_screen_size(mtm);
@@ -224,11 +224,11 @@ impl AppEngine {
                     self.notify_then_deactivate("No text found in clipboard.", Level::Warn);
                 }
             }
-            AppSignal::ClearNotification => {
+            AppSignal::ClearNotification(id) => {
                 if self.check_mode(Mode::WaitAndDeactivate) {
                     self.deactivate();
                 } else {
-                    self.drawer.clear_notifications();
+                    self.drawer.clear_notification(id);
                 }
             }
         }

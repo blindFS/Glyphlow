@@ -69,9 +69,9 @@ impl AppEngine {
             _ => LONG_TIMEOUT,
         };
         log::log!(log_level, "{msg}");
-        self.drawer.notify(msg);
+        let id = self.drawer.notify(msg);
         let sender = self.timeout_sender.clone();
-        tokio::spawn(async move { delay(sender, timeout_secs).await });
+        tokio::spawn(async move { delay(sender, id, timeout_secs).await });
     }
 
     pub(super) fn select_app_window(
@@ -330,7 +330,7 @@ impl AppEngine {
     }
 }
 
-async fn delay(sender: Sender<()>, timeout_secs: u64) {
+async fn delay(sender: Sender<usize>, id: usize, timeout_secs: u64) {
     tokio::time::sleep(Duration::from_secs(timeout_secs)).await;
-    let _ = sender.send(()).await;
+    let _ = sender.send(id).await;
 }
