@@ -1,15 +1,12 @@
 use super::AppEngine;
 use crate::{
     Mode,
-    ax_element::{
-        ElementOfInterest, ElementSignal, GetAttribute, Target, ThreadSafeElement, traverse,
-    },
+    ax_element::{ElementOfInterest, ElementSignal, Target, ThreadSafeElement, traverse},
     config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
-    os_util::{get_focused, get_system_alarm_window},
+    os_util::get_focused,
     user_interface::{HintBox, hint_label_from_index, resolve_collisions},
     util::{Frame, digits_by_length},
 };
-use accessibility::AXUIElementAttributes;
 use log::Level;
 use objc2::rc::autoreleasepool;
 use objc2_quartz_core::CATransaction;
@@ -80,59 +77,17 @@ impl AppEngine {
     ) -> Option<Frame> {
         let screen_frame = Frame::from_origion(self.screen_size);
 
-        // NOTE: prioritize system alarms
-        if let Some(window) = get_system_alarm_window() {
-            let frame = window.get_frame(screen_frame);
-            self.last_window_frame = frame;
-            self.is_electron = false;
-
-            self.selected = Some(ElementOfInterest::new(
-                window,
-                None,
-                RoleOfInterest::Generic,
-                frame,
-            ));
-            self.draw_frame_instant(&frame);
-
-            return Some(frame);
-        }
-
-        let (pid, focused_app, is_electron) = get_focused()?;
-        self.is_electron = is_electron;
-
-        // HACK: need this to bootstrap UI tree generation for some electron apps,
-        // e.g. Discord
-        if is_electron && (pid != self.last_pid || vis_level == VisibilityCheckingLevel::Loosest) {
-            let _ = focused_app.role();
-            std::thread::sleep(Duration::from_millis(self.config.electron_initial_wait_ms));
-        }
-        self.last_pid = pid;
-
-        // HACK: menu items may go out of focused window
-        let (focused_window, window_frame) = if vis_level == VisibilityCheckingLevel::Loosest {
-            (focused_app, screen_frame)
-        } else {
-            let mut window = focused_app.focused_window();
-            // NOTE: prioritize popover windows, e.g. Apple Music search
-            if let Ok(windows) = focused_app.windows()
-                && windows.len() > 1
-            {
-                use accessibility_sys::kAXPopoverRole;
-                for win in windows.iter() {
-                    if win.role().is_ok_and(|r| r == kAXPopoverRole) {
-                        window = Ok(win.clone());
-                        break;
-                    }
-                }
-            }
-            let window = window.unwrap_or(focused_app);
-            let frame = window.get_frame(screen_frame);
-            (window, frame)
-        };
-        self.last_window_frame = window_frame;
+        let (window, app_win_info) = get_focused(
+            &self.last_app_window_info,
+            vis_level == VisibilityCheckingLevel::Loosest,
+            self.config.electron_initial_wait_ms,
+            screen_frame,
+        )?;
+        let window_frame = app_win_info.frame;
+        self.last_app_window_info = app_win_info;
 
         self.selected = Some(ElementOfInterest::new(
-            focused_window,
+            window,
             None,
             RoleOfInterest::Generic,
             window_frame,
@@ -170,7 +125,7 @@ impl AppEngine {
         {
             let frame = selected.frame;
             let safe_root = ThreadSafeElement(element.clone());
-            let window_frame = self.last_window_frame;
+            let window_frame = self.last_app_window_info.frame;
             let _ = std::thread::spawn(move || {
                 traverse(
                     safe_root,

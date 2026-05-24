@@ -44,7 +44,7 @@ impl AppEngine {
         let (x, y) = center;
         self.focus_on_element(element);
 
-        if self.is_electron || *role == RoleOfInterest::Cell {
+        if self.last_app_window_info.is_electron || *role == RoleOfInterest::Cell {
             self.simulate_click(x, y, Button::Left);
         } else if let Err(e) = element.press() {
             log::warn!("Failed to do UI press on element: {e}");
@@ -71,7 +71,7 @@ impl AppEngine {
     pub(super) fn right_click_menu_on_element(&self, element: &AXUIElement, center: (f64, f64)) {
         let (x, y) = center;
 
-        if self.is_electron {
+        if self.last_app_window_info.is_electron {
             self.simulate_click(x, y, Button::Right);
         } else if let Err(e) = element.show_menu() {
             log::warn!("Failed to show menu on element: {e}");
