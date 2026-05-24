@@ -29,6 +29,7 @@ pub enum RoleOfInterest {
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
 pub struct CustomTarget {
     pub role: String,
+    pub subrole: Option<String>,
     pub label: Option<String>,
     pub value: Option<String>,
     pub title: Option<String>,
@@ -59,6 +60,7 @@ pub enum WorkFlowAction {
 pub struct WorkFlow {
     pub display: String,
     pub key: String,
+    pub valid_app_ids: Option<Vec<String>>,
     #[serde(default = "default_starting_role")]
     pub starting_role: RoleOfInterest,
     pub actions: Vec<WorkFlowAction>,
@@ -420,6 +422,7 @@ fn default_workflows() -> Vec<WorkFlow> {
             key: "R".into(),
             display: " ProofRead".into(),
             starting_role: RoleOfInterest::TextField,
+            valid_app_ids: None,
             actions: vec![
                 WorkFlowAction::Focus,
                 WorkFlowAction::SelectAll,
@@ -437,6 +440,7 @@ fn default_workflows() -> Vec<WorkFlow> {
             key: "C".into(),
             display: "⮺ Copy".into(),
             starting_role: RoleOfInterest::Image,
+            valid_app_ids: None,
             actions: vec![
                 WorkFlowAction::ShowMenu,
                 WorkFlowAction::Sleep(150),
@@ -452,6 +456,7 @@ fn default_workflows() -> Vec<WorkFlow> {
             key: "L".into(),
             display: " Copy Link".into(),
             starting_role: RoleOfInterest::Image,
+            valid_app_ids: None,
             actions: vec![
                 WorkFlowAction::ShowMenu,
                 WorkFlowAction::Sleep(150),
@@ -467,12 +472,14 @@ fn default_workflows() -> Vec<WorkFlow> {
             key: "[".into(),
             display: "󰳽 Press [Left Click]".into(),
             starting_role: RoleOfInterest::Generic,
+            valid_app_ids: None,
             actions: vec![WorkFlowAction::Press],
         },
         WorkFlow {
             key: "]".into(),
             display: " Menu [Right Click]".into(),
             starting_role: RoleOfInterest::Generic,
+            valid_app_ids: None,
             actions: vec![
                 WorkFlowAction::ShowMenu,
                 WorkFlowAction::Sleep(150),

@@ -8,8 +8,14 @@ use rdev::{Button, EventType};
 use std::time::Duration;
 
 impl AppEngine {
-    /// Check if a workflow's starting_role matches current selected element
+    /// Check if a workflow is valid given currently selected element and app bundle id
     pub(super) fn is_workflow_valid(&self, wf: &WorkFlow) -> bool {
+        if wf.valid_app_ids.as_ref().is_some_and(|ids| {
+            ids.iter()
+                .all(|id| *id != self.last_app_window_info.bundle_id)
+        }) {
+            return false;
+        }
         match wf.starting_role {
             RoleOfInterest::Empty => self.selected.is_none(),
             RoleOfInterest::Generic => self
