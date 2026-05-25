@@ -14,7 +14,7 @@ pub enum RoleOfInterest {
     CheckBox,
     #[default]
     Generic,
-    Empty,
+    Any,
     Image,
     MenuItem,
     ScrollBar,

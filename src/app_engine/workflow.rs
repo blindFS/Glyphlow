@@ -17,7 +17,7 @@ impl AppEngine {
             return false;
         }
         match wf.starting_role {
-            RoleOfInterest::Empty => self.selected.is_none(),
+            RoleOfInterest::Any => true,
             RoleOfInterest::Generic => self
                 .selected
                 .as_ref()
@@ -94,6 +94,7 @@ impl AppEngine {
         let role = selected.role();
         let frame = selected.frame;
 
+        // TODO: visual animation of mouse actions
         match act {
             WorkFlowAction::Focus => {
                 self.focus_on_element(element);

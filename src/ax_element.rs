@@ -622,7 +622,6 @@ pub enum Target {
     Editable,
     Edit,
     Text,
-    MenuItem,
     ChildElement,
     Scrollable,
     Custom(CustomTarget),
@@ -981,7 +980,7 @@ fn traverse_elements(
                         )));
                 }
             }
-            Target::MenuItem | Target::Clickable => {
+            Target::Clickable => {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
                     element.clone(),
                     None,

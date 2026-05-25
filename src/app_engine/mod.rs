@@ -187,15 +187,12 @@ impl AppEngine {
             AppSignal::ScreenShot => {
                 self.clear_cache();
                 self.clear_drawing();
-                let frame = if let Some(eoi) = self.selected.as_ref() {
-                    &eoi.frame
-                } else {
-                    // Defaults to the window
-                    &self
-                        .select_app_window(self.config.visibility_checking_level)
-                        .unwrap_or_else(|| Frame::from_origion(self.screen_size))
-                };
-                if screen_shot(frame).await {
+                let frame = self
+                    .selected
+                    .as_ref()
+                    .map(|eoi| eoi.frame)
+                    .unwrap_or(self.last_app_window_info.frame);
+                if screen_shot(&frame).await {
                     self.notify_then_deactivate("Screenshot copied to clipboard.", Level::Info);
                 } else {
                     self.notify_then_deactivate("Failed to take screenshot.", Level::Error);

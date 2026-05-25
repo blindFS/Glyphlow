@@ -3,10 +3,11 @@ use crate::{
     Mode,
     ax_element::{ElementOfInterest, ElementSignal, Target, ThreadSafeElement, traverse},
     config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
-    os_util::get_focused,
+    os_util::get_focused_window,
     user_interface::{HintBox, hint_label_from_index, resolve_collisions},
     util::{Frame, digits_by_length},
 };
+use accessibility::AXUIElementAttributes;
 use log::Level;
 use objc2::rc::autoreleasepool;
 use objc2_quartz_core::CATransaction;
@@ -71,30 +72,18 @@ impl AppEngine {
         tokio::spawn(async move { delay(sender, id, timeout_secs).await });
     }
 
-    pub(super) fn select_app_window(
-        &mut self,
-        vis_level: VisibilityCheckingLevel,
-    ) -> Option<Frame> {
+    pub(super) fn get_app_window_info(&mut self) {
         let screen_frame = Frame::from_origion(self.screen_size);
-
-        let (window, app_win_info) = get_focused(
-            &self.last_app_window_info,
-            vis_level == VisibilityCheckingLevel::Loosest,
-            self.config.electron_initial_wait_ms,
+        let Some(app_win_info) = get_focused_window(
             screen_frame,
-        )?;
-        let window_frame = app_win_info.frame;
+            &self.last_app_window_info,
+            self.config.electron_initial_wait_ms,
+        ) else {
+            return;
+        };
+
+        self.draw_frame_instant(&app_win_info.frame);
         self.last_app_window_info = app_win_info;
-
-        self.selected = Some(ElementOfInterest::new(
-            window,
-            None,
-            RoleOfInterest::Generic,
-            window_frame,
-        ));
-        self.draw_frame_instant(&window_frame);
-
-        Some(window_frame)
     }
 
     pub(super) fn ui_element_traverse_on_activation(
@@ -108,14 +97,26 @@ impl AppEngine {
             _ => target,
         };
 
-        let vis_level = match target {
+        let (focused_only, vis_level) = match target {
             // NOTE: loose visibility checking for specific targets
-            Target::MenuItem | Target::Custom(_) => VisibilityCheckingLevel::Loosest,
-            _ => self.config.visibility_checking_level,
+            Target::Custom(_) => (false, VisibilityCheckingLevel::Loosest),
+            _ => (true, self.config.visibility_checking_level),
         };
 
         if self.selected.is_none() {
-            self.select_app_window(vis_level);
+            let focused_window = self.last_app_window_info.window.clone();
+            let element = if !focused_only && let Ok(ax_app) = focused_window.parent() {
+                ax_app
+            } else {
+                focused_window
+            };
+
+            self.selected = Some(ElementOfInterest::new(
+                element,
+                None,
+                RoleOfInterest::Generic,
+                self.last_app_window_info.frame,
+            ));
         }
 
         let (result_tx, result_rx) = std::sync::mpsc::channel();
@@ -123,19 +124,15 @@ impl AppEngine {
         if let Some(selected) = self.selected.as_ref()
             && let Some(element) = selected.element()
         {
-            let frame = selected.frame;
             let safe_root = ThreadSafeElement(element.clone());
-            let window_frame = self.last_app_window_info.frame;
+            let frame = selected.frame;
+            let window_frame = if focused_only {
+                self.last_app_window_info.frame
+            } else {
+                Frame::from_origion(self.screen_size)
+            };
             let _ = std::thread::spawn(move || {
-                traverse(
-                    safe_root,
-                    // Very loose visibility constraint
-                    frame,
-                    window_frame,
-                    target,
-                    vis_level,
-                    result_tx,
-                );
+                traverse(safe_root, frame, window_frame, target, vis_level, result_tx);
             });
         }
 
