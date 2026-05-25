@@ -1,11 +1,9 @@
 use super::AppEngine;
 use crate::{
     Mode,
-    ax_element::{
-        ElementOfInterest, ElementSignal, GetAttribute, Target, ThreadSafeElement, traverse,
-    },
+    ax_element::{ElementOfInterest, ElementSignal, Target, ThreadSafeElement, traverse},
     config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
-    os_util::{get_focused, get_system_alarm_window},
+    os_util::get_focused_window,
     user_interface::{HintBox, hint_label_from_index, resolve_collisions},
     util::{Frame, digits_by_length},
 };
@@ -74,72 +72,18 @@ impl AppEngine {
         tokio::spawn(async move { delay(sender, id, timeout_secs).await });
     }
 
-    pub(super) fn select_app_window(
-        &mut self,
-        vis_level: VisibilityCheckingLevel,
-    ) -> Option<Frame> {
+    pub(super) fn get_app_window_info(&mut self) {
         let screen_frame = Frame::from_origion(self.screen_size);
-
-        // NOTE: prioritize system alarms
-        if let Some(window) = get_system_alarm_window() {
-            let frame = window.get_frame(screen_frame);
-            self.last_window_frame = frame;
-            self.is_electron = false;
-
-            self.selected = Some(ElementOfInterest::new(
-                window,
-                None,
-                RoleOfInterest::Generic,
-                frame,
-            ));
-            self.draw_frame_instant(&frame);
-
-            return Some(frame);
-        }
-
-        let (pid, focused_app, is_electron) = get_focused()?;
-        self.is_electron = is_electron;
-
-        // HACK: need this to bootstrap UI tree generation for some electron apps,
-        // e.g. Discord
-        if is_electron && (pid != self.last_pid || vis_level == VisibilityCheckingLevel::Loosest) {
-            let _ = focused_app.role();
-            std::thread::sleep(Duration::from_millis(self.config.electron_initial_wait_ms));
-        }
-        self.last_pid = pid;
-
-        // HACK: menu items may go out of focused window
-        let (focused_window, window_frame) = if vis_level == VisibilityCheckingLevel::Loosest {
-            (focused_app, screen_frame)
-        } else {
-            let mut window = focused_app.focused_window();
-            // NOTE: prioritize popover windows, e.g. Apple Music search
-            if let Ok(windows) = focused_app.windows()
-                && windows.len() > 1
-            {
-                use accessibility_sys::kAXPopoverRole;
-                for win in windows.iter() {
-                    if win.role().is_ok_and(|r| r == kAXPopoverRole) {
-                        window = Ok(win.clone());
-                        break;
-                    }
-                }
-            }
-            let window = window.unwrap_or(focused_app);
-            let frame = window.get_frame(screen_frame);
-            (window, frame)
+        let Some(app_win_info) = get_focused_window(
+            screen_frame,
+            &self.last_app_window_info,
+            self.config.electron_initial_wait_ms,
+        ) else {
+            return;
         };
-        self.last_window_frame = window_frame;
 
-        self.selected = Some(ElementOfInterest::new(
-            focused_window,
-            None,
-            RoleOfInterest::Generic,
-            window_frame,
-        ));
-        self.draw_frame_instant(&window_frame);
-
-        Some(window_frame)
+        self.draw_frame_instant(&app_win_info.frame);
+        self.last_app_window_info = app_win_info;
     }
 
     pub(super) fn ui_element_traverse_on_activation(
@@ -153,14 +97,27 @@ impl AppEngine {
             _ => target,
         };
 
-        let vis_level = match target {
+        let (focused_only, vis_level) = match target {
             // NOTE: loose visibility checking for specific targets
-            Target::MenuItem | Target::Custom(_) => VisibilityCheckingLevel::Loosest,
-            _ => self.config.visibility_checking_level,
+            Target::Custom(_) => (false, VisibilityCheckingLevel::Loosest),
+            _ => (true, self.config.visibility_checking_level),
         };
 
         if self.selected.is_none() {
-            self.select_app_window(vis_level);
+            let element = if !focused_only
+                && let Ok(ax_app) = self.last_app_window_info.window.parent()
+            {
+                ax_app
+            } else {
+                self.last_app_window_info.window.clone()
+            };
+
+            self.selected = Some(ElementOfInterest::new(
+                element,
+                None,
+                RoleOfInterest::Generic,
+                self.last_app_window_info.frame,
+            ));
         }
 
         let (result_tx, result_rx) = std::sync::mpsc::channel();
@@ -168,19 +125,15 @@ impl AppEngine {
         if let Some(selected) = self.selected.as_ref()
             && let Some(element) = selected.element()
         {
-            let frame = selected.frame;
             let safe_root = ThreadSafeElement(element.clone());
-            let window_frame = self.last_window_frame;
+            let frame = selected.frame;
+            let window_frame = if focused_only {
+                self.last_app_window_info.frame
+            } else {
+                Frame::from_origion(self.screen_size)
+            };
             let _ = std::thread::spawn(move || {
-                traverse(
-                    safe_root,
-                    // Very loose visibility constraint
-                    frame,
-                    window_frame,
-                    target,
-                    vis_level,
-                    result_tx,
-                );
+                traverse(safe_root, frame, window_frame, target, vis_level, result_tx);
             });
         }
 

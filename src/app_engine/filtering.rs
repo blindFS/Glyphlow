@@ -128,7 +128,7 @@ impl AppEngine {
             let context = &eoi.context;
             let frame = &eoi.frame;
             match self.target {
-                Target::MenuItem | Target::Clickable => {
+                Target::Clickable => {
                     let center = frame.center();
                     self.press_on_element(element, &role, center);
                     self.deactivate();

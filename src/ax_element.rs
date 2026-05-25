@@ -127,8 +127,19 @@ impl ElementBasicAttributes {
         }
         let role = self.role.to_lowercase();
         let target_role = target.role.to_lowercase();
-        target_role.split('|').any(|r| role.contains(r))
+        match_helper(&target_role, &role, true)
     }
+}
+
+fn match_helper(options: &str, value: &impl ToString, match_with_contains: bool) -> bool {
+    let value = value.to_string();
+    options.split('|').any(|o| {
+        if match_with_contains {
+            value.contains(o)
+        } else {
+            o == value
+        }
+    })
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -514,18 +525,30 @@ impl GetAttribute for AXUIElement {
     }
 
     fn match_custom_target(&self, target: &CustomTarget) -> bool {
+        if let Some(subroles) = target.subrole.as_ref() {
+            let Ok(subrole) = self.subrole() else {
+                return false;
+            };
+            if !match_helper(subroles, &subrole, true) {
+                return false;
+            }
+        }
         if let Some(description) = target.description.as_ref()
-            && !self.description().is_ok_and(|d| d == *description)
+            && !self
+                .description()
+                .is_ok_and(|d| match_helper(description, &d, false))
         {
             return false;
         }
         if let Some(title) = target.title.as_ref()
-            && !self.title().is_ok_and(|t| t == *title)
+            && !self.title().is_ok_and(|t| match_helper(title, &t, false))
         {
             return false;
         }
         if let Some(label) = target.label.as_ref()
-            && !self.label_value().is_ok_and(|l| l == *label)
+            && !self
+                .label_value()
+                .is_ok_and(|l| match_helper(label, &l, false))
         {
             return false;
         }
@@ -534,7 +557,7 @@ impl GetAttribute for AXUIElement {
                 .value()
                 .ok()
                 .and_then(|v| v.downcast::<CFString>())
-                .is_some_and(|v| v == *value)
+                .is_some_and(|v| match_helper(value, &v, false))
         {
             return false;
         }
@@ -599,7 +622,6 @@ pub enum Target {
     Editable,
     Edit,
     Text,
-    MenuItem,
     ChildElement,
     Scrollable,
     Custom(CustomTarget),
@@ -958,7 +980,7 @@ fn traverse_elements(
                         )));
                 }
             }
-            Target::MenuItem | Target::Clickable => {
+            Target::Clickable => {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
                     element.clone(),
                     None,

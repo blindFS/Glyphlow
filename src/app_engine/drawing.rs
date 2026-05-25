@@ -33,7 +33,7 @@ impl AppEngine {
         self.selected = Some(eoi);
     }
 
-    pub(super) fn draw_frame_instant(&mut self, frame: &Frame) {
+    pub(super) fn draw_frame_instant(&self, frame: &Frame) {
         self.drawer
             .draw_frame_instant(&frame.invert_y(self.screen_size.height));
     }
@@ -157,7 +157,13 @@ impl AppEngine {
         msg
     }
 
-    fn draw_dashboard(&self, key_prefix: &str) {
+    fn draw_dashboard(&mut self, key_prefix: &str) {
+        // NOTE: need `self.last_app_window_info` for `is_workflow_valid` check,
+        // but shouldn't set `self.selected` yet
+        if self.selected.is_none() {
+            self.get_app_window_info();
+        }
+
         let msg = self.menu_msg_alignment_helper(
             "Pick a Target:",
             &DASH_BOARD_MENU_ITEMS,
@@ -217,7 +223,12 @@ impl AppEngine {
         }
     }
 
-    pub(super) fn draw_element_menu(&self, key_prefix: &str, role: RoleOfInterest, set_mode: bool) {
+    pub(super) fn draw_element_menu(
+        &mut self,
+        key_prefix: &str,
+        role: RoleOfInterest,
+        set_mode: bool,
+    ) {
         // Set mode before drawing to make it more responsive
         if set_mode {
             match role {
@@ -253,7 +264,7 @@ impl AppEngine {
         }
     }
 
-    pub(super) fn menu_refresh(&self, key_prefix: &str, set_mode: bool) {
+    pub(super) fn menu_refresh(&mut self, key_prefix: &str, set_mode: bool) {
         if let Some(eoi) = self.selected.as_ref() {
             self.draw_element_menu(key_prefix, eoi.role(), set_mode);
         } else {

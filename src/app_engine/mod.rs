@@ -3,6 +3,7 @@ use crate::{
     action::{OCRResult, WordPicker, screen_shot, text_from_clipboard},
     ax_element::{ElementCache, ElementOfInterest, Target},
     config::{GlyphlowConfig, RoleOfInterest, WorkFlowAction},
+    os_util::AppWindowInfo,
     user_interface::{HintBox, UIDrawer, get_main_screen_size},
     util::Frame,
 };
@@ -82,9 +83,7 @@ pub struct AppEngine {
     pub(super) timeout_sender: Sender<usize>,
     /// Special treatment for Electron based apps.
     /// Like simulate mouse clicking instead of `element.press()`
-    pub(super) is_electron: bool,
-    pub(super) last_pid: i32,
-    pub(super) last_window_frame: Frame,
+    pub(super) last_app_window_info: AppWindowInfo,
     /// For multi-selection
     pub(super) multi_selection: MultiSeletionState,
     /// Something to finish after filtering
@@ -124,9 +123,7 @@ impl AppEngine {
             temp_file,
             word_picker: None,
             ocr_cache: None,
-            is_electron: false,
-            last_pid: 0,
-            last_window_frame: Frame::from_origion(screen_size),
+            last_app_window_info: AppWindowInfo::default(screen_size),
             multi_selection: MultiSeletionState::default(),
             pending_workflow_actions: VecDeque::new(),
         }
@@ -190,15 +187,12 @@ impl AppEngine {
             AppSignal::ScreenShot => {
                 self.clear_cache();
                 self.clear_drawing();
-                let frame = if let Some(eoi) = self.selected.as_ref() {
-                    &eoi.frame
-                } else {
-                    // Defaults to the window
-                    &self
-                        .select_app_window(self.config.visibility_checking_level)
-                        .unwrap_or_else(|| Frame::from_origion(self.screen_size))
-                };
-                if screen_shot(frame).await {
+                let frame = self
+                    .selected
+                    .as_ref()
+                    .map(|eoi| eoi.frame)
+                    .unwrap_or(self.last_app_window_info.frame);
+                if screen_shot(&frame).await {
                     self.notify_then_deactivate("Screenshot copied to clipboard.", Level::Info);
                 } else {
                     self.notify_then_deactivate("Failed to take screenshot.", Level::Error);
