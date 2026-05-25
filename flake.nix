@@ -13,7 +13,7 @@
       flake-utils,
     }:
     let
-      version = "0.1.0";
+      version = "0.1.1";
       systems = [ "aarch64-darwin" ];
       forEachSystem = flake-utils.lib.eachSystem systems;
     in
@@ -29,7 +29,7 @@
 
           src = pkgs.fetchurl {
             url = "https://github.com/blindFS/Glyphlow/releases/download/v${version}/glyphlow.tar.gz";
-            hash = "sha256-1QCskKOu+mN9BqD8BoxtFYAsXVEfyWTeE1Q6e1+j1UU=";
+            hash = "sha256-T04zvgtqMDwrbiylgXP109mKiGW6qPpKk77PgAvZhgo=";
           };
 
           nativeBuildInputs = [ pkgs.installShellFiles ];
