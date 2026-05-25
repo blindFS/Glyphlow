@@ -310,9 +310,12 @@ impl UIDrawer {
     }
 
     pub fn clear(&mut self) {
+        CATransaction::begin();
+        CATransaction::setDisableActions(true);
         self.menu.hide();
         self.selected_frame.setHidden(true);
         self.clear_notifications();
+        CATransaction::commit();
         CATransaction::flush();
     }
 }
