@@ -1,0 +1,42 @@
+name: Update Nix Flake
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g., 0.1.1)'
+        required: true
+      hash:
+        description: 'SRI Hash (e.g., sha256-...)'
+        required: true
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+      hash:
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  update-flake:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Update flake.nix
+        run: |
+          sed -i '' "s/version = \".*\";/version = \"${{ inputs.version }}\";/" flake.nix
+          sed -i '' "s/hash = \"sha256-.*\";/hash = \"${{ inputs.hash }}\";/" flake.nix
+          
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add flake.nix
+          git commit -m "chore: update flake.nix to version ${{ inputs.version }}" || echo "No changes to commit"
+          git push origin HEAD:main

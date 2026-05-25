@@ -14,6 +14,9 @@ on:
 jobs:
   build-and-release:
     runs-on: macos-latest
+    outputs:
+      version: ${{ steps.get_meta.outputs.version }}
+      hash: ${{ steps.get_meta.outputs.hash }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -32,9 +35,28 @@ jobs:
           chmod +x glyphlow
           tar -czf glyphlow.tar.gz glyphlow
 
+      - name: Calculate Metadata
+        id: get_meta
+        run: |
+          TAG_NAME=${{ github.event.inputs.tag_name || github.ref_name }}
+          VERSION=${TAG_NAME#v}
+          HASH=$(shasum -a 256 target/aarch64-apple-darwin/release/glyphlow.tar.gz | cut -d ' ' -f 1 | xxd -r -p | base64)
+          SRI_HASH="sha256-$HASH"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "hash=$SRI_HASH" >> $GITHUB_OUTPUT
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
           files: target/aarch64-apple-darwin/release/glyphlow.tar.gz
           generate_release_notes: true
+
+  call-update-nix:
+    needs: build-and-release
+    uses: ./.github/workflows/update-nix.yml
+    with:
+      version: ${{ needs.build-and-release.outputs.version }}
+      hash: ${{ needs.build-and-release.outputs.hash }}
+    secrets: inherit
+
