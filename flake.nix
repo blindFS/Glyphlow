@@ -29,7 +29,7 @@
 
           src = pkgs.fetchurl {
             url = "https://github.com/blindFS/Glyphlow/releases/download/v${version}/glyphlow.tar.gz";
-            hash = "sha256-T04zvgtqMDwrbiylgXP109mKiGW6qPpKk77PgAvZhgo=";
+            hash = "sha256-jB5FeUJ5U8TlxpI0Lv4q8ckzApnWy5vLDgYTjy2hBRU=";
           };
 
           nativeBuildInputs = [ pkgs.installShellFiles ];
