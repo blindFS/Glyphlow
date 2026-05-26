@@ -138,7 +138,7 @@ impl AppEngine {
                 ) {
                     self.drawer.draw_attributed_string(attr_string, false);
                 } else {
-                    self.notify_then_deactivate("No definition found.", Level::Warn);
+                    self.notify("No definition found.", Level::Warn);
                 }
                 true
             }
