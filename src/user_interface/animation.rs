@@ -16,7 +16,7 @@ const RIPPLE_SCALE_FACTOR: f64 = 5.0;
 
 const TRAIL_DURATION: f64 = 0.5;
 /// Offset from the ending cursor position to the right-bottom corner of the cursor shape
-const CURSOR_OFFSET_X: f64 = 12.0;
+const CURSOR_OFFSET_X: f64 = 9.0;
 const CURSOR_OFFSET_Y: f64 = 15.0;
 
 impl UIDrawer {
@@ -117,28 +117,23 @@ impl UIDrawer {
         end_y: f64,
         color: &CFRetained<CGColor>,
     ) {
+        // Convert from top-left origin to bottom-left origin (Cocoa/CALayer coordinates)
+        let end_y = self.screen_size.height - end_y;
         // Skip if start and end are the same (no movement)
         if (start_x - end_x).abs() < 1.0 && (start_y - end_y).abs() < 1.0 {
             return;
         }
 
         autoreleasepool(|_| {
-            let screen_h = self.screen_size.height;
-
-            // Convert from top-left origin to bottom-left origin (Cocoa/CALayer coordinates)
-            let sy = screen_h - start_y;
-            let sx = start_x;
-            let ey = screen_h - end_y;
-            let ex = end_x;
             // Right-bottom corner of cursor shape at ending position
             let cx = end_x + CURSOR_OFFSET_X;
-            let cy = screen_h - (end_y + CURSOR_OFFSET_Y);
+            let cy = end_y - CURSOR_OFFSET_Y;
 
             // Build the triangle path
             let path = CGMutablePath::new();
             unsafe {
-                CGMutablePath::move_to_point(Some(&path), std::ptr::null(), sx, sy);
-                CGMutablePath::add_line_to_point(Some(&path), std::ptr::null(), ex, ey);
+                CGMutablePath::move_to_point(Some(&path), std::ptr::null(), start_x, start_y);
+                CGMutablePath::add_line_to_point(Some(&path), std::ptr::null(), end_x, end_y);
                 CGMutablePath::add_line_to_point(Some(&path), std::ptr::null(), cx, cy);
                 CGMutablePath::close_subpath(Some(&path));
             }

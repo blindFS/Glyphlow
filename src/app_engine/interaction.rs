@@ -28,30 +28,31 @@ impl AppEngine {
     pub(super) fn move_mouse_with_trail(&self, end_x: f64, end_y: f64) {
         // Get current mouse position (Cocoa bottom-left origin)
         let mouse_loc = NSEvent::mouseLocation();
-        // Convert from Cocoa (bottom-left) to screen (top-left) coordinates
-        let start_x = mouse_loc.x;
-        let start_y = self.screen_size.height - mouse_loc.y;
 
-        let color = &self.config.theme.hint_bg_color;
-        self.drawer
-            .draw_trail(start_x, start_y, end_x, end_y, color);
+        if self.config.theme.enable_animation {
+            let color = &self.config.theme.hint_bg_color;
+            self.drawer
+                .draw_trail(mouse_loc.x, mouse_loc.y, end_x, end_y, color);
+        }
         self.simulate_event(&EventType::MouseMove { x: end_x, y: end_y });
     }
 
     pub(super) fn simulate_click(&self, x: f64, y: f64, button: Button) {
         self.move_mouse_with_trail(x, y);
-        // Choose ripple color according to button type
-        let frame_colors = &self.config.theme.frame_colors;
-        let default_color = &self.config.theme.hint_bg_color;
-        let color_idx = match button {
-            Button::Left => frame_colors.len(),
-            Button::Right => 0,
-            Button::Middle => 1,
-            _ => 2,
-        };
-        let color = frame_colors.get(color_idx).unwrap_or(default_color);
-        self.drawer.draw_ripple(x, y, color);
 
+        if self.config.theme.enable_animation {
+            // Choose ripple color according to button type
+            let frame_colors = &self.config.theme.frame_colors;
+            let default_color = &self.config.theme.hint_bg_color;
+            let color_idx = match button {
+                Button::Left => frame_colors.len(),
+                Button::Right => 0,
+                Button::Middle => 1,
+                _ => 2,
+            };
+            let color = frame_colors.get(color_idx).unwrap_or(default_color);
+            self.drawer.draw_ripple(x, y, color);
+        }
         std::thread::sleep(Duration::from_millis(20));
         self.simulate_event(&EventType::ButtonPress(button));
         std::thread::sleep(Duration::from_millis(20));
