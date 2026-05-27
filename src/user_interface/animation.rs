@@ -14,11 +14,10 @@ const RIPPLE_DURATION: f64 = 0.4;
 const RIPPLE_INIT_RADIUS: f64 = 5.0;
 const RIPPLE_SCALE_FACTOR: f64 = 5.0;
 
-const TRAIL_DURATION: f64 = 0.4;
-const TRAIL_INIT_OPACITY: f64 = 0.6;
+const TRAIL_DURATION: f64 = 0.5;
 /// Offset from the ending cursor position to the right-bottom corner of the cursor shape
 const CURSOR_OFFSET_X: f64 = 12.0;
-const CURSOR_OFFSET_Y: f64 = 20.0;
+const CURSOR_OFFSET_Y: f64 = 15.0;
 
 impl UIDrawer {
     /// Triggers a ripple animation at the given (x, y) coordinates inside a parent CALayer.
@@ -163,7 +162,7 @@ impl UIDrawer {
                 // Create fade-out animation
                 let fade_anim =
                     CABasicAnimation::animationWithKeyPath(Some(&NSString::from_str("opacity")));
-                fade_anim.setFromValue(Some(&NSNumber::new_f64(TRAIL_INIT_OPACITY)));
+                fade_anim.setFromValue(Some(&NSNumber::new_f64(1.0)));
                 fade_anim.setToValue(Some(&NSNumber::new_f64(0.0)));
                 fade_anim.setDuration(TRAIL_DURATION);
 
