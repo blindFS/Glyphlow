@@ -104,13 +104,12 @@ impl AppEngine {
         };
 
         if self.selected.is_none() {
-            let element = if !focused_only
-                && let Ok(ax_app) = self.last_app_window_info.window.parent()
-            {
-                ax_app
-            } else {
-                self.last_app_window_info.window.clone()
-            };
+            let element =
+                if !focused_only && let Ok(ax_app) = self.last_app_window_info.window.parent() {
+                    ax_app
+                } else {
+                    self.last_app_window_info.window.clone()
+                };
 
             self.selected = Some(ElementOfInterest::new(
                 element,

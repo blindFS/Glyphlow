@@ -2,7 +2,6 @@ use super::AppEngine;
 use crate::action::{WordPicker, get_dictionary_attributed_string};
 use crate::ax_element::{ElementOfInterest, GetAttribute, SetAttribute};
 use crate::config::RoleOfInterest;
-use crate::user_interface::draw_ripple;
 use crate::util::Frame;
 use crate::{Mode, ScrollAction, TextAction};
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
@@ -36,7 +35,7 @@ impl AppEngine {
             _ => 2,
         };
         let color = frame_colors.get(color_idx).unwrap_or(default_color);
-        draw_ripple(&self.drawer.root, x, self.screen_size.height - y, color);
+        self.drawer.draw_ripple(x, y, color);
 
         std::thread::sleep(Duration::from_millis(20));
         self.simulate_event(&EventType::ButtonPress(button));
