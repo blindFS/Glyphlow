@@ -2,6 +2,7 @@ use super::AppEngine;
 use crate::action::{WordPicker, get_dictionary_attributed_string};
 use crate::ax_element::{ElementOfInterest, GetAttribute, SetAttribute};
 use crate::config::RoleOfInterest;
+use crate::user_interface::draw_ripple;
 use crate::util::Frame;
 use crate::{Mode, ScrollAction, TextAction};
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
@@ -25,6 +26,18 @@ impl AppEngine {
 
     pub(super) fn simulate_click(&self, x: f64, y: f64, button: Button) {
         self.simulate_event(&EventType::MouseMove { x, y });
+        // Choose ripple color according to button type
+        let frame_colors = &self.config.theme.frame_colors;
+        let default_color = &self.config.theme.hint_bg_color;
+        let color_idx = match button {
+            Button::Left => frame_colors.len(),
+            Button::Right => 0,
+            Button::Middle => 1,
+            _ => 2,
+        };
+        let color = frame_colors.get(color_idx).unwrap_or(default_color);
+        draw_ripple(&self.drawer.root, x, self.screen_size.height - y, color);
+
         std::thread::sleep(Duration::from_millis(20));
         self.simulate_event(&EventType::ButtonPress(button));
         std::thread::sleep(Duration::from_millis(20));
