@@ -1,7 +1,7 @@
 use block2::RcBlock;
 use objc2::rc::{Retained, autoreleasepool};
 use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize};
-use objc2_core_graphics::{CGColor, CGPath};
+use objc2_core_graphics::{CGColor, CGMutablePath, CGPath};
 use objc2_foundation::{NSNumber, NSString};
 use objc2_quartz_core::{
     CAAnimation, CAAnimationGroup, CABasicAnimation, CAMediaTiming, CAMediaTimingFunction,
@@ -13,6 +13,12 @@ use crate::user_interface::UIDrawer;
 const RIPPLE_DURATION: f64 = 0.4;
 const RIPPLE_INIT_RADIUS: f64 = 5.0;
 const RIPPLE_SCALE_FACTOR: f64 = 5.0;
+
+const TRAIL_DURATION: f64 = 0.4;
+const TRAIL_INIT_OPACITY: f64 = 0.6;
+/// Offset from the ending cursor position to the right-bottom corner of the cursor shape
+const CURSOR_OFFSET_X: f64 = 12.0;
+const CURSOR_OFFSET_Y: f64 = 20.0;
 
 impl UIDrawer {
     /// Triggers a ripple animation at the given (x, y) coordinates inside a parent CALayer.
@@ -92,6 +98,82 @@ impl UIDrawer {
                 // Bind animation to layer and add layer to window/view hierarchy
                 // The key "ripple" can be anything unique
                 ripple_layer.addAnimation_forKey(&anim_group, Some(&NSString::from_str("ripple")));
+
+                CATransaction::commit();
+            }
+        });
+    }
+
+    /// Draws a fading-out triangle cursor trail from `(start_x, start_y)` to `(end_x, end_y)`.
+    /// All coordinates are in screen coordinates (top-left origin).
+    /// The triangle vertices are:
+    ///   1. Starting cursor position
+    ///   2. Ending cursor position
+    ///   3. Right-bottom corner of the ending cursor shape (constant offset from ending position)
+    pub fn draw_trail(
+        &self,
+        start_x: f64,
+        start_y: f64,
+        end_x: f64,
+        end_y: f64,
+        color: &CFRetained<CGColor>,
+    ) {
+        // Skip if start and end are the same (no movement)
+        if (start_x - end_x).abs() < 1.0 && (start_y - end_y).abs() < 1.0 {
+            return;
+        }
+
+        autoreleasepool(|_| {
+            let screen_h = self.screen_size.height;
+
+            // Convert from top-left origin to bottom-left origin (Cocoa/CALayer coordinates)
+            let sy = screen_h - start_y;
+            let sx = start_x;
+            let ey = screen_h - end_y;
+            let ex = end_x;
+            // Right-bottom corner of cursor shape at ending position
+            let cx = end_x + CURSOR_OFFSET_X;
+            let cy = screen_h - (end_y + CURSOR_OFFSET_Y);
+
+            // Build the triangle path
+            let path = CGMutablePath::new();
+            unsafe {
+                CGMutablePath::move_to_point(Some(&path), std::ptr::null(), sx, sy);
+                CGMutablePath::add_line_to_point(Some(&path), std::ptr::null(), ex, ey);
+                CGMutablePath::add_line_to_point(Some(&path), std::ptr::null(), cx, cy);
+                CGMutablePath::close_subpath(Some(&path));
+            }
+
+            let trail_layer = CAShapeLayer::new();
+            trail_layer.setPath(Some(&path));
+            trail_layer.setFillColor(Some(color));
+            trail_layer.setOpacity(0.0); // Final state: fully transparent
+
+            self.root.addSublayer(&trail_layer);
+
+            unsafe {
+                CATransaction::begin();
+
+                let layer_to_remove = trail_layer.clone();
+                let completion_block = RcBlock::new(move || {
+                    layer_to_remove.removeFromSuperlayer();
+                });
+                CATransaction::setCompletionBlock(Some(&completion_block));
+
+                // Create fade-out animation
+                let fade_anim =
+                    CABasicAnimation::animationWithKeyPath(Some(&NSString::from_str("opacity")));
+                fade_anim.setFromValue(Some(&NSNumber::new_f64(TRAIL_INIT_OPACITY)));
+                fade_anim.setToValue(Some(&NSNumber::new_f64(0.0)));
+                fade_anim.setDuration(TRAIL_DURATION);
+
+                let timing_function =
+                    CAMediaTimingFunction::functionWithName(kCAMediaTimingFunctionEaseOut);
+                fade_anim.setTimingFunction(Some(&timing_function));
+                fade_anim.setRemovedOnCompletion(true);
+
+                trail_layer
+                    .addAnimation_forKey(&fade_anim, Some(&NSString::from_str("cursor_trail")));
 
                 CATransaction::commit();
             }

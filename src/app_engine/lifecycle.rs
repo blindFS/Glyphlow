@@ -244,7 +244,7 @@ impl AppEngine {
         {
             // Fallback to mouse scroll if no scrollbar found
             let (x, y) = eoi.frame.center();
-            self.simulate_event(&rdev::EventType::MouseMove { x, y });
+            self.move_mouse_with_trail(x, y);
             self.draw_element_menu("", RoleOfInterest::ScrollBar, true);
         } else if target != Target::ChildElement {
             self.clear_drawing();

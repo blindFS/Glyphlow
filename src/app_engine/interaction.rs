@@ -10,6 +10,7 @@ use accessibility_sys::{
 };
 use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber};
 use log::Level;
+use objc2_app_kit::NSEvent;
 use rdev::{Button, EventType, simulate};
 use std::time::Duration;
 
@@ -23,8 +24,22 @@ impl AppEngine {
         }
     }
 
+    /// Move the mouse to `(end_x, end_y)` with a fading triangle cursor trail animation.
+    pub(super) fn move_mouse_with_trail(&self, end_x: f64, end_y: f64) {
+        // Get current mouse position (Cocoa bottom-left origin)
+        let mouse_loc = NSEvent::mouseLocation();
+        // Convert from Cocoa (bottom-left) to screen (top-left) coordinates
+        let start_x = mouse_loc.x;
+        let start_y = self.screen_size.height - mouse_loc.y;
+
+        let color = &self.config.theme.hint_bg_color;
+        self.drawer
+            .draw_trail(start_x, start_y, end_x, end_y, color);
+        self.simulate_event(&EventType::MouseMove { x: end_x, y: end_y });
+    }
+
     pub(super) fn simulate_click(&self, x: f64, y: f64, button: Button) {
-        self.simulate_event(&EventType::MouseMove { x, y });
+        self.move_mouse_with_trail(x, y);
         // Choose ripple color according to button type
         let frame_colors = &self.config.theme.frame_colors;
         let default_color = &self.config.theme.hint_bg_color;
