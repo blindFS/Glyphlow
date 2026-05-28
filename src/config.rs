@@ -808,7 +808,7 @@ mod tests {
         );
 
         // Check defaulted values
-        assert_eq!(config.theme.enable_animation, true);
+        assert!(config.theme.enable_animation);
         assert_eq!(config.scroll_distance, 0.05);
         assert_eq!(config.ocr_languages, vec!["en-US".to_string()]);
     }
