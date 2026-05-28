@@ -15,6 +15,7 @@ pub enum RoleOfInterest {
     #[default]
     Generic,
     Any,
+    Some,
     Image,
     MenuItem,
     ScrollBar,

@@ -1,9 +1,11 @@
 use super::AppEngine;
-use crate::action::{WordPicker, get_dictionary_attributed_string};
-use crate::ax_element::{ElementOfInterest, GetAttribute, SetAttribute};
-use crate::config::RoleOfInterest;
-use crate::util::Frame;
-use crate::{Mode, ScrollAction, TextAction};
+use crate::{
+    Mode, ScrollAction, TextAction,
+    action::{WordPicker, get_dictionary_attributed_string},
+    ax_element::{ElementOfInterest, GetAttribute, SetAttribute},
+    config::RoleOfInterest,
+    util::Frame,
+};
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
 use accessibility_sys::{
     kAXErrorAttributeUnsupported, kAXErrorCannotComplete, kAXFocusedAttribute,
