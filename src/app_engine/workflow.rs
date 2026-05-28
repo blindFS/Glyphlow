@@ -50,12 +50,14 @@ impl AppEngine {
                 if self.element_cache.cache.len() == 1 {
                     self.clear_hints();
                     self.select(self.element_cache.cache[0].clone());
-                } else if self.element_cache.cache.len() > 1 {
-                    return true;
                 } else {
-                    // Stop on empty result
+                    // Stop on empty result/multiple results
                     return true;
                 }
+                return false;
+            }
+            WorkFlowAction::Move(x, y) => {
+                self.move_mouse_with_trail(*x, *y);
                 return false;
             }
             WorkFlowAction::KeyCombo(kb) => {
@@ -82,6 +84,32 @@ impl AppEngine {
             return true;
         };
 
+        let frame = selected.frame;
+        match act {
+            WorkFlowAction::Hover => {
+                let (x, y) = frame.center();
+                self.move_mouse_with_trail(x, y);
+                return false;
+            }
+            WorkFlowAction::Click => {
+                let (x, y) = frame.center();
+                self.simulate_click(x, y, Button::Left);
+                return false;
+            }
+            WorkFlowAction::RightClick => {
+                let (x, y) = frame.center();
+                self.simulate_click(x, y, Button::Right);
+                return false;
+            }
+            WorkFlowAction::MiddleClick => {
+                let (x, y) = frame.center();
+                self.simulate_click(x, y, Button::Middle);
+                return false;
+            }
+            _ => (),
+        }
+
+        // Actions that require an AX element
         let Some(element) = selected.element() else {
             self.notify_then_deactivate(
                 &format!("Running a workflow action with no accessibility element. {act:?}"),
@@ -92,7 +120,6 @@ impl AppEngine {
 
         let context = &selected.context;
         let role = selected.role();
-        let frame = selected.frame;
 
         match act {
             WorkFlowAction::Focus => {
@@ -101,25 +128,6 @@ impl AppEngine {
             WorkFlowAction::Press => {
                 let center = frame.center();
                 self.press_on_element(element, &role, center);
-            }
-            WorkFlowAction::Hover => {
-                let (x, y) = frame.center();
-                self.move_mouse_with_trail(x, y);
-            }
-            WorkFlowAction::Move(x, y) => {
-                self.move_mouse_with_trail(*x, *y);
-            }
-            WorkFlowAction::Click => {
-                let (x, y) = frame.center();
-                self.simulate_click(x, y, Button::Left);
-            }
-            WorkFlowAction::RightClick => {
-                let (x, y) = frame.center();
-                self.simulate_click(x, y, Button::Right);
-            }
-            WorkFlowAction::MiddleClick => {
-                let (x, y) = frame.center();
-                self.simulate_click(x, y, Button::Middle);
             }
             WorkFlowAction::ShowMenu => {
                 let center = frame.center();
