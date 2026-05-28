@@ -102,6 +102,8 @@ pub struct GlyphlowTheme {
     pub menu_hl_color: CFRetained<CGColor>,
     #[serde(with = "vec_cgcolor_format", default = "default_frame_colors")]
     pub frame_colors: Vec<CFRetained<CGColor>>,
+    #[serde(default = "default_enable_animation")]
+    pub enable_animation: bool,
 }
 
 fn default_hint_font() -> Retained<NSFont> {
@@ -142,6 +144,9 @@ fn default_frame_colors() -> Vec<CFRetained<CGColor>> {
         color_from_hex("#f7768eff"),
     ]
 }
+fn default_enable_animation() -> bool {
+    true
+}
 
 impl Default for GlyphlowTheme {
     fn default() -> Self {
@@ -157,6 +162,7 @@ impl Default for GlyphlowTheme {
             menu_fg_color: default_menu_fg(),
             menu_hl_color: default_hint_hl(),
             frame_colors: default_frame_colors(),
+            enable_animation: default_enable_animation(),
         }
     }
 }
@@ -802,6 +808,7 @@ mod tests {
         );
 
         // Check defaulted values
+        assert!(config.theme.enable_animation);
         assert_eq!(config.scroll_distance, 0.05);
         assert_eq!(config.ocr_languages, vec!["en-US".to_string()]);
     }

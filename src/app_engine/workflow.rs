@@ -94,7 +94,6 @@ impl AppEngine {
         let role = selected.role();
         let frame = selected.frame;
 
-        // TODO: visual animation of mouse actions
         match act {
             WorkFlowAction::Focus => {
                 self.focus_on_element(element);
@@ -105,10 +104,10 @@ impl AppEngine {
             }
             WorkFlowAction::Hover => {
                 let (x, y) = frame.center();
-                self.simulate_event(&EventType::MouseMove { x, y });
+                self.move_mouse_with_trail(x, y);
             }
             WorkFlowAction::Move(x, y) => {
-                self.simulate_event(&EventType::MouseMove { x: *x, y: *y });
+                self.move_mouse_with_trail(*x, *y);
             }
             WorkFlowAction::Click => {
                 let (x, y) = frame.center();

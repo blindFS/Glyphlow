@@ -184,7 +184,7 @@ impl Menu {
 pub struct UIDrawer {
     theme: GlyphlowTheme,
     pub root: Retained<CALayer>,
-    screen_size: CGSize,
+    pub(super) screen_size: CGSize,
     /// Useful for notification clearing
     notifications: Vec<(usize, Menu)>,
     next_notification_id: usize,

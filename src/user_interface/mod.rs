@@ -1,3 +1,4 @@
+mod animation;
 mod drawer;
 mod hint_box;
 

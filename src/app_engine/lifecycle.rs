@@ -104,13 +104,12 @@ impl AppEngine {
         };
 
         if self.selected.is_none() {
-            let element = if !focused_only
-                && let Ok(ax_app) = self.last_app_window_info.window.parent()
-            {
-                ax_app
-            } else {
-                self.last_app_window_info.window.clone()
-            };
+            let element =
+                if !focused_only && let Ok(ax_app) = self.last_app_window_info.window.parent() {
+                    ax_app
+                } else {
+                    self.last_app_window_info.window.clone()
+                };
 
             self.selected = Some(ElementOfInterest::new(
                 element,
@@ -245,7 +244,7 @@ impl AppEngine {
         {
             // Fallback to mouse scroll if no scrollbar found
             let (x, y) = eoi.frame.center();
-            self.simulate_event(&rdev::EventType::MouseMove { x, y });
+            self.move_mouse_with_trail(x, y);
             self.draw_element_menu("", RoleOfInterest::ScrollBar, true);
         } else if target != Target::ChildElement {
             self.clear_drawing();
