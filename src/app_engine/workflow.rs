@@ -18,6 +18,7 @@ impl AppEngine {
         }
         match wf.starting_role {
             RoleOfInterest::Any => true,
+            RoleOfInterest::Some => self.selected.is_some(),
             RoleOfInterest::Generic => self
                 .selected
                 .as_ref()
