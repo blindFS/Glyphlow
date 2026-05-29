@@ -132,16 +132,8 @@ impl WordPicker {
             .round() as usize;
 
         let line_span_head = "<span class=\"line\">";
-        let mut buffer = format!(
-            "<span class=\"h\">{}</span>",
-            if self.is_searching {
-                format!("/{}", text_prefix)
-            } else {
-                "Press / to search".into()
-            }
-        );
+        let mut buffer = String::new();
 
-        buffer.push('\n');
         let mut line_width = 0;
         buffer.push_str(line_span_head);
 
@@ -195,6 +187,17 @@ impl WordPicker {
             buffer.push_str(&this_span);
         }
         buffer.push_str("</span>");
+
+        let buffer = format!(
+            "<span class=\"h\">{}</span>\n{buffer}",
+            if self.is_searching {
+                format!("/{}", text_prefix)
+            } else if !self.label_prefix.is_empty() && matched.is_empty() {
+                "Press 󰁮 to go back".into()
+            } else {
+                "Press / to search".into()
+            }
+        );
 
         (buffer, matched)
     }
