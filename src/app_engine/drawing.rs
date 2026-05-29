@@ -57,6 +57,7 @@ impl AppEngine {
         let prefix_len = self.key_prefix.len();
 
         autoreleasepool(|_| {
+            let mut nothing_visible = true;
             for hb in self.hint_boxes.iter_mut() {
                 let visible = hb.label.starts_with(&self.key_prefix)
                     && !(self.multi_selection.is_on
@@ -69,7 +70,12 @@ impl AppEngine {
 
                 if visible {
                     hb.refresh(prefix_len, self.screen_size, &self.config.theme);
+                    nothing_visible = false;
                 }
+            }
+
+            if nothing_visible {
+                self.notify("Nothing matches, press 󰁮 to go back", log::Level::Warn);
             }
         })
     }
