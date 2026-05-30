@@ -1,3 +1,13 @@
+<div align="center">
+
+  # Glyphlow
+
+[![Build
+Status](https://github.com/blindFS/Glyphlow/actions/workflows/test.yml/badge.svg)](https://github.com/blindFS/Glyphlow/actions/workflows/test.yml)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/blindFS/Glyphlow)](https://github.com/blindFS/Glyphlow/releases)
+[![GitHub license](https://img.shields.io/github/license/blindFS/Glyphlow)](https://github.com/blindFS/Glyphlow/blob/main/LICENSE)
+</div>
+
 ## Towards a Mouse Free UX for Most APPs on macOS
 
 This tiny tool aims to ease the pain of
