@@ -191,15 +191,15 @@ A comprehensive configuration file is generated when you run this app at the fir
 | :--- | :--- | :--- |
 | `theme.hint_font` | Font used for hint keys | `Andale Mono:12` |
 | `theme.hint_margin_size` | Margin around the hint text | `3` |
-| `theme.hint_bg_color` | Background color of hint box | `#769ff0d0` |
-| `theme.hint_fg_color` | Foreground (text) color of hint box | `#111726ff` |
-| `theme.hint_hl_color` | Faded color of matching prefixes | `#11172620` |
+| `theme.hint_bg_color` | Background color of hint box | $\color{#769ff0}{\blacksquare}$ `#769ff0d0` |
+| `theme.hint_fg_color` | Foreground (text) color of hint box | $\color{#111726}{\blacksquare}$ `#111726ff` |
+| `theme.hint_hl_color` | Faded color of matching prefixes | $\color{#111726}{\blacksquare}$ `#11172620` |
 | `theme.menu_font` | Font used for the menu | `Andale Mono:20` |
 | `theme.menu_margin_size` | Margin around the menu window | `10` |
-| `theme.menu_bg_color` | Background color of the menu | `#111726dd` |
-| `theme.menu_fg_color` | Foreground (text) color of the menu | `#a3aed2ff` |
-| `theme.menu_hl_color` | Highlight color of the menu | `#769ff0d0` |
-| `theme.frame_colors` | Colors used for large UI element frames | `["#e0af68", "#9ece6a", "#bb9af7", "#f7768e"]` |
+| `theme.menu_bg_color` | Background color of the menu | $\color{#111726}{\blacksquare}$ `#111726dd` |
+| `theme.menu_fg_color` | Foreground (text) color of the menu | $\color{#a3aed2}{\blacksquare}$ `#a3aed2ff` |
+| `theme.menu_hl_color` | Highlight color of the menu | $\color{#769ff0}{\blacksquare}$ `#769ff0d0` |
+| `theme.frame_colors` | Colors used for large UI element frames | [$\color{#e0af68}{\blacksquare}$ `"#e0af68"`, $\color{#9ece6a}{\blacksquare}$ `"#9ece6a"`, $\color{#bb9af7}{\blacksquare}$ `"#bb9af7"`, $\color{#f7768e}{\blacksquare}$ `"#f7768e"`] |
 | `theme.enable_animation` | Animations for mouse events | `true` |
 
 </details>
