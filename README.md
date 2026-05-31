@@ -1,3 +1,14 @@
+<div align="center">
+  <img src="assets/icon.svg" width="100" />
+
+# Glyphlow
+
+[![Build
+Status](https://github.com/blindFS/Glyphlow/actions/workflows/test.yml/badge.svg)](https://github.com/blindFS/Glyphlow/actions/workflows/test.yml)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/blindFS/Glyphlow)](https://github.com/blindFS/Glyphlow/releases)
+[![GitHub license](https://img.shields.io/github/license/blindFS/Glyphlow)](https://github.com/blindFS/Glyphlow/blob/main/LICENSE)
+</div>
+
 ## Towards a Mouse Free UX for Most APPs on macOS
 
 This tiny tool aims to ease the pain of
@@ -94,6 +105,8 @@ actions = [
 
 ### Homebrew
 
+<details>
+
 1. Install with brew tap and start the service
 
 ```bash
@@ -105,7 +118,11 @@ brew services start glyphlow
 2. Grant accessibility permission to it
 3. Press the global trigger (defaults to "ALT + g") to start
 
+</details>
+
 ### Nix
+
+<details>
 
 1. Add another input to your system flake file
 
@@ -139,6 +156,8 @@ written in [dendritic pattern](https://github.com/mightyiam/dendritic).
 3. Grant accessibility permission to it
 4. Press the global trigger (defaults to "ALT + g") to start
 
+</details>
+
 ## Purging
 
 This app is designed to be lean and clean, it only generates 2 files:
@@ -150,8 +169,55 @@ or `~/.cache/glyphlow/tempfile.md`.
 
 ## Configuration
 
-Here's how I configure it to perform those actions shown in the demo videos.
 A comprehensive configuration file is generated when you run this app at the first time.
+
+<details>
+<summary><b>Full List of Configuration Options</b></summary>
+
+### General Options
+
+| Name | Description | Default Value |
+| :--- | :--- | :--- |
+| `global_trigger_key` | Global hotkey to trigger the app | `ALT + G` |
+| `editor` | External editor command for editing text fields | `None` |
+| `text_actions` | Custom text actions (e.g., search, translate) | `[]` |
+| `workflows` | Sequences of primitive actions for specific UI roles | `[Default Workflows]` |
+| `scroll_distance` | Relative distance to scroll when using scroll actions | `0.05` |
+| `hide_scrolling_menu` | Whether to hide the menu when scrolling | `false` |
+| `element_min_width` | Minimum width for UI elements to be considered | `15` |
+| `element_min_height` | Minimum height for UI elements to be considered | `15` |
+| `image_min_size` | Minimum size (width/height) for images | `20` |
+| `colored_frame_min_size` | Minimum size for frames to be colored differently | `200` |
+| `ocr_languages` | Languages to use for OCR (Apple VisionKit) | `["en-US"]` |
+| `dictionaries` | Dictionary names for the built-in dictionary lookup | `["New Oxford American Dictionary"]` |
+| `visibility_checking_level` | Rigor level for checking if an element is visible (`Loosest`, `Loose`, `Medium`, `Strict`) | `Loose` |
+| `electron_initial_wait_ms` | Delay for Electron-based apps to bootstrap | `100` |
+
+### Theme Options
+
+| Name | Description | Default Value |
+| :--- | :--- | :--- |
+| `theme.hint_font` | Font used for hint keys | `Andale Mono:12` |
+| `theme.hint_margin_size` | Margin around the hint text | `3` |
+| `theme.hint_bg_color` | Background color of hint box | $\color{#769ff0}{\blacksquare}$ |
+| `theme.hint_fg_color` | Foreground (text) color of hint box | $\color{#111726}{\blacksquare}$ |
+| `theme.hint_hl_color` | Faded color of matching prefixes | $\color{#111726}{\blacksquare}$ |
+| `theme.menu_font` | Font used for the menu | `Andale Mono:20` |
+| `theme.menu_margin_size` | Margin around the menu window | `10` |
+| `theme.menu_bg_color` | Background color of the menu | $\color{#111726}{\blacksquare}$ |
+| `theme.menu_fg_color` | Foreground (text) color of the menu | $\color{#a3aed2}{\blacksquare}$ |
+| `theme.menu_hl_color` | Highlight color of the menu | $\color{#769ff0}{\blacksquare}$ |
+| `theme.frame_colors` | Colors used for large UI element frames | [ $\color{#e0af68}{\blacksquare}$, $\color{#9ece6a}{\blacksquare}$, $\color{#bb9af7}{\blacksquare}$, $\color{#f7768e}{\blacksquare}$ ] |
+| `theme.enable_animation` | Animations for mouse events | `true` |
+
+</details>
+
+### Example
+
+And here's how I configure it to perform those actions shown in the demo videos.
+
+<details>
+<summary>An example of TOML configuration file</summary>
 
 ```toml
 colored_frame_min_size = 100
@@ -197,6 +263,8 @@ args = ["-a", "Zed", "{glyphlow_temp_file}"]
 hint_font = "AndaleMono:16"
 menu_font = "IosevkaTerm Nerd Font Mono:26"
 ```
+
+</details>
 
 ## Roadmap
 

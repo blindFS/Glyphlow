@@ -134,6 +134,7 @@ impl ElementBasicAttributes {
 fn match_helper(options: &str, value: &impl ToString, match_with_contains: bool) -> bool {
     let value = value.to_string();
     options.split('|').any(|o| {
+        let o = o.trim();
         if match_with_contains {
             value.contains(o)
         } else {
