@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
+  <!-- G shape -->
+  <path d="M 286,102
+         L 135,102
+         A 37,37 0 0 0 98,139
+         L 98,361
+         A 37,37 0 0 0 135,398
+         L 365,398
+         A 37,37 0 0 0 402,361
+         L 280,260"
+    fill="none"
+    stroke="#2cb3ed"
+    stroke-width="45"
+    stroke-linecap="butt"
+    stroke-linejoin="round" />
+
+  <!-- 3 top-right buttons -->
+  <rect x="306" y="80" width="45" height="45" rx="9" fill="none" stroke="#2cb3ed" stroke-width="7" />
+  <rect x="371" y="80" width="45" height="45" rx="9" fill="none" stroke="#2cb3ed" stroke-width="7" />
+  <rect x="371" y="145" width="45" height="45" rx="9" fill="none" stroke="#2cb3ed" stroke-width="7" />
+
+  <!-- Arrow head triangle -->
+  <path
+    d="M 211,188 L 310,227 L 250,293"
+    fill="#2cb3ed"
+    stroke="#2cb3ed"
+    stroke-width="2"
+    stroke-linejoin="round" />
+
+  <!-- Y character bg -->
+  <path d="M 220,199 L 260,239 L 300,199 M 260,239 L 260,290"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="30"
+    stroke-linecap="round"
+    stroke-linejoin="round" />
+
+  <!-- Y character fg -->
+  <path d="M 220,199 L 260,239 L 300,199 M 260,239 L 260,290"
+    fill="none"
+    stroke="#2cb3ed"
+    stroke-width="15"
+    stroke-linecap="round"
+    stroke-linejoin="round" />
+</svg>

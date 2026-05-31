@@ -1,4 +1,5 @@
 <div align="center">
+  <img src="assets/icon.svg" width="100" />
 
   # Glyphlow
 
