@@ -161,8 +161,52 @@ or `~/.cache/glyphlow/tempfile.md`.
 
 ## Configuration
 
-Here's how I configure it to perform those actions shown in the demo videos.
 A comprehensive configuration file is generated when you run this app at the first time.
+
+<details>
+<summary><b>Full List of Configuration Options</b></summary>
+
+### General Options
+
+| Name | Description | Default Value |
+| :--- | :--- | :--- |
+| `global_trigger_key` | Global hotkey to trigger the app | `ALT + G` |
+| `editor` | External editor command for editing text fields | `None` |
+| `text_actions` | Custom text actions (e.g., search, translate) | `[]` |
+| `workflows` | Sequences of primitive actions for specific UI roles | [Default Workflows] |
+| `scroll_distance` | Relative distance to scroll when using scroll actions | `0.05` |
+| `hide_scrolling_menu` | Whether to hide the menu when scrolling | `false` |
+| `element_min_width` | Minimum width for UI elements to be considered | `15` |
+| `element_min_height` | Minimum height for UI elements to be considered | `15` |
+| `image_min_size` | Minimum size (width/height) for images | `20` |
+| `colored_frame_min_size` | Minimum size for frames to be colored differently | `200` |
+| `ocr_languages` | Languages to use for OCR (Apple VisionKit) | `["en-US"]` |
+| `dictionaries` | Dictionary names for the built-in dictionary lookup | `["New Oxford American Dictionary"]` |
+| `visibility_checking_level` | Rigor level for checking if an element is visible (`Loosest`, `Loose`, `Medium`, `Strict`) | `Loose` |
+| `electron_initial_wait_ms` | Delay for Electron-based apps to bootstrap | `100` |
+
+### Theme Options
+
+| Name | Description | Default Value |
+| :--- | :--- | :--- |
+| `theme.hint_font` | Font used for hint keys | `Andale Mono:12` |
+| `theme.hint_margin_size` | Margin around the hint text | `3` |
+| `theme.hint_bg_color` | Background color of hint box | `#769ff0d0` |
+| `theme.hint_fg_color` | Foreground (text) color of hint box | `#111726ff` |
+| `theme.hint_hl_color` | Faded color of matching prefixes | `#11172620` |
+| `theme.menu_font` | Font used for the menu | `Andale Mono:20` |
+| `theme.menu_margin_size` | Margin around the menu window | `10` |
+| `theme.menu_bg_color` | Background color of the menu | `#111726dd` |
+| `theme.menu_fg_color` | Foreground (text) color of the menu | `#a3aed2ff` |
+| `theme.menu_hl_color` | Highlight color of the menu | `#769ff0d0` |
+| `theme.frame_colors` | Colors used for large UI element frames | `["#e0af68", "#9ece6a", "#bb9af7", "#f7768e"]` |
+| `theme.enable_animation` | Animations for mouse events | `true` |
+
+</details>
+
+### Example
+
+And here's how I configure it to perform those actions shown in the demo videos.
 
 ```toml
 colored_frame_min_size = 100
