@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/icon.svg" width="100" />
 
-  # Glyphlow
+# Glyphlow
 
 [![Build
 Status](https://github.com/blindFS/Glyphlow/actions/workflows/test.yml/badge.svg)](https://github.com/blindFS/Glyphlow/actions/workflows/test.yml)
@@ -105,6 +105,8 @@ actions = [
 
 ### Homebrew
 
+<details>
+
 1. Install with brew tap and start the service
 
 ```bash
@@ -116,7 +118,11 @@ brew services start glyphlow
 2. Grant accessibility permission to it
 3. Press the global trigger (defaults to "ALT + g") to start
 
+</details>
+
 ### Nix
+
+<details>
 
 1. Add another input to your system flake file
 
@@ -150,6 +156,8 @@ written in [dendritic pattern](https://github.com/mightyiam/dendritic).
 3. Grant accessibility permission to it
 4. Press the global trigger (defaults to "ALT + g") to start
 
+</details>
+
 ## Purging
 
 This app is designed to be lean and clean, it only generates 2 files:
@@ -173,7 +181,7 @@ A comprehensive configuration file is generated when you run this app at the fir
 | `global_trigger_key` | Global hotkey to trigger the app | `ALT + G` |
 | `editor` | External editor command for editing text fields | `None` |
 | `text_actions` | Custom text actions (e.g., search, translate) | `[]` |
-| `workflows` | Sequences of primitive actions for specific UI roles | [Default Workflows] |
+| `workflows` | Sequences of primitive actions for specific UI roles | `[Default Workflows]` |
 | `scroll_distance` | Relative distance to scroll when using scroll actions | `0.05` |
 | `hide_scrolling_menu` | Whether to hide the menu when scrolling | `false` |
 | `element_min_width` | Minimum width for UI elements to be considered | `15` |
@@ -191,15 +199,15 @@ A comprehensive configuration file is generated when you run this app at the fir
 | :--- | :--- | :--- |
 | `theme.hint_font` | Font used for hint keys | `Andale Mono:12` |
 | `theme.hint_margin_size` | Margin around the hint text | `3` |
-| `theme.hint_bg_color` | Background color of hint box | $\color{#769ff0}{\blacksquare}$ `#769ff0d0` |
-| `theme.hint_fg_color` | Foreground (text) color of hint box | $\color{#111726}{\blacksquare}$ `#111726ff` |
-| `theme.hint_hl_color` | Faded color of matching prefixes | $\color{#111726}{\blacksquare}$ `#11172620` |
+| `theme.hint_bg_color` | Background color of hint box | $\color{#769ff0}{\blacksquare}$ |
+| `theme.hint_fg_color` | Foreground (text) color of hint box | $\color{#111726}{\blacksquare}$ |
+| `theme.hint_hl_color` | Faded color of matching prefixes | $\color{#111726}{\blacksquare}$ |
 | `theme.menu_font` | Font used for the menu | `Andale Mono:20` |
 | `theme.menu_margin_size` | Margin around the menu window | `10` |
-| `theme.menu_bg_color` | Background color of the menu | $\color{#111726}{\blacksquare}$ `#111726dd` |
-| `theme.menu_fg_color` | Foreground (text) color of the menu | $\color{#a3aed2}{\blacksquare}$ `#a3aed2ff` |
-| `theme.menu_hl_color` | Highlight color of the menu | $\color{#769ff0}{\blacksquare}$ `#769ff0d0` |
-| `theme.frame_colors` | Colors used for large UI element frames | [$\color{#e0af68}{\blacksquare}$ `"#e0af68"`, $\color{#9ece6a}{\blacksquare}$ `"#9ece6a"`, $\color{#bb9af7}{\blacksquare}$ `"#bb9af7"`, $\color{#f7768e}{\blacksquare}$ `"#f7768e"`] |
+| `theme.menu_bg_color` | Background color of the menu | $\color{#111726}{\blacksquare}$ |
+| `theme.menu_fg_color` | Foreground (text) color of the menu | $\color{#a3aed2}{\blacksquare}$ |
+| `theme.menu_hl_color` | Highlight color of the menu | $\color{#769ff0}{\blacksquare}$ |
+| `theme.frame_colors` | Colors used for large UI element frames | [ $\color{#e0af68}{\blacksquare}$, $\color{#9ece6a}{\blacksquare}$, $\color{#bb9af7}{\blacksquare}$, $\color{#f7768e}{\blacksquare}$ ] |
 | `theme.enable_animation` | Animations for mouse events | `true` |
 
 </details>
@@ -207,6 +215,9 @@ A comprehensive configuration file is generated when you run this app at the fir
 ### Example
 
 And here's how I configure it to perform those actions shown in the demo videos.
+
+<details>
+<summary>An example of TOML configuration file</summary>
 
 ```toml
 colored_frame_min_size = 100
@@ -252,6 +263,8 @@ args = ["-a", "Zed", "{glyphlow_temp_file}"]
 hint_font = "AndaleMono:16"
 menu_font = "IosevkaTerm Nerd Font Mono:26"
 ```
+
+</details>
 
 ## Roadmap
 
