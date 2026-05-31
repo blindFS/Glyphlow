@@ -146,7 +146,7 @@ impl AppEngine {
         }
 
         if menu_itmes.is_empty() {
-            return "Wrong key sequence\nPress Backspace to go back".to_string();
+            return "Wrong key sequence\nPress 󰁮 to go back".to_string();
         }
 
         // Aligned
