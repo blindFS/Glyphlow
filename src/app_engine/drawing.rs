@@ -28,14 +28,14 @@ impl AppEngine {
     /// Change selected element of interest
     /// Draw/Update the frame box of selected element
     pub(super) fn select(&mut self, eoi: ElementOfInterest) {
-        self.drawer
-            .draw_frame(&eoi.frame.invert_y(self.screen_size.height));
+        let y = self.screen_frame.size().1;
+        self.drawer.draw_frame(&eoi.frame.invert_y(y));
         self.selected = Some(eoi);
     }
 
     pub(super) fn draw_frame_instant(&self, frame: &Frame) {
-        self.drawer
-            .draw_frame_instant(&frame.invert_y(self.screen_size.height));
+        let y = self.screen_frame.size().1;
+        self.drawer.draw_frame_instant(&frame.invert_y(y));
     }
 
     /// Draw/Update hint boxes
@@ -46,7 +46,7 @@ impl AppEngine {
                     &self.drawer.root,
                     &self.config.theme,
                     self.key_prefix.len(),
-                    self.screen_size,
+                    &self.screen_frame,
                 );
             }
         })
@@ -69,7 +69,7 @@ impl AppEngine {
                 hb.set_visible(visible);
 
                 if visible {
-                    hb.refresh(prefix_len, self.screen_size, &self.config.theme);
+                    hb.refresh(prefix_len, &self.screen_frame, &self.config.theme);
                     nothing_visible = false;
                 }
             }

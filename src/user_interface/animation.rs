@@ -27,7 +27,7 @@ impl UIDrawer {
     pub fn draw_ripple(&self, x: f64, y: f64, color: &CFRetained<CGColor>) {
         autoreleasepool(|_| {
             // Invert y coordinate
-            let y = self.screen_size.height - y;
+            let y = self.current_screen_frame.size().1 - y;
             let initial_radius = RIPPLE_INIT_RADIUS;
 
             let ripple_layer = CAShapeLayer::new();
@@ -120,7 +120,7 @@ impl UIDrawer {
         color: &CFRetained<CGColor>,
     ) {
         // Convert from top-left origin to bottom-left origin (Cocoa/CALayer coordinates)
-        let end_y = self.screen_size.height - end_y;
+        let end_y = self.current_screen_frame.size().1 - end_y;
         // Skip if start and end are the same (no movement)
         if (start_x - end_x).abs() < 1.0 && (start_y - end_y).abs() < 1.0 {
             return;

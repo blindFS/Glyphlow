@@ -4,7 +4,6 @@ use crate::{
     action::{WordPicker, get_dictionary_attributed_string},
     ax_element::{ElementOfInterest, GetAttribute, SetAttribute},
     config::RoleOfInterest,
-    util::Frame,
 };
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
 use accessibility_sys::{
@@ -127,8 +126,7 @@ impl AppEngine {
             .and_then(|eoi| eoi.element())
             .and_then(|ele| ele.parent().ok())
         {
-            let screen_frame = Frame::from_origion(self.screen_size);
-            let frame = parent_element.get_frame(screen_frame);
+            let frame = parent_element.get_frame(self.screen_frame);
             self.select(ElementOfInterest::new(
                 parent_element,
                 None,
@@ -175,12 +173,10 @@ impl AppEngine {
             TextAction::Split => {
                 self.set_mode(Mode::WordPicking);
                 self.clear_cache();
-                let word_picker = WordPicker::new(
-                    text,
-                    self.screen_size,
-                    self.config.theme.clone(),
-                    &self.drawer,
-                );
+                let (w, h) = self.drawer.current_screen_frame.size();
+                let screen_ratio = w / (h + 0.01);
+                let word_picker =
+                    WordPicker::new(text, screen_ratio, self.config.theme.clone(), &self.drawer);
                 self.hint_width = word_picker.digits;
 
                 self.word_picker = Some(word_picker);

@@ -115,13 +115,17 @@ impl HintBox {
     fn calculate_origin(
         &self,
         box_size: CGSize,
-        screen_size: CGSize,
+        screen_frame: &Frame,
         tri_height: f64,
     ) -> (NSPoint, f64, f64) {
         let (box_width, box_height) = (box_size.width, box_size.height);
         let (o_x, o_y) = (self.x - box_width / 2.0, self.y - tri_height - box_height);
-        let o_x_move = o_x.min(screen_size.width - box_width).max(0.0);
-        let o_y_move = o_y.max(0.0).min(screen_size.height - box_height);
+        let o_x_move = o_x
+            .min(screen_frame.bottom_right.x - box_width)
+            .max(screen_frame.top_left.x);
+        let o_y_move = o_y
+            .max(screen_frame.top_left.y)
+            .min(screen_frame.bottom_right.y - box_height);
         (
             NSPoint::new(o_x_move, o_y_move),
             o_x - o_x_move,
@@ -156,7 +160,7 @@ impl HintBox {
         root_layer: &CALayer,
         theme: &GlyphlowTheme,
         key_prefix_len: usize,
-        screen_size: CGSize,
+        screen_frame: &Frame,
     ) {
         let (tri_width, tri_height) = Self::geometry(theme);
         let bg_color = self.color.as_ref().unwrap_or(&theme.hint_bg_color);
@@ -179,15 +183,15 @@ impl HintBox {
 
         // Text & Box Layer
         let attr_string = self.attributed_string(key_prefix_len, theme);
-        let (text_size, _) =
-            estimate_frame_for_text(&attr_string, (screen_size.width, screen_size.height));
+        let (text_size, _) = estimate_frame_for_text(&attr_string, screen_frame.size());
         let margin = theme.hint_margin_size as f64;
         let box_size = CGSize::new(
             text_size.width + (margin * 2.0),
             text_size.height + (margin * 2.0),
         );
 
-        let (origin, x_offset, y_offset) = self.calculate_origin(box_size, screen_size, tri_height);
+        let (origin, x_offset, y_offset) =
+            self.calculate_origin(box_size, screen_frame, tri_height);
 
         self.box_layer.setFrame(NSRect::new(origin, box_size));
         self.box_layer.setBackgroundColor(Some(bg_color));
@@ -247,13 +251,14 @@ impl HintBox {
         true
     }
 
-    fn update_position(&self, has_resized: bool, screen_size: CGSize, theme: &GlyphlowTheme) {
+    fn update_position(&self, has_resized: bool, screen_frame: &Frame, theme: &GlyphlowTheme) {
         if self.delta == (0.0, 0.0) && !has_resized {
             return;
         }
         let (tri_width, tri_height) = Self::geometry(theme);
         let box_size = self.box_layer.frame().size;
-        let (origin, x_offset, y_offset) = self.calculate_origin(box_size, screen_size, tri_height);
+        let (origin, x_offset, y_offset) =
+            self.calculate_origin(box_size, screen_frame, tri_height);
 
         self.box_layer.setFrame(NSRect::new(origin, box_size));
 
@@ -268,9 +273,9 @@ impl HintBox {
     }
 
     /// Update text, then refresh
-    pub fn refresh(&self, prefix_len: usize, screen_size: CGSize, theme: &GlyphlowTheme) {
+    pub fn refresh(&self, prefix_len: usize, screen_frame: &Frame, theme: &GlyphlowTheme) {
         let has_resized = self.update_text(prefix_len, theme);
-        self.update_position(has_resized, screen_size, theme);
+        self.update_position(has_resized, screen_frame, theme);
     }
 
     pub fn set_visible(&self, visible: bool) {

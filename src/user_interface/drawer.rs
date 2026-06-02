@@ -96,11 +96,11 @@ impl Menu {
 
     fn estimate_text_size(
         &self,
-        screen_size: CGSize,
+        screen_frame: &Frame,
         theme: &GlyphlowTheme,
         auto_resize: bool,
     ) -> CGSize {
-        let CGSize { width, height } = screen_size;
+        let (width, height) = screen_frame.size();
         let (size, visible_len) = estimate_frame_for_text(&self.menu_string, (f64::MAX, f64::MAX));
         let shrinkage = (width / size.width)
             .min(height / size.height)
@@ -124,20 +124,22 @@ impl Menu {
         }
     }
 
-    fn resize_and_show(&self, screen_size: CGSize, theme: &GlyphlowTheme, auto_resize: bool) {
-        let size = self.estimate_text_size(screen_size, theme, auto_resize);
+    fn resize_and_show(&self, screen_frame: &Frame, theme: &GlyphlowTheme, auto_resize: bool) {
+        let size = self.estimate_text_size(screen_frame, theme, auto_resize);
         let CGSize { width, height } = size;
         let margin = theme.menu_margin_size as f64;
         let box_width = width + (margin * 2.0);
         let box_height = height + (margin * 2.0);
 
-        let (o_x, o_y) = (
-            (screen_size.width - box_width) / 2.0,
-            (screen_size.height - box_height) / 2.0,
-        );
+        let (c_x, c_y) = screen_frame.center();
+        let (o_x, o_y) = (c_x - box_width / 2.0, c_y - box_height / 2.0);
 
-        let o_x_move = o_x.min(screen_size.width - box_width).max(0.0);
-        let o_y_move = o_y.max(0.0).min(screen_size.height - box_height);
+        let o_x_move = o_x
+            .min(screen_frame.bottom_right.x - box_width)
+            .max(screen_frame.top_left.x);
+        let o_y_move = o_y
+            .max(screen_frame.top_left.y)
+            .min(screen_frame.bottom_right.y - box_height);
         let origin = NSPoint::new(o_x_move, o_y_move);
 
         self.container
@@ -153,12 +155,12 @@ impl Menu {
         self.container.setHidden(false);
     }
 
-    fn draw(&self, text: &str, screen_size: CGSize, theme: &GlyphlowTheme) {
+    fn draw(&self, text: &str, screen_frame: &Frame, theme: &GlyphlowTheme) {
         autoreleasepool(|_| {
             let ns_string = NSString::from_str(text);
             self.menu_string.mutableString().setString(&ns_string);
             self.initialize_string_attributes(theme);
-            self.resize_and_show(screen_size, theme, true);
+            self.resize_and_show(screen_frame, theme, true);
         })
     }
 
@@ -166,13 +168,13 @@ impl Menu {
     fn draw_attributed_string(
         &self,
         attr_string: Retained<NSMutableAttributedString>,
-        screen_size: CGSize,
+        screen_frame: &Frame,
         theme: &GlyphlowTheme,
         auto_resize: bool,
     ) {
         autoreleasepool(|_| {
             self.menu_string.setAttributedString(&attr_string);
-            self.resize_and_show(screen_size, theme, auto_resize);
+            self.resize_and_show(screen_frame, theme, auto_resize);
         })
     }
 
@@ -184,7 +186,8 @@ impl Menu {
 pub struct UIDrawer {
     theme: GlyphlowTheme,
     pub root: Retained<CALayer>,
-    pub(super) screen_size: CGSize,
+    pub current_screen_frame: Frame,
+    screen_frames: Vec<Frame>,
     /// Useful for notification clearing
     notifications: Vec<(usize, Menu)>,
     next_notification_id: usize,
@@ -193,15 +196,8 @@ pub struct UIDrawer {
 }
 
 impl UIDrawer {
-    pub fn new(screen_size: CGSize, mtm: MainThreadMarker, theme: &GlyphlowTheme) -> Self {
-        let ns_window = create_overlay_window(mtm, screen_size);
-        // To work across different macOS native workspaces
-        ns_window.setCollectionBehavior(
-            NSWindowCollectionBehavior::CanJoinAllSpaces
-                | NSWindowCollectionBehavior::Stationary
-                | NSWindowCollectionBehavior::IgnoresCycle,
-        );
-        ns_window.makeKeyAndOrderFront(None);
+    pub fn new(screen_frames: Vec<Frame>, mtm: MainThreadMarker, theme: &GlyphlowTheme) -> Self {
+        let ns_window = create_overlay_window(mtm, &screen_frames);
         let root = CALayer::from_window(&ns_window).expect("Failed to get root layer of window.");
 
         let menu = Menu::new(theme);
@@ -213,7 +209,9 @@ impl UIDrawer {
         selected_frame.setHidden(true);
 
         // Initialized to middle point on screen
-        let middle = NSPoint::new(screen_size.width / 2.0, screen_size.height / 2.0);
+        let current_screen_frame = screen_frames.first().cloned().unwrap_or_default();
+        let (w, h) = current_screen_frame.size();
+        let middle = NSPoint::new(w / 2.0, h / 2.0);
         let middle_rect = NSRect::new(middle, NSSize::new(0.0, 0.0));
         menu.container.setFrame(middle_rect);
         selected_frame.setFrame(middle_rect);
@@ -224,7 +222,8 @@ impl UIDrawer {
         Self {
             theme: theme.clone(),
             root,
-            screen_size,
+            current_screen_frame,
+            screen_frames,
             notifications: vec![],
             next_notification_id: 0,
             selected_frame,
@@ -240,7 +239,7 @@ impl UIDrawer {
     }
 
     pub fn draw_menu(&self, msg: &str) {
-        self.menu.draw(msg, self.screen_size, &self.theme);
+        self.menu.draw(msg, &self.current_screen_frame, &self.theme);
     }
 
     /// Shrink font size on large estimated frame size if `auto_resize` is true
@@ -249,8 +248,12 @@ impl UIDrawer {
         attr_string: Retained<NSMutableAttributedString>,
         auto_resize: bool,
     ) {
-        self.menu
-            .draw_attributed_string(attr_string, self.screen_size, &self.theme, auto_resize);
+        self.menu.draw_attributed_string(
+            attr_string,
+            &self.current_screen_frame,
+            &self.theme,
+            auto_resize,
+        );
     }
 
     pub fn draw_frame(&self, frame: &Frame) {
@@ -274,7 +277,7 @@ impl UIDrawer {
         self.next_notification_id += 1;
         let nl = Menu::new(&self.theme);
         self.root.addSublayer(&nl.container);
-        nl.draw(msg, self.screen_size, &self.theme);
+        nl.draw(msg, &self.current_screen_frame, &self.theme);
         self.notifications.push((id, nl));
         id
     }
@@ -320,16 +323,20 @@ impl UIDrawer {
     }
 }
 
-pub fn get_main_screen_size(mtm: MainThreadMarker) -> CGSize {
+pub fn get_screen_frames(mtm: MainThreadMarker) -> Vec<Frame> {
     let screens = NSScreen::screens(mtm);
     // The first screen in the array is always the "primary" screen
     // with the menu bar, which defines the coordinate system origin.
-    screens.objectAtIndex(0).frame().size
+    screens
+        .iter()
+        .map(|s| Frame::from_cgrect(&s.frame()))
+        .collect()
 }
 
-fn create_overlay_window(mtm: MainThreadMarker, screen_size: CGSize) -> Retained<NSWindow> {
+fn create_overlay_window(mtm: MainThreadMarker, screen_frames: &[Frame]) -> Retained<NSWindow> {
     unsafe {
-        let frame = NSRect::new(NSPoint::new(0.0, 0.0), screen_size);
+        // A large union frame
+        let frame = Frame::union_of_frames(screen_frames).to_cgrect();
 
         // Use NSBackingStoreType::Buffered (the modern enum path)
         let window = NSWindow::initWithContentRect_styleMask_backing_defer(
@@ -347,6 +354,13 @@ fn create_overlay_window(mtm: MainThreadMarker, screen_size: CGSize) -> Retained
 
         // Front most
         window.setLevel(i32::MAX as isize);
+        // To work across different macOS native workspaces
+        window.setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::Stationary
+                | NSWindowCollectionBehavior::IgnoresCycle,
+        );
+        window.makeKeyAndOrderFront(None);
 
         window
     }
