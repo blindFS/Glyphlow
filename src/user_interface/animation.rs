@@ -11,7 +11,7 @@ use objc2_quartz_core::{
     CAMediaTimingFunction, CAShapeLayer, CATransaction, kCAMediaTimingFunctionEaseOut,
 };
 
-use crate::user_interface::UIDrawer;
+use crate::user_interface::{UIDrawer, calibrated_origin};
 
 const RIPPLE_DURATION: f64 = 0.4;
 const RIPPLE_INIT_RADIUS: f64 = 5.0;
@@ -26,14 +26,12 @@ impl UIDrawer {
     /// Triggers a ripple animation at the given (x, y) coordinates inside a parent CALayer.
     pub fn draw_ripple(&self, x: f64, y: f64, color: &CFRetained<CGColor>) {
         autoreleasepool(|_| {
-            // Invert y coordinate
-            let y = self.current_screen_frame.size().1 - y;
             let initial_radius = RIPPLE_INIT_RADIUS;
 
             let ripple_layer = CAShapeLayer::new();
 
             // Position the layer at the click location and define bounds centered at (0, 0)
-            ripple_layer.setPosition(CGPoint::new(x, y));
+            ripple_layer.setPosition(calibrated_origin(x, y, &self.overlay_frame));
             ripple_layer.setBounds(CGRect::new(
                 CGPoint::new(-initial_radius, -initial_radius),
                 CGSize::new(initial_radius * 2.0, initial_radius * 2.0),
@@ -120,7 +118,7 @@ impl UIDrawer {
         color: &CFRetained<CGColor>,
     ) {
         // Convert from top-left origin to bottom-left origin (Cocoa/CALayer coordinates)
-        let end_y = self.current_screen_frame.size().1 - end_y;
+        let CGPoint { x: end_x, y: end_y } = calibrated_origin(end_x, end_y, &self.overlay_frame);
         // Skip if start and end are the same (no movement)
         if (start_x - end_x).abs() < 1.0 && (start_y - end_y).abs() < 1.0 {
             return;

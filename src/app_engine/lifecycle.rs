@@ -74,7 +74,7 @@ impl AppEngine {
 
     pub(super) fn get_app_window_info(&mut self) {
         let Some(app_win_info) = get_focused_window(
-            self.screen_frame,
+            self.overlay_frame,
             &self.last_app_window_info,
             self.config.electron_initial_wait_ms,
         ) else {
@@ -128,7 +128,7 @@ impl AppEngine {
             let window_frame = if focused_only {
                 self.last_app_window_info.frame
             } else {
-                self.screen_frame
+                self.overlay_frame
             };
             let _ = std::thread::spawn(move || {
                 traverse(safe_root, frame, window_frame, target, vis_level, result_tx);
@@ -174,7 +174,7 @@ impl AppEngine {
         if let Some(idx) = self.element_cache.add_by_target(ele, &self.target) {
             let eoi = &self.element_cache.cache[idx];
 
-            let screen_frame = self.screen_frame;
+            let screen_frame = self.overlay_frame;
             let frame = eoi.frame.intersect(&screen_frame).unwrap_or(screen_frame);
 
             let (x, y) = frame.center();
@@ -201,7 +201,12 @@ impl AppEngine {
 
             let mut hb = HintBox::new(idx, hint_label_from_index(idx, None), x, y, frame, color);
 
-            hb.draw(&self.drawer.root, &self.config.theme, 0, &self.screen_frame);
+            hb.draw(
+                &self.drawer.root,
+                &self.config.theme,
+                0,
+                &self.overlay_frame,
+            );
             if need_flush {
                 CATransaction::flush();
             }

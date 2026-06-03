@@ -39,7 +39,7 @@ impl AppEngine {
                     &self.drawer.root,
                     &self.config.theme,
                     self.key_prefix.len(),
-                    &self.screen_frame,
+                    &self.overlay_frame,
                 );
             }
         })
@@ -62,7 +62,7 @@ impl AppEngine {
                 hb.set_visible(visible);
 
                 if visible {
-                    hb.refresh(prefix_len, &self.screen_frame, &self.config.theme);
+                    hb.refresh(prefix_len, &self.overlay_frame, &self.config.theme);
                     nothing_visible = false;
                 }
             }

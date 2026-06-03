@@ -116,19 +116,19 @@ impl HintBox {
     fn calculate_origin(
         &self,
         box_size: CGSize,
-        screen_frame: &Frame,
+        overlay_frame: &Frame,
         tri_height: f64,
     ) -> (NSPoint, f64, f64) {
         let (box_width, box_height) = (box_size.width, box_size.height);
         let (o_x, o_y) = (self.x - box_width / 2.0, self.y + tri_height + box_height);
         let o_x_move = o_x
-            .min(screen_frame.bottom_right.x - box_width)
-            .max(screen_frame.top_left.x);
+            .min(overlay_frame.bottom_right.x - box_width)
+            .max(overlay_frame.top_left.x);
         let o_y_move = o_y
-            .max(screen_frame.top_left.y)
-            .min(screen_frame.bottom_right.y);
+            .max(overlay_frame.top_left.y)
+            .min(overlay_frame.bottom_right.y);
         (
-            calibrated_origin(o_x_move, o_y_move, screen_frame),
+            calibrated_origin(o_x_move, o_y_move, overlay_frame),
             o_x - o_x_move,
             o_y - o_y_move,
         )
@@ -148,7 +148,7 @@ impl HintBox {
                 Some(&path),
                 std::ptr::null(),
                 tri_width / 2.0 - self.delta.0 + x_offset,
-                tri_height + self.delta.1 + y_offset,
+                tri_height + self.delta.1 - y_offset,
             );
             CGMutablePath::add_line_to_point(Some(&path), std::ptr::null(), tri_width, 0.0);
         }
@@ -161,7 +161,7 @@ impl HintBox {
         root_layer: &CALayer,
         theme: &GlyphlowTheme,
         key_prefix_len: usize,
-        screen_frame: &Frame,
+        overlay_frame: &Frame,
     ) {
         let (tri_width, tri_height) = Self::geometry(theme);
         let bg_color = self.color.as_ref().unwrap_or(&theme.hint_bg_color);
@@ -174,7 +174,7 @@ impl HintBox {
             let y = frame.bottom_right.y;
             let (w, h) = frame.size();
             fl.setFrame(NSRect::new(
-                calibrated_origin(x, y, screen_frame),
+                calibrated_origin(x, y, overlay_frame),
                 NSSize::new(w, h),
             ));
             fl.setBorderColor(Some(bg_color));
@@ -185,7 +185,7 @@ impl HintBox {
 
         // Text & Box Layer
         let attr_string = self.attributed_string(key_prefix_len, theme);
-        let (text_size, _) = estimate_frame_for_text(&attr_string, screen_frame.size());
+        let (text_size, _) = estimate_frame_for_text(&attr_string, overlay_frame.size());
         let margin = theme.hint_margin_size as f64;
         let box_size = CGSize::new(
             text_size.width + (margin * 2.0),
@@ -193,7 +193,7 @@ impl HintBox {
         );
 
         let (origin, x_offset, y_offset) =
-            self.calculate_origin(box_size, screen_frame, tri_height);
+            self.calculate_origin(box_size, overlay_frame, tri_height);
 
         self.box_layer.setFrame(NSRect::new(origin, box_size));
         self.box_layer.setBackgroundColor(Some(bg_color));

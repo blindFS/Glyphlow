@@ -24,7 +24,7 @@ impl AppEngine {
                 hint_boxes_from_frames(
                     len,
                     iter,
-                    &self.screen_frame,
+                    &self.overlay_frame,
                     &self.config.theme,
                     self.config.colored_frame_min_size as f64,
                 )
@@ -85,7 +85,7 @@ impl AppEngine {
         self.drawer.clear_menus_instant();
         self.clear_cache();
         // NOTE: for images with parts out of sight
-        let frame = frame.intersect(&self.screen_frame).unwrap_or(frame);
+        let frame = frame.intersect(&self.overlay_frame).unwrap_or(frame);
         match perform_ocr(&frame, &self.config.ocr_languages).await {
             Ok(ocr_res) if !ocr_res.is_empty() => {
                 self.ocr_cache = Some(ocr_res);

@@ -143,9 +143,7 @@ impl Menu {
         let o_x_move = o_x
             .min(screen_frame.bottom_right.x - box_width)
             .max(screen_frame.top_left.x);
-        let o_y_move = o_y
-            .max(screen_frame.top_left.y)
-            .min(screen_frame.bottom_right.y);
+        let o_y_move = o_y.max(screen_frame.top_left.y + box_height);
         let origin = calibrated_origin(o_x_move, o_y_move, overlay_frame);
 
         self.container
@@ -195,7 +193,7 @@ pub struct UIDrawer {
     pub root: Retained<CALayer>,
     pub current_screen_frame: Frame,
     /// Large enough frame to cover all screen frames
-    overlay_frame: Frame,
+    pub(super) overlay_frame: Frame,
     screen_frames: Vec<Frame>,
     /// Useful for notification clearing
     notifications: Vec<(usize, Menu)>,

@@ -65,7 +65,7 @@ pub struct AppEngine {
     pub(super) hint_boxes: Vec<HintBox>,
     pub(super) element_cache: ElementCache,
     pub(super) key_prefix: String,
-    pub(super) screen_frame: Frame,
+    pub(super) overlay_frame: Frame,
     pub(super) drawer: UIDrawer,
     /// Which elements of interest to look for
     pub(super) target: Target,
@@ -114,7 +114,7 @@ impl AppEngine {
             key_prefix: String::new(),
             target: Target::default(),
             hint_width: 0,
-            screen_frame: overlay_frame,
+            overlay_frame,
             drawer,
             config,
             timeout_sender,
@@ -209,7 +209,10 @@ impl AppEngine {
             AppSignal::FileUpdate(pb) => self.handle_file_update(pb),
             AppSignal::ReadClipboard => {
                 if let Some(text) = text_from_clipboard() {
-                    self.selected = Some(ElementOfInterest::pseudo(None, Frame::default()));
+                    self.selected = Some(ElementOfInterest::pseudo(
+                        None,
+                        self.last_app_window_info.frame,
+                    ));
                     self.update_selected_text_and_show_menu(text);
                 } else {
                     self.notify_then_deactivate("No text found in clipboard.", Level::Warn);

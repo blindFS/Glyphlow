@@ -126,7 +126,7 @@ impl AppEngine {
             .and_then(|eoi| eoi.element())
             .and_then(|ele| ele.parent().ok())
         {
-            let frame = parent_element.get_frame(self.screen_frame);
+            let frame = parent_element.get_frame(self.overlay_frame);
             self.select(ElementOfInterest::new(
                 parent_element,
                 None,

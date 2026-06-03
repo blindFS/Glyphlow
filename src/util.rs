@@ -68,15 +68,6 @@ impl Frame {
         )
     }
 
-    pub fn invert_y(&self, height: f64) -> Self {
-        Frame::new(
-            self.top_left.x,
-            height - self.top_left.y,
-            self.bottom_right.x,
-            height - self.bottom_right.y,
-        )
-    }
-
     pub fn to_cgrect(&self) -> CGRect {
         let (w, h) = self.size();
         CGRect::new(self.top_left, OCGSize::new(w, h))
