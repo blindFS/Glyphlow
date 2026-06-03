@@ -81,7 +81,7 @@ impl AppEngine {
             return;
         };
 
-        self.draw_frame_instant(&app_win_info.frame);
+        self.drawer.draw_frame_instant(&app_win_info.frame);
         self.last_app_window_info = app_win_info;
     }
 
@@ -183,10 +183,9 @@ impl AppEngine {
             let color_num = self.config.theme.frame_colors.len();
 
             // Draw frames for large enough elements
-            let s_h = self.screen_frame.size().1;
             let frame = if w.max(h) >= self.config.colored_frame_min_size as f64 {
                 *color_idx += 1;
-                Some(eoi.frame.invert_y(s_h))
+                Some(eoi.frame)
             } else {
                 None
             };
@@ -200,14 +199,7 @@ impl AppEngine {
                 })
                 .flatten();
 
-            let mut hb = HintBox::new(
-                idx,
-                hint_label_from_index(idx, None),
-                x,
-                s_h - y,
-                frame,
-                color,
-            );
+            let mut hb = HintBox::new(idx, hint_label_from_index(idx, None), x, y, frame, color);
 
             hb.draw(&self.drawer.root, &self.config.theme, 0, &self.screen_frame);
             if need_flush {

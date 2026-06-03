@@ -7,6 +7,7 @@ use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSi
 use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer, kCAAlignmentCenter};
 
 use crate::config::GlyphlowTheme;
+use crate::user_interface::calibrated_origin;
 use crate::util::{Frame, digits_by_length, estimate_frame_for_text};
 
 pub fn hint_label_from_index(i: usize, digits: Option<u32>) -> String {
@@ -119,15 +120,15 @@ impl HintBox {
         tri_height: f64,
     ) -> (NSPoint, f64, f64) {
         let (box_width, box_height) = (box_size.width, box_size.height);
-        let (o_x, o_y) = (self.x - box_width / 2.0, self.y - tri_height - box_height);
+        let (o_x, o_y) = (self.x - box_width / 2.0, self.y + tri_height + box_height);
         let o_x_move = o_x
             .min(screen_frame.bottom_right.x - box_width)
             .max(screen_frame.top_left.x);
         let o_y_move = o_y
             .max(screen_frame.top_left.y)
-            .min(screen_frame.bottom_right.y - box_height);
+            .min(screen_frame.bottom_right.y);
         (
-            NSPoint::new(o_x_move, o_y_move),
+            calibrated_origin(o_x_move, o_y_move, screen_frame),
             o_x - o_x_move,
             o_y - o_y_move,
         )
@@ -147,7 +148,7 @@ impl HintBox {
                 Some(&path),
                 std::ptr::null(),
                 tri_width / 2.0 - self.delta.0 + x_offset,
-                tri_height - self.delta.1 + y_offset,
+                tri_height + self.delta.1 + y_offset,
             );
             CGMutablePath::add_line_to_point(Some(&path), std::ptr::null(), tri_width, 0.0);
         }
@@ -169,10 +170,11 @@ impl HintBox {
         if let Some(fl) = &self.frame_layer
             && let Some(frame) = &self.frame
         {
-            let origin = frame.top_left;
+            let x = frame.top_left.x;
+            let y = frame.bottom_right.y;
             let (w, h) = frame.size();
             fl.setFrame(NSRect::new(
-                NSPoint::new(origin.x, origin.y),
+                calibrated_origin(x, y, screen_frame),
                 NSSize::new(w, h),
             ));
             fl.setBorderColor(Some(bg_color));
@@ -312,7 +314,6 @@ pub fn hint_boxes_from_frames(
     let mut boxes = frames
         .enumerate()
         .map(|(idx, frame)| {
-            let (_, screen_height) = screen_frame.size();
             let frame = frame.intersect(screen_frame).unwrap_or(*screen_frame);
 
             let (x, y) = frame.center();
@@ -321,7 +322,7 @@ pub fn hint_boxes_from_frames(
             // Draw frames for large enough elements
             let frame = if w.max(h) >= colored_frame_min_size {
                 color_idx += 1;
-                Some(frame.invert_y(screen_height))
+                Some(frame)
             } else {
                 None
             };
@@ -337,7 +338,7 @@ pub fn hint_boxes_from_frames(
                 idx,
                 hint_label_from_index(idx, Some(digits)),
                 x,
-                screen_height - y,
+                y,
                 frame,
                 color,
             )

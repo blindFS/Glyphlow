@@ -124,7 +124,13 @@ impl Menu {
         }
     }
 
-    fn resize_and_show(&self, screen_frame: &Frame, theme: &GlyphlowTheme, auto_resize: bool) {
+    fn resize_and_show(
+        &self,
+        screen_frame: &Frame,
+        overlay_frame: &Frame,
+        theme: &GlyphlowTheme,
+        auto_resize: bool,
+    ) {
         let size = self.estimate_text_size(screen_frame, theme, auto_resize);
         let CGSize { width, height } = size;
         let margin = theme.menu_margin_size as f64;
@@ -132,15 +138,15 @@ impl Menu {
         let box_height = height + (margin * 2.0);
 
         let (c_x, c_y) = screen_frame.center();
-        let (o_x, o_y) = (c_x - box_width / 2.0, c_y - box_height / 2.0);
+        let (o_x, o_y) = (c_x - box_width / 2.0, c_y + box_height / 2.0);
 
         let o_x_move = o_x
             .min(screen_frame.bottom_right.x - box_width)
             .max(screen_frame.top_left.x);
         let o_y_move = o_y
             .max(screen_frame.top_left.y)
-            .min(screen_frame.bottom_right.y - box_height);
-        let origin = NSPoint::new(o_x_move, o_y_move);
+            .min(screen_frame.bottom_right.y);
+        let origin = calibrated_origin(o_x_move, o_y_move, overlay_frame);
 
         self.container
             .setFrame(NSRect::new(origin, NSSize::new(box_width, box_height)));
@@ -155,12 +161,12 @@ impl Menu {
         self.container.setHidden(false);
     }
 
-    fn draw(&self, text: &str, screen_frame: &Frame, theme: &GlyphlowTheme) {
+    fn draw(&self, text: &str, screen_frame: &Frame, overlay_frame: &Frame, theme: &GlyphlowTheme) {
         autoreleasepool(|_| {
             let ns_string = NSString::from_str(text);
             self.menu_string.mutableString().setString(&ns_string);
             self.initialize_string_attributes(theme);
-            self.resize_and_show(screen_frame, theme, true);
+            self.resize_and_show(screen_frame, overlay_frame, theme, true);
         })
     }
 
@@ -169,12 +175,13 @@ impl Menu {
         &self,
         attr_string: Retained<NSMutableAttributedString>,
         screen_frame: &Frame,
+        overlay_frame: &Frame,
         theme: &GlyphlowTheme,
         auto_resize: bool,
     ) {
         autoreleasepool(|_| {
             self.menu_string.setAttributedString(&attr_string);
-            self.resize_and_show(screen_frame, theme, auto_resize);
+            self.resize_and_show(screen_frame, overlay_frame, theme, auto_resize);
         })
     }
 
@@ -187,6 +194,8 @@ pub struct UIDrawer {
     theme: GlyphlowTheme,
     pub root: Retained<CALayer>,
     pub current_screen_frame: Frame,
+    /// Large enough frame to cover all screen frames
+    overlay_frame: Frame,
     screen_frames: Vec<Frame>,
     /// Useful for notification clearing
     notifications: Vec<(usize, Menu)>,
@@ -196,8 +205,13 @@ pub struct UIDrawer {
 }
 
 impl UIDrawer {
-    pub fn new(screen_frames: Vec<Frame>, mtm: MainThreadMarker, theme: &GlyphlowTheme) -> Self {
-        let ns_window = create_overlay_window(mtm, &screen_frames);
+    pub fn new(
+        screen_frames: Vec<Frame>,
+        overlay_frame: Frame,
+        mtm: MainThreadMarker,
+        theme: &GlyphlowTheme,
+    ) -> Self {
+        let ns_window = create_overlay_window(mtm, &overlay_frame);
         let root = CALayer::from_window(&ns_window).expect("Failed to get root layer of window.");
 
         let menu = Menu::new(theme);
@@ -210,8 +224,8 @@ impl UIDrawer {
 
         // Initialized to middle point on screen
         let current_screen_frame = screen_frames.first().cloned().unwrap_or_default();
-        let (w, h) = current_screen_frame.size();
-        let middle = NSPoint::new(w / 2.0, h / 2.0);
+        let (x, y) = current_screen_frame.center();
+        let middle = calibrated_origin(x, y, &overlay_frame);
         let middle_rect = NSRect::new(middle, NSSize::new(0.0, 0.0));
         menu.container.setFrame(middle_rect);
         selected_frame.setFrame(middle_rect);
@@ -223,6 +237,7 @@ impl UIDrawer {
             theme: theme.clone(),
             root,
             current_screen_frame,
+            overlay_frame,
             screen_frames,
             notifications: vec![],
             next_notification_id: 0,
@@ -239,7 +254,12 @@ impl UIDrawer {
     }
 
     pub fn draw_menu(&self, msg: &str) {
-        self.menu.draw(msg, &self.current_screen_frame, &self.theme);
+        self.menu.draw(
+            msg,
+            &self.current_screen_frame,
+            &self.overlay_frame,
+            &self.theme,
+        );
     }
 
     /// Shrink font size on large estimated frame size if `auto_resize` is true
@@ -251,14 +271,16 @@ impl UIDrawer {
         self.menu.draw_attributed_string(
             attr_string,
             &self.current_screen_frame,
+            &self.overlay_frame,
             &self.theme,
             auto_resize,
         );
     }
 
     pub fn draw_frame(&self, frame: &Frame) {
-        let origin = frame.top_left;
-        let origin = NSPoint::new(origin.x, origin.y);
+        let x = frame.top_left.x;
+        let y = frame.bottom_right.y;
+        let origin = calibrated_origin(x, y, &self.overlay_frame);
         let (w, h) = frame.size();
         let frame = NSRect::new(origin, NSSize::new(w, h));
         self.selected_frame.setFrame(frame);
@@ -277,7 +299,12 @@ impl UIDrawer {
         self.next_notification_id += 1;
         let nl = Menu::new(&self.theme);
         self.root.addSublayer(&nl.container);
-        nl.draw(msg, &self.current_screen_frame, &self.theme);
+        nl.draw(
+            msg,
+            &self.current_screen_frame,
+            &self.overlay_frame,
+            &self.theme,
+        );
         self.notifications.push((id, nl));
         id
     }
@@ -333,10 +360,10 @@ pub fn get_screen_frames(mtm: MainThreadMarker) -> Vec<Frame> {
         .collect()
 }
 
-fn create_overlay_window(mtm: MainThreadMarker, screen_frames: &[Frame]) -> Retained<NSWindow> {
+fn create_overlay_window(mtm: MainThreadMarker, overlay_frame: &Frame) -> Retained<NSWindow> {
     unsafe {
         // A large union frame
-        let frame = Frame::union_of_frames(screen_frames).to_cgrect();
+        let frame = overlay_frame.to_cgrect();
 
         // Use NSBackingStoreType::Buffered (the modern enum path)
         let window = NSWindow::initWithContentRect_styleMask_backing_defer(
@@ -377,4 +404,12 @@ impl GlyphlowDrawingLayer for CALayer {
         let root_layer = content_view.layer()?;
         Some(root_layer)
     }
+}
+
+/// Coordinate shift, top left -> bottom left
+pub fn calibrated_origin(x: f64, y: f64, overlay_frame: &Frame) -> NSPoint {
+    NSPoint::new(
+        x - overlay_frame.top_left.x,
+        overlay_frame.bottom_right.y - y,
+    )
 }

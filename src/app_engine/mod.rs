@@ -99,8 +99,8 @@ impl AppEngine {
     ) -> Self {
         let mtm = MainThreadMarker::new().expect("Not on main thread");
         let screen_frames = get_screen_frames(mtm);
-        let union_screen_frame = Frame::union_of_frames(&screen_frames);
-        let drawer = UIDrawer::new(screen_frames, mtm, &config.theme);
+        let overlay_frame = Frame::union_of_frames(&screen_frames);
+        let drawer = UIDrawer::new(screen_frames, overlay_frame, mtm, &config.theme);
 
         Self {
             state,
@@ -114,7 +114,7 @@ impl AppEngine {
             key_prefix: String::new(),
             target: Target::default(),
             hint_width: 0,
-            screen_frame: union_screen_frame,
+            screen_frame: overlay_frame,
             drawer,
             config,
             timeout_sender,
@@ -123,7 +123,7 @@ impl AppEngine {
             temp_file,
             word_picker: None,
             ocr_cache: None,
-            last_app_window_info: AppWindowInfo::default(union_screen_frame),
+            last_app_window_info: AppWindowInfo::default(overlay_frame),
             multi_selection: MultiSeletionState::default(),
             pending_workflow_actions: VecDeque::new(),
         }

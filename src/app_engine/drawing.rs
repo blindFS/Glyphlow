@@ -4,7 +4,6 @@ use crate::{
     TEXT_ACTION_MENU_ITEMS,
     ax_element::{ElementOfInterest, Target},
     config::RoleOfInterest,
-    util::Frame,
 };
 use objc2::rc::autoreleasepool;
 
@@ -28,14 +27,8 @@ impl AppEngine {
     /// Change selected element of interest
     /// Draw/Update the frame box of selected element
     pub(super) fn select(&mut self, eoi: ElementOfInterest) {
-        let y = self.screen_frame.size().1;
-        self.drawer.draw_frame(&eoi.frame.invert_y(y));
+        self.drawer.draw_frame(&eoi.frame);
         self.selected = Some(eoi);
-    }
-
-    pub(super) fn draw_frame_instant(&self, frame: &Frame) {
-        let y = self.screen_frame.size().1;
-        self.drawer.draw_frame_instant(&frame.invert_y(y));
     }
 
     /// Draw/Update hint boxes
