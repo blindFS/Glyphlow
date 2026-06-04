@@ -209,7 +209,7 @@ impl UIDrawer {
         mtm: MainThreadMarker,
         theme: &GlyphlowTheme,
     ) -> Self {
-        let ns_window = create_overlay_window(mtm, &overlay_frame);
+        let ns_window = create_overlay_window(mtm);
         let root = CALayer::from_window(&ns_window).expect("Failed to get root layer of window.");
 
         let menu = Menu::new(theme);
@@ -351,13 +351,18 @@ impl UIDrawer {
 pub fn get_screen_frames(mtm: MainThreadMarker) -> Vec<Frame> {
     let screens = NSScreen::screens(mtm);
     if screens.len() > 1 && NSScreen::screensHaveSeparateSpaces(mtm) {
-        log::error!("Multiple screens with separate spaces is not supported.");
+        log::error!(
+            "Multiple screens with separate spaces is not supported.\nYou can turn it off in System Preferences -> Desktop & Dock -> Mission Control -> Displays have separate Spaces."
+        );
     }
+
+    // NOTE: This app mainly works with AX coordinate system.
+    // NS frames converted.
     let primary_height = screens
-        .iter()
-        .next()
+        .firstObject()
         .map(|s| s.frame().size.height)
         .unwrap_or(0.0);
+
     screens
         .iter()
         .map(|s| {
@@ -372,10 +377,16 @@ pub fn get_screen_frames(mtm: MainThreadMarker) -> Vec<Frame> {
         .collect()
 }
 
-fn create_overlay_window(mtm: MainThreadMarker, overlay_frame: &Frame) -> Retained<NSWindow> {
+fn create_overlay_window(mtm: MainThreadMarker) -> Retained<NSWindow> {
     unsafe {
         // A large union frame
-        let frame = overlay_frame.to_cgrect();
+        let frame = Frame::union_of_frames(
+            &NSScreen::screens(mtm)
+                .iter()
+                .map(|s| Frame::from_cgrect(&s.frame()))
+                .collect::<Vec<_>>(),
+        )
+        .to_cgrect();
 
         // Use NSBackingStoreType::Buffered (the modern enum path)
         let window = NSWindow::initWithContentRect_styleMask_backing_defer(

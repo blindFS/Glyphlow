@@ -122,7 +122,7 @@ impl UIDrawer {
         let (start_x, start_y) = if self.screen_frames.len() > 1 {
             let main_frame = self.screen_frames[0];
             let start_x = start_x + main_frame.top_left.x - self.overlay_frame.top_left.x;
-            let start_y = start_y + main_frame.bottom_right.y - self.overlay_frame.bottom_right.y;
+            let start_y = start_y - main_frame.bottom_right.y + self.overlay_frame.bottom_right.y;
             (start_x, start_y)
         } else {
             (start_x, start_y)
