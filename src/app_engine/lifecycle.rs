@@ -20,7 +20,7 @@ const DEBUG_TIMEOUT: u64 = 5;
 
 impl AppEngine {
     pub(super) fn set_mode(&self, mode: Mode) {
-        log::log!(Level::Trace, "Set mode: {mode:?}");
+        log::trace!("Set mode: {mode:?}");
         if let Ok(mut state) = self.state.lock() {
             *state = mode;
         }
@@ -141,7 +141,7 @@ impl AppEngine {
     const HINTBOX_FLUSH_BATCH_SIZE: usize = 5;
 
     pub(super) fn activate(&mut self, target: Target) {
-        log::log!(Level::Debug, "Start traversing, target: {target:?}");
+        log::debug!("Start traversing, target: {target:?}");
         self.clear_cache();
         self.drawer.clear_menus();
         let result_rx = self.ui_element_traverse_on_activation(target);
@@ -161,7 +161,7 @@ impl AppEngine {
                 }
             }
         });
-        log::log!(Level::Debug, "Finish traversing");
+        log::debug!("Finish traversing");
     }
 
     fn handle_element_found(

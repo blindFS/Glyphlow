@@ -119,7 +119,9 @@ impl Frame {
     }
 
     pub fn union_of_frames(frames: &[Frame]) -> Self {
-        frames.iter().fold(Frame::default(), |acc, f| acc.union(f))
+        let mut iter = frames.iter();
+        let first = iter.next().cloned().unwrap_or_default();
+        iter.fold(first, |acc, f| acc.union(f))
     }
 
     pub fn contains(&self, other: &Frame) -> bool {

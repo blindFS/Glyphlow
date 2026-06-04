@@ -104,7 +104,9 @@ impl UIDrawer {
     }
 
     /// Draws a fading-out triangle cursor trail from `(start_x, start_y)` to `(end_x, end_y)`.
-    /// All coordinates are in screen coordinates (top-left origin).
+    /// Ending coordinates are in screen coordinates (top-left origin), need calibration before drawing
+    /// while start coordinates are in bottom-left origin, but relative to the main screen origin.
+    ///
     /// The triangle vertices are:
     ///   1. Starting cursor position
     ///   2. Ending cursor position
@@ -117,7 +119,15 @@ impl UIDrawer {
         end_y: f64,
         color: &CFRetained<CGColor>,
     ) {
-        // Convert from top-left origin to bottom-left origin (Cocoa/CALayer coordinates)
+        let (start_x, start_y) = if self.screen_frames.len() > 1 {
+            let main_frame = self.screen_frames[0];
+            let start_x = start_x + main_frame.top_left.x - self.overlay_frame.top_left.x;
+            let start_y = start_y + main_frame.bottom_right.y - self.overlay_frame.bottom_right.y;
+            (start_x, start_y)
+        } else {
+            (start_x, start_y)
+        };
+        // Convert ending point from top-left origin to bottom-left origin (Cocoa/CALayer coordinates)
         let CGPoint { x: end_x, y: end_y } = calibrated_origin(end_x, end_y, &self.overlay_frame);
         // Skip if start and end are the same (no movement)
         if (start_x - end_x).abs() < 1.0 && (start_y - end_y).abs() < 1.0 {

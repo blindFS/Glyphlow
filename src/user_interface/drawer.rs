@@ -194,7 +194,7 @@ pub struct UIDrawer {
     pub current_screen_frame: Frame,
     /// Large enough frame to cover all screen frames
     pub(super) overlay_frame: Frame,
-    screen_frames: Vec<Frame>,
+    pub(super) screen_frames: Vec<Frame>,
     /// Useful for notification clearing
     notifications: Vec<(usize, Menu)>,
     next_notification_id: usize,
@@ -350,11 +350,25 @@ impl UIDrawer {
 
 pub fn get_screen_frames(mtm: MainThreadMarker) -> Vec<Frame> {
     let screens = NSScreen::screens(mtm);
-    // The first screen in the array is always the "primary" screen
-    // with the menu bar, which defines the coordinate system origin.
+    if screens.len() > 1 && NSScreen::screensHaveSeparateSpaces(mtm) {
+        log::error!("Multiple screens with separate spaces is not supported.");
+    }
+    let primary_height = screens
+        .iter()
+        .next()
+        .map(|s| s.frame().size.height)
+        .unwrap_or(0.0);
     screens
         .iter()
-        .map(|s| Frame::from_cgrect(&s.frame()))
+        .map(|s| {
+            let f = s.frame();
+            Frame::new(
+                f.origin.x,
+                primary_height - (f.origin.y + f.size.height),
+                f.origin.x + f.size.width,
+                primary_height - f.origin.y,
+            )
+        })
         .collect()
 }
 

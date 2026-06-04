@@ -118,7 +118,7 @@ pub fn get_focused_window(
         .bundleIdentifier()
         .map(|s| s.to_string())
         .unwrap_or_default();
-    log::log!(log::Level::Trace, "Focused app bundle id: {:?}", bundle_id);
+    log::trace!("Focused app bundle id: {:?}", bundle_id);
 
     let pid = app.processIdentifier();
     let is_electron = check_is_electron_app(&app).unwrap_or_default();
