@@ -4,12 +4,11 @@ use crate::{
     ax_element::{ElementCache, ElementOfInterest, Target},
     config::{GlyphlowConfig, RoleOfInterest, WorkFlowAction},
     os_util::AppWindowInfo,
-    user_interface::{HintBox, UIDrawer, get_main_screen_size},
+    user_interface::{HintBox, UIDrawer, get_screen_frames},
     util::Frame,
 };
 use log::Level;
 use objc2::MainThreadMarker;
-use objc2_core_foundation::CGSize;
 use std::{
     collections::VecDeque,
     path::PathBuf,
@@ -66,7 +65,7 @@ pub struct AppEngine {
     pub(super) hint_boxes: Vec<HintBox>,
     pub(super) element_cache: ElementCache,
     pub(super) key_prefix: String,
-    pub(super) screen_size: CGSize,
+    pub(super) overlay_frame: Frame,
     pub(super) drawer: UIDrawer,
     /// Which elements of interest to look for
     pub(super) target: Target,
@@ -99,8 +98,9 @@ impl AppEngine {
         timeout_sender: Sender<usize>,
     ) -> Self {
         let mtm = MainThreadMarker::new().expect("Not on main thread");
-        let screen_size = get_main_screen_size(mtm);
-        let drawer = UIDrawer::new(screen_size, mtm, &config.theme);
+        let screen_frames = get_screen_frames(mtm);
+        let overlay_frame = Frame::union_of_frames(&screen_frames);
+        let drawer = UIDrawer::new(screen_frames, overlay_frame, mtm, &config.theme);
 
         Self {
             state,
@@ -114,7 +114,7 @@ impl AppEngine {
             key_prefix: String::new(),
             target: Target::default(),
             hint_width: 0,
-            screen_size,
+            overlay_frame,
             drawer,
             config,
             timeout_sender,
@@ -123,7 +123,7 @@ impl AppEngine {
             temp_file,
             word_picker: None,
             ocr_cache: None,
-            last_app_window_info: AppWindowInfo::default(screen_size),
+            last_app_window_info: AppWindowInfo::default(overlay_frame),
             multi_selection: MultiSeletionState::default(),
             pending_workflow_actions: VecDeque::new(),
         }
@@ -211,7 +211,7 @@ impl AppEngine {
                 if let Some(text) = text_from_clipboard() {
                     self.selected = Some(ElementOfInterest::pseudo(
                         None,
-                        Frame::from_origion(self.screen_size),
+                        self.last_app_window_info.frame,
                     ));
                     self.update_selected_text_and_show_menu(text);
                 } else {

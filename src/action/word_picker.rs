@@ -6,7 +6,6 @@ use crate::{
 };
 use objc2::rc::{Retained, autoreleasepool};
 use objc2_app_kit::NSFontAttributeName;
-use objc2_core_foundation::CGSize;
 use objc2_foundation::{NSMutableAttributedString, NSRange};
 use regex::Regex;
 use std::sync::OnceLock;
@@ -45,7 +44,7 @@ pub struct WordPicker {
 }
 
 impl WordPicker {
-    pub fn new(text: String, screen_size: CGSize, theme: GlyphlowTheme, drawer: &UIDrawer) -> Self {
+    pub fn new(text: String, screen_ratio: f64, theme: GlyphlowTheme, drawer: &UIDrawer) -> Self {
         let (word_strings, offsets) = multilingual_split(&text);
         let digits = digits_by_length(word_strings.len());
         let mut words = Vec::new();
@@ -54,7 +53,6 @@ impl WordPicker {
             words.push(Word { text, label });
         }
 
-        let CGSize { width, height } = screen_size;
         let word_picker = Self {
             raw: text,
             words,
@@ -63,7 +61,7 @@ impl WordPicker {
             is_searching: false,
             label_prefix: String::new(),
             text_prefix: String::new(),
-            screen_ratio: width / (height + 0.01),
+            screen_ratio,
             theme,
             matched: Vec::new(),
         };

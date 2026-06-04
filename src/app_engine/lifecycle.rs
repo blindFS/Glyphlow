@@ -5,7 +5,7 @@ use crate::{
     config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
     os_util::get_focused_window,
     user_interface::{HintBox, hint_label_from_index, resolve_collisions},
-    util::{Frame, digits_by_length},
+    util::digits_by_length,
 };
 use accessibility::AXUIElementAttributes;
 use log::Level;
@@ -20,7 +20,7 @@ const DEBUG_TIMEOUT: u64 = 5;
 
 impl AppEngine {
     pub(super) fn set_mode(&self, mode: Mode) {
-        log::log!(Level::Trace, "Set mode: {mode:?}");
+        log::trace!("Set mode: {mode:?}");
         if let Ok(mut state) = self.state.lock() {
             *state = mode;
         }
@@ -73,16 +73,16 @@ impl AppEngine {
     }
 
     pub(super) fn get_app_window_info(&mut self) {
-        let screen_frame = Frame::from_origion(self.screen_size);
         let Some(app_win_info) = get_focused_window(
-            screen_frame,
+            self.overlay_frame,
             &self.last_app_window_info,
             self.config.electron_initial_wait_ms,
         ) else {
             return;
         };
 
-        self.draw_frame_instant(&app_win_info.frame);
+        self.drawer.select_screen_frame(&app_win_info.frame);
+        self.drawer.draw_frame_instant(&app_win_info.frame);
         self.last_app_window_info = app_win_info;
     }
 
@@ -129,7 +129,7 @@ impl AppEngine {
             let window_frame = if focused_only {
                 self.last_app_window_info.frame
             } else {
-                Frame::from_origion(self.screen_size)
+                self.overlay_frame
             };
             let _ = std::thread::spawn(move || {
                 traverse(safe_root, frame, window_frame, target, vis_level, result_tx);
@@ -142,7 +142,7 @@ impl AppEngine {
     const HINTBOX_FLUSH_BATCH_SIZE: usize = 5;
 
     pub(super) fn activate(&mut self, target: Target) {
-        log::log!(Level::Debug, "Start traversing, target: {target:?}");
+        log::debug!("Start traversing, target: {target:?}");
         self.clear_cache();
         self.drawer.clear_menus();
         let result_rx = self.ui_element_traverse_on_activation(target);
@@ -162,7 +162,7 @@ impl AppEngine {
                 }
             }
         });
-        log::log!(Level::Debug, "Finish traversing");
+        log::debug!("Finish traversing");
     }
 
     fn handle_element_found(
@@ -175,7 +175,7 @@ impl AppEngine {
         if let Some(idx) = self.element_cache.add_by_target(ele, &self.target) {
             let eoi = &self.element_cache.cache[idx];
 
-            let screen_frame = Frame::from_origion(self.screen_size);
+            let screen_frame = self.overlay_frame;
             let frame = eoi.frame.intersect(&screen_frame).unwrap_or(screen_frame);
 
             let (x, y) = frame.center();
@@ -186,7 +186,7 @@ impl AppEngine {
             // Draw frames for large enough elements
             let frame = if w.max(h) >= self.config.colored_frame_min_size as f64 {
                 *color_idx += 1;
-                Some(eoi.frame.invert_y(self.screen_size.height))
+                Some(eoi.frame)
             } else {
                 None
             };
@@ -200,16 +200,14 @@ impl AppEngine {
                 })
                 .flatten();
 
-            let mut hb = HintBox::new(
-                idx,
-                hint_label_from_index(idx, None),
-                x,
-                self.screen_size.height - y,
-                frame,
-                color,
-            );
+            let mut hb = HintBox::new(idx, hint_label_from_index(idx, None), x, y, frame, color);
 
-            hb.draw(&self.drawer.root, &self.config.theme, 0, self.screen_size);
+            hb.draw(
+                &self.drawer.root,
+                &self.config.theme,
+                0,
+                &self.overlay_frame,
+            );
             if need_flush {
                 CATransaction::flush();
             }

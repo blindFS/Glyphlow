@@ -96,11 +96,11 @@ impl Menu {
 
     fn estimate_text_size(
         &self,
-        screen_size: CGSize,
+        screen_frame: &Frame,
         theme: &GlyphlowTheme,
         auto_resize: bool,
     ) -> CGSize {
-        let CGSize { width, height } = screen_size;
+        let (width, height) = screen_frame.size();
         let (size, visible_len) = estimate_frame_for_text(&self.menu_string, (f64::MAX, f64::MAX));
         let shrinkage = (width / size.width)
             .min(height / size.height)
@@ -124,21 +124,27 @@ impl Menu {
         }
     }
 
-    fn resize_and_show(&self, screen_size: CGSize, theme: &GlyphlowTheme, auto_resize: bool) {
-        let size = self.estimate_text_size(screen_size, theme, auto_resize);
+    fn resize_and_show(
+        &self,
+        screen_frame: &Frame,
+        overlay_frame: &Frame,
+        theme: &GlyphlowTheme,
+        auto_resize: bool,
+    ) {
+        let size = self.estimate_text_size(screen_frame, theme, auto_resize);
         let CGSize { width, height } = size;
         let margin = theme.menu_margin_size as f64;
         let box_width = width + (margin * 2.0);
         let box_height = height + (margin * 2.0);
 
-        let (o_x, o_y) = (
-            (screen_size.width - box_width) / 2.0,
-            (screen_size.height - box_height) / 2.0,
-        );
+        let (c_x, c_y) = screen_frame.center();
+        let (o_x, o_y) = (c_x - box_width / 2.0, c_y + box_height / 2.0);
 
-        let o_x_move = o_x.min(screen_size.width - box_width).max(0.0);
-        let o_y_move = o_y.max(0.0).min(screen_size.height - box_height);
-        let origin = NSPoint::new(o_x_move, o_y_move);
+        let o_x_move = o_x
+            .min(screen_frame.bottom_right.x - box_width)
+            .max(screen_frame.top_left.x);
+        let o_y_move = o_y.max(screen_frame.top_left.y + box_height);
+        let origin = calibrated_origin(o_x_move, o_y_move, overlay_frame);
 
         self.container
             .setFrame(NSRect::new(origin, NSSize::new(box_width, box_height)));
@@ -153,12 +159,12 @@ impl Menu {
         self.container.setHidden(false);
     }
 
-    fn draw(&self, text: &str, screen_size: CGSize, theme: &GlyphlowTheme) {
+    fn draw(&self, text: &str, screen_frame: &Frame, overlay_frame: &Frame, theme: &GlyphlowTheme) {
         autoreleasepool(|_| {
             let ns_string = NSString::from_str(text);
             self.menu_string.mutableString().setString(&ns_string);
             self.initialize_string_attributes(theme);
-            self.resize_and_show(screen_size, theme, true);
+            self.resize_and_show(screen_frame, overlay_frame, theme, true);
         })
     }
 
@@ -166,13 +172,14 @@ impl Menu {
     fn draw_attributed_string(
         &self,
         attr_string: Retained<NSMutableAttributedString>,
-        screen_size: CGSize,
+        screen_frame: &Frame,
+        overlay_frame: &Frame,
         theme: &GlyphlowTheme,
         auto_resize: bool,
     ) {
         autoreleasepool(|_| {
             self.menu_string.setAttributedString(&attr_string);
-            self.resize_and_show(screen_size, theme, auto_resize);
+            self.resize_and_show(screen_frame, overlay_frame, theme, auto_resize);
         })
     }
 
@@ -182,9 +189,12 @@ impl Menu {
 }
 
 pub struct UIDrawer {
-    theme: GlyphlowTheme,
+    pub(super) theme: GlyphlowTheme,
     pub root: Retained<CALayer>,
-    pub(super) screen_size: CGSize,
+    pub current_screen_frame: Frame,
+    /// Large enough frame to cover all screen frames
+    pub(super) overlay_frame: Frame,
+    pub(super) screen_frames: Vec<Frame>,
     /// Useful for notification clearing
     notifications: Vec<(usize, Menu)>,
     next_notification_id: usize,
@@ -193,15 +203,13 @@ pub struct UIDrawer {
 }
 
 impl UIDrawer {
-    pub fn new(screen_size: CGSize, mtm: MainThreadMarker, theme: &GlyphlowTheme) -> Self {
-        let ns_window = create_overlay_window(mtm, screen_size);
-        // To work across different macOS native workspaces
-        ns_window.setCollectionBehavior(
-            NSWindowCollectionBehavior::CanJoinAllSpaces
-                | NSWindowCollectionBehavior::Stationary
-                | NSWindowCollectionBehavior::IgnoresCycle,
-        );
-        ns_window.makeKeyAndOrderFront(None);
+    pub fn new(
+        screen_frames: Vec<Frame>,
+        overlay_frame: Frame,
+        mtm: MainThreadMarker,
+        theme: &GlyphlowTheme,
+    ) -> Self {
+        let ns_window = create_overlay_window(mtm);
         let root = CALayer::from_window(&ns_window).expect("Failed to get root layer of window.");
 
         let menu = Menu::new(theme);
@@ -213,7 +221,9 @@ impl UIDrawer {
         selected_frame.setHidden(true);
 
         // Initialized to middle point on screen
-        let middle = NSPoint::new(screen_size.width / 2.0, screen_size.height / 2.0);
+        let current_screen_frame = screen_frames.first().cloned().unwrap_or_default();
+        let (x, y) = current_screen_frame.center();
+        let middle = calibrated_origin(x, y, &overlay_frame);
         let middle_rect = NSRect::new(middle, NSSize::new(0.0, 0.0));
         menu.container.setFrame(middle_rect);
         selected_frame.setFrame(middle_rect);
@@ -224,11 +234,23 @@ impl UIDrawer {
         Self {
             theme: theme.clone(),
             root,
-            screen_size,
+            current_screen_frame,
+            overlay_frame,
+            screen_frames,
             notifications: vec![],
             next_notification_id: 0,
             selected_frame,
             menu,
+        }
+    }
+
+    pub fn select_screen_frame(&mut self, window_frame: &Frame) {
+        if let Some(sf) = self
+            .screen_frames
+            .iter()
+            .max_by_key(|f| f.intersect(window_frame).map(|f| f.area().to_bits()))
+        {
+            self.current_screen_frame = *sf;
         }
     }
 
@@ -240,7 +262,12 @@ impl UIDrawer {
     }
 
     pub fn draw_menu(&self, msg: &str) {
-        self.menu.draw(msg, self.screen_size, &self.theme);
+        self.menu.draw(
+            msg,
+            &self.current_screen_frame,
+            &self.overlay_frame,
+            &self.theme,
+        );
     }
 
     /// Shrink font size on large estimated frame size if `auto_resize` is true
@@ -249,13 +276,19 @@ impl UIDrawer {
         attr_string: Retained<NSMutableAttributedString>,
         auto_resize: bool,
     ) {
-        self.menu
-            .draw_attributed_string(attr_string, self.screen_size, &self.theme, auto_resize);
+        self.menu.draw_attributed_string(
+            attr_string,
+            &self.current_screen_frame,
+            &self.overlay_frame,
+            &self.theme,
+            auto_resize,
+        );
     }
 
     pub fn draw_frame(&self, frame: &Frame) {
-        let origin = frame.top_left;
-        let origin = NSPoint::new(origin.x, origin.y);
+        let x = frame.top_left.x;
+        let y = frame.bottom_right.y;
+        let origin = calibrated_origin(x, y, &self.overlay_frame);
         let (w, h) = frame.size();
         let frame = NSRect::new(origin, NSSize::new(w, h));
         self.selected_frame.setFrame(frame);
@@ -274,7 +307,12 @@ impl UIDrawer {
         self.next_notification_id += 1;
         let nl = Menu::new(&self.theme);
         self.root.addSublayer(&nl.container);
-        nl.draw(msg, self.screen_size, &self.theme);
+        nl.draw(
+            msg,
+            &self.current_screen_frame,
+            &self.overlay_frame,
+            &self.theme,
+        );
         self.notifications.push((id, nl));
         id
     }
@@ -320,16 +358,45 @@ impl UIDrawer {
     }
 }
 
-pub fn get_main_screen_size(mtm: MainThreadMarker) -> CGSize {
+pub fn get_screen_frames(mtm: MainThreadMarker) -> Vec<Frame> {
     let screens = NSScreen::screens(mtm);
-    // The first screen in the array is always the "primary" screen
-    // with the menu bar, which defines the coordinate system origin.
-    screens.objectAtIndex(0).frame().size
+    if screens.len() > 1 && NSScreen::screensHaveSeparateSpaces(mtm) {
+        log::error!(
+            "Multiple screens with separate spaces is not supported.\nYou can turn it off in System Preferences -> Desktop & Dock -> Mission Control -> Displays have separate Spaces."
+        );
+    }
+
+    // NOTE: This app mainly works with AX coordinate system.
+    // NS frames converted.
+    let primary_height = screens
+        .firstObject()
+        .map(|s| s.frame().size.height)
+        .unwrap_or(0.0);
+
+    screens
+        .iter()
+        .map(|s| {
+            let f = s.frame();
+            Frame::new(
+                f.origin.x,
+                primary_height - (f.origin.y + f.size.height),
+                f.origin.x + f.size.width,
+                primary_height - f.origin.y,
+            )
+        })
+        .collect()
 }
 
-fn create_overlay_window(mtm: MainThreadMarker, screen_size: CGSize) -> Retained<NSWindow> {
+fn create_overlay_window(mtm: MainThreadMarker) -> Retained<NSWindow> {
     unsafe {
-        let frame = NSRect::new(NSPoint::new(0.0, 0.0), screen_size);
+        // A large union frame
+        let frame = Frame::union_of_frames(
+            &NSScreen::screens(mtm)
+                .iter()
+                .map(|s| Frame::from_cgrect(&s.frame()))
+                .collect::<Vec<_>>(),
+        )
+        .to_cgrect();
 
         // Use NSBackingStoreType::Buffered (the modern enum path)
         let window = NSWindow::initWithContentRect_styleMask_backing_defer(
@@ -347,6 +414,13 @@ fn create_overlay_window(mtm: MainThreadMarker, screen_size: CGSize) -> Retained
 
         // Front most
         window.setLevel(i32::MAX as isize);
+        // To work across different macOS native workspaces
+        window.setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::Stationary
+                | NSWindowCollectionBehavior::IgnoresCycle,
+        );
+        window.makeKeyAndOrderFront(None);
 
         window
     }
@@ -363,4 +437,12 @@ impl GlyphlowDrawingLayer for CALayer {
         let root_layer = content_view.layer()?;
         Some(root_layer)
     }
+}
+
+/// Coordinate shift, top left -> bottom left
+pub fn calibrated_origin(x: f64, y: f64, overlay_frame: &Frame) -> NSPoint {
+    NSPoint::new(
+        x - overlay_frame.top_left.x,
+        overlay_frame.bottom_right.y - y,
+    )
 }

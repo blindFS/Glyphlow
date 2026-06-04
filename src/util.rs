@@ -7,7 +7,7 @@ use objc2_core_foundation::{CGPoint, CGRect, CGSize as OCGSize};
 use objc2_foundation::{NSMutableAttributedString, NSSize};
 use unicode_width::UnicodeWidthStr;
 
-#[derive(Debug, Clone, PartialEq, Copy)]
+#[derive(Debug, Clone, PartialEq, Copy, Default)]
 pub struct Frame {
     pub top_left: CGPoint,
     pub bottom_right: CGPoint,
@@ -68,13 +68,9 @@ impl Frame {
         )
     }
 
-    pub fn invert_y(&self, height: f64) -> Self {
-        Frame::new(
-            self.top_left.x,
-            height - self.top_left.y,
-            self.bottom_right.x,
-            height - self.bottom_right.y,
-        )
+    pub fn area(&self) -> f64 {
+        let (w, h) = self.size();
+        w * h
     }
 
     pub fn to_cgrect(&self) -> CGRect {
@@ -104,10 +100,6 @@ impl Frame {
         )
     }
 
-    pub fn from_origion(size: OCGSize) -> Self {
-        Self::new(0.0, 0.0, size.width, size.height)
-    }
-
     /// Calculate the boundaries of the potential intersection
     pub fn intersect(&self, other: &Frame) -> Option<Self> {
         let inter_x1 = self.top_left.x.max(other.top_left.x);
@@ -129,6 +121,12 @@ impl Frame {
             self.bottom_right.x.max(other.bottom_right.x),
             self.bottom_right.y.max(other.bottom_right.y),
         )
+    }
+
+    pub fn union_of_frames(frames: &[Frame]) -> Self {
+        let mut iter = frames.iter();
+        let first = iter.next().cloned().unwrap_or_default();
+        iter.fold(first, |acc, f| acc.union(f))
     }
 
     pub fn contains(&self, other: &Frame) -> bool {

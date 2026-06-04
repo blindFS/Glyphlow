@@ -9,7 +9,6 @@ use core_foundation::{
 };
 use objc2::rc::Retained;
 use objc2_app_kit::{NSRunningApplication, NSWorkspace};
-use objc2_core_foundation::CGSize;
 
 use crate::{ax_element::GetAttribute, util::Frame};
 
@@ -49,13 +48,13 @@ pub struct AppWindowInfo {
 }
 
 impl AppWindowInfo {
-    pub fn default(screen_size: CGSize) -> Self {
+    pub fn default(screen_frame: Frame) -> Self {
         Self {
             window: AXUIElement::system_wide(),
             bundle_id: String::new(),
             pid: -1,
             is_electron: false,
-            frame: Frame::from_origion(screen_size),
+            frame: screen_frame,
         }
     }
 
@@ -119,7 +118,7 @@ pub fn get_focused_window(
         .bundleIdentifier()
         .map(|s| s.to_string())
         .unwrap_or_default();
-    log::log!(log::Level::Trace, "Focused app bundle id: {:?}", bundle_id);
+    log::trace!("Focused app bundle id: {:?}", bundle_id);
 
     let pid = app.processIdentifier();
     let is_electron = check_is_electron_app(&app).unwrap_or_default();
