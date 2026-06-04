@@ -31,9 +31,8 @@ impl AppEngine {
         let mouse_loc = NSEvent::mouseLocation();
 
         if self.config.theme.enable_animation {
-            let color = &self.config.theme.hint_bg_color;
             self.drawer
-                .draw_trail(mouse_loc.x, mouse_loc.y, end_x, end_y, color);
+                .draw_trail(mouse_loc.x, mouse_loc.y, end_x, end_y);
         }
         self.simulate_event(&EventType::MouseMove { x: end_x, y: end_y });
     }

@@ -111,14 +111,7 @@ impl UIDrawer {
     ///   1. Starting cursor position
     ///   2. Ending cursor position
     ///   3. Right-bottom corner of the ending cursor shape (constant offset from ending position)
-    pub fn draw_trail(
-        &self,
-        start_x: f64,
-        start_y: f64,
-        end_x: f64,
-        end_y: f64,
-        color: &CFRetained<CGColor>,
-    ) {
+    pub fn draw_trail(&self, start_x: f64, start_y: f64, end_x: f64, end_y: f64) {
         let (start_x, start_y) = if self.screen_frames.len() > 1 {
             let main_frame = self.screen_frames[0];
             let start_x = start_x + main_frame.top_left.x - self.overlay_frame.top_left.x;
@@ -178,7 +171,7 @@ impl UIDrawer {
                 CGSize::new(width, height),
             ));
             trail_layer.setPath(Some(&path));
-            trail_layer.setFillColor(Some(color));
+            trail_layer.setFillColor(Some(&self.theme.hint_bg_color));
             trail_layer.setOpacity(1.0); // Keep opaque, let mask handle transparency
 
             self.root.addSublayer(&trail_layer);

@@ -189,7 +189,7 @@ impl Menu {
 }
 
 pub struct UIDrawer {
-    theme: GlyphlowTheme,
+    pub(super) theme: GlyphlowTheme,
     pub root: Retained<CALayer>,
     pub current_screen_frame: Frame,
     /// Large enough frame to cover all screen frames
@@ -241,6 +241,16 @@ impl UIDrawer {
             next_notification_id: 0,
             selected_frame,
             menu,
+        }
+    }
+
+    pub fn select_screen_frame(&mut self, window_frame: &Frame) {
+        if let Some(sf) = self
+            .screen_frames
+            .iter()
+            .max_by_key(|f| f.intersect(window_frame).map(|f| f.area().to_bits()))
+        {
+            self.current_screen_frame = *sf;
         }
     }
 

@@ -81,6 +81,7 @@ impl AppEngine {
             return;
         };
 
+        self.drawer.select_screen_frame(&app_win_info.frame);
         self.drawer.draw_frame_instant(&app_win_info.frame);
         self.last_app_window_info = app_win_info;
     }
