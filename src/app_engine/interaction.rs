@@ -11,8 +11,8 @@ use accessibility_sys::{
 };
 use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber};
 use log::Level;
-use objc2_app_kit::NSEvent;
 use monio::Button;
+use objc2_app_kit::NSEvent;
 use std::time::Duration;
 
 impl AppEngine {

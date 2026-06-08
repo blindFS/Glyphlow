@@ -1,9 +1,9 @@
+use monio::Key;
 use objc2::rc::Retained;
 use objc2_app_kit::NSFont;
 use objc2_core_foundation::CFRetained;
 use objc2_core_graphics::CGColor;
 use objc2_foundation::{NSString, ns_string};
-use monio::Key;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -316,7 +316,6 @@ impl AlphabeticKey for Key {
         }
     }
 }
-
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct KeyBinding {
