@@ -236,10 +236,8 @@ impl AppEngine {
     fn go_back_in_filtering(&mut self, mode: FilterMode) {
         match mode {
             // Go back 1 level in element explorer
-            FilterMode::Generic if self.target == Target::ChildElement => {
-                if self.select_parent() {
-                    self.activate(Target::ChildElement);
-                }
+            FilterMode::Generic if self.target == Target::ChildElement && self.select_parent() => {
+                self.activate(Target::ChildElement);
             }
             FilterMode::WordPicking => {
                 if let Some(wp) = self.word_picker.as_mut()

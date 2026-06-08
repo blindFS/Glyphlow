@@ -135,9 +135,10 @@ impl AppEngine {
                 self.right_click_menu_on_element(element, center);
             }
             WorkFlowAction::GoParent => {
-                if self.select_parent() {
+                let flag = self.select_parent();
+                if flag {
                     self.target = Target::ChildElement;
-                };
+                }
             }
             WorkFlowAction::Debug => {
                 self.notify(&element.inspect(), Level::Debug);
