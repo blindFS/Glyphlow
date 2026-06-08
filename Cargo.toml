@@ -28,4 +28,4 @@ regex = "1.12.3"
 tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "sync", "time"] }
 unicode-width = "0.2.2"
 simple_logger = "5.2.0"
-log = "0.4.29"
+log = "0.4.32"

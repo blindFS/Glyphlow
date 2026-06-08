@@ -199,7 +199,7 @@ pub fn select_range_helper(
         .collect::<Vec<_>>();
 
     // Sort by Y strictly first (ensures total order)
-    within_y_range.sort_by(|(_, f1, _), (_, f2, _)| f1.cmp(f2));
+    within_y_range.sort_by_key(|(_, f, _)| *f);
 
     // Group into lines and sort each line by X to handle staggered Y
     let mut i = 0;

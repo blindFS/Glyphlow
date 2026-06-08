@@ -308,16 +308,16 @@ impl ElementCache {
             }
             RoleOfInterest::TextField => (),
             // Check text before size, keep small texts
-            _ if context.is_some() => {
+            _ if context.is_some()
                 // Skip elements with empty/nonsense text
-                if context.as_ref().is_some_and(|ctx| {
+                && context.as_ref().is_some_and(|ctx| {
                     ctx.is_empty()
                         || ctx
                             .chars()
                             .all(|c| c.is_ascii_punctuation() || c.is_whitespace())
-                }) {
-                    return None;
-                }
+                }) =>
+            {
+                return None;
             }
             _ if (w < self.element_min_width || h < self.element_min_height) => {
                 return None;
