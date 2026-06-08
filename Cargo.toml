@@ -4,7 +4,7 @@ version = "0.0.1"
 edition = "2024"
 
 [dependencies]
-rdev = {version = "0.5.3", features = ["unstable_grab"]}
+monio = "0.1.1"
 toml = "1.1.2"
 serde = { version = "1.0.228", features = ["derive"] }
 accessibility = "0.2.0"

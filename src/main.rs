@@ -7,9 +7,9 @@ use glyphlow::{
     config::{GlyphlowConfig, get_config_path},
     os_util::check_accessibility_permissions,
 };
+use monio::{EventType, grab};
 use notify::RecursiveMode;
 use notify_debouncer_mini::{DebounceEventResult, new_debouncer};
-use rdev::{EventType, grab};
 use std::{
     collections::HashSet,
     path::PathBuf,
@@ -53,7 +53,7 @@ async fn main() {
     let key_listener = KeyListener::new(tx, &config);
 
     let state = Arc::new(Mutex::new(Mode::Idle));
-    // Need this because rdev::grab takes a Fn not FnMut
+    // Key state for tracking pressed keys and simulating state
     let key_state = Arc::new(Mutex::new(KeyState::default()));
 
     // Listen to temp file updates
@@ -102,23 +102,29 @@ async fn main() {
         let state = state.clone();
         let _ = grab(move |event| {
             let Ok(mut k_s) = key_state.lock() else {
-                return Some(event);
+                return Some(event.clone());
             };
             if k_s.is_simulating {
-                return Some(event);
+                return Some(event.clone());
             }
             let swallow = match event.event_type {
-                EventType::KeyPress(key) => {
-                    k_s.key_down(&key);
-                    key_listener.key_down(key, &state, &mut k_s)
+                EventType::KeyPressed => {
+                    if let Some(kb) = &event.keyboard {
+                        k_s.key_down(&kb.key);
+                        key_listener.key_down(kb.key, &state, &mut k_s)
+                    } else {
+                        false
+                    }
                 }
-                EventType::KeyRelease(key) => {
-                    k_s.key_up(&key);
+                EventType::KeyReleased => {
+                    if let Some(kb) = &event.keyboard {
+                        k_s.key_up(&kb.key);
+                    }
                     false
                 }
                 _ => false,
             };
-            (!swallow).then_some(event)
+            (!swallow).then(|| event.clone())
         });
     });
 
