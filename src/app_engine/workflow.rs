@@ -4,7 +4,7 @@ use crate::{
     config::{RoleOfInterest, WorkFlow, WorkFlowAction},
 };
 use log::Level;
-use rdev::{Button, EventType};
+use monio::Button;
 use std::time::Duration;
 
 impl AppEngine {
@@ -64,11 +64,11 @@ impl AppEngine {
             WorkFlowAction::KeyCombo(kb) => {
                 self.set_simulating_key(true);
                 for k in kb.keys.iter() {
-                    self.simulate_event(&EventType::KeyPress(*k));
+                    let _ = monio::key_press(*k);
                     std::thread::sleep(Duration::from_millis(20));
                 }
                 for k in kb.keys.iter().rev() {
-                    self.simulate_event(&EventType::KeyRelease(*k));
+                    let _ = monio::key_release(*k);
                 }
                 self.set_simulating_key(false);
                 return false;

@@ -1,9 +1,9 @@
+use monio::Key;
 use objc2::rc::Retained;
 use objc2_app_kit::NSFont;
 use objc2_core_foundation::CFRetained;
 use objc2_core_graphics::CGColor;
 use objc2_foundation::{NSString, ns_string};
-use rdev::Key;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -253,8 +253,8 @@ impl AlphabeticKey for Key {
             Key::Num9 => '9',
             Key::Num0 => '0',
             Key::Backspace | Key::Delete => '-',
-            Key::LeftBracket => '[',
-            Key::RightBracket => ']',
+            Key::BracketLeft => '[',
+            Key::BracketRight => ']',
             Key::ShiftLeft | Key::ShiftRight => '󰘶',
             _ => ' ',
         }
@@ -262,7 +262,7 @@ impl AlphabeticKey for Key {
 
     fn to_str(&self) -> String {
         match self {
-            Key::Alt | Key::AltGr => "ALT".to_string(),
+            Key::AltLeft | Key::AltRight => "ALT".to_string(),
             Key::ControlLeft | Key::ControlRight => "CTRL".to_string(),
             Key::MetaLeft | Key::MetaRight => "META".to_string(),
             Key::ShiftLeft | Key::ShiftRight => "SHIFT".to_string(),
@@ -298,7 +298,7 @@ impl AlphabeticKey for Key {
             "X" => Some(Key::KeyX),
             "Y" => Some(Key::KeyY),
             "Z" => Some(Key::KeyZ),
-            "ALT" => Some(Key::Alt),
+            "ALT" => Some(Key::AltLeft),
             "CTRL" => Some(Key::ControlLeft),
             "SHIFT" => Some(Key::ShiftLeft),
             "META" => Some(Key::MetaLeft),
@@ -308,7 +308,7 @@ impl AlphabeticKey for Key {
 
     fn right_alternative(&self) -> Option<Key> {
         match self {
-            Key::Alt => Some(Key::AltGr),
+            Key::AltLeft => Some(Key::AltRight),
             Key::ControlLeft => Some(Key::ControlRight),
             Key::ShiftLeft => Some(Key::ShiftRight),
             Key::ShiftRight => Some(Key::MetaRight),
@@ -417,7 +417,7 @@ impl GlyphlowConfig {
 
 fn default_global_keybinding() -> KeyBinding {
     KeyBinding {
-        keys: vec![Key::Alt, Key::KeyG],
+        keys: vec![Key::AltLeft, Key::KeyG],
     }
 }
 fn default_text_actions() -> Vec<CommandAction> {

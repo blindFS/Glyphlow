@@ -5,7 +5,7 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-use rdev::Key;
+use monio::Key;
 use tokio::sync::mpsc::Sender;
 
 use crate::{
@@ -355,7 +355,7 @@ impl KeyListener {
             }
             Mode::DashBoard => self.menu_helper(&key, MenuType::Dashboard, state, key_state),
             // To act on selected parent node
-            Mode::Filtering if key == Key::Return => {
+            Mode::Filtering if key == Key::Enter => {
                 self.send(AppSignal::ActOnSelected);
                 self.send(AppSignal::MenuRefresh("".into()));
                 *state = Mode::DashBoard;
@@ -370,7 +370,7 @@ impl KeyListener {
             Mode::WordPicking => {
                 match key {
                     Key::Slash => self.send(AppSignal::WordPickerStartSearch),
-                    Key::Return => self.send(AppSignal::WordPickerFinishSearch),
+                    Key::Enter => self.send(AppSignal::WordPickerFinishSearch),
                     Key::Escape => {
                         self.send(AppSignal::DeActivate);
                         *state = Mode::Idle;

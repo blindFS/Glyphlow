@@ -9,32 +9,23 @@ use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
 use accessibility_sys::{
     kAXErrorAttributeUnsupported, kAXErrorCannotComplete, kAXFocusedAttribute,
 };
-use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber};
+use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber, string::CFString};
 use log::Level;
-use objc2_app_kit::NSEvent;
-use rdev::{Button, EventType, simulate};
-use std::time::Duration;
+use monio::{Button, Event, ScrollDirection};
 
 impl AppEngine {
-    pub(super) fn simulate_event(&self, event_type: &EventType) {
-        match simulate(event_type) {
-            Ok(()) => (),
-            Err(e) => {
-                log::error!("Failed to simulate event {event_type:?}: {e}");
-            }
-        }
-    }
-
     /// Move the mouse to `(end_x, end_y)` with a fading triangle cursor trail animation.
     pub(super) fn move_mouse_with_trail(&self, end_x: f64, end_y: f64) {
         // Get current mouse position (Cocoa bottom-left origin)
-        let mouse_loc = NSEvent::mouseLocation();
+        let mouse_loc = objc2_app_kit::NSEvent::mouseLocation();
 
         if self.config.theme.enable_animation {
             self.drawer
                 .draw_trail(mouse_loc.x, mouse_loc.y, end_x, end_y);
         }
-        self.simulate_event(&EventType::MouseMove { x: end_x, y: end_y });
+        if let Err(e) = monio::mouse_move(end_x, end_y) {
+            log::error!("Failed to move mouse to ({end_x}, {end_y}): {e}");
+        }
     }
 
     pub(super) fn simulate_click(&self, x: f64, y: f64, button: Button) {
@@ -53,10 +44,10 @@ impl AppEngine {
             let color = frame_colors.get(color_idx).unwrap_or(default_color);
             self.drawer.draw_ripple(x, y, color);
         }
-        std::thread::sleep(Duration::from_millis(20));
-        self.simulate_event(&EventType::ButtonPress(button));
-        std::thread::sleep(Duration::from_millis(20));
-        self.simulate_event(&EventType::ButtonRelease(button));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        if let Err(e) = monio::mouse_click(button) {
+            log::error!("Failed to click mouse button {button:?}: {e}");
+        }
     }
 
     pub(super) fn focus_on_element(&self, element: &AXUIElement) {
@@ -203,6 +194,17 @@ impl AppEngine {
         }
     }
 
+    fn simulate_scroll(delta: f64) {
+        let direction = if delta > 0.0 {
+            ScrollDirection::Up
+        } else {
+            ScrollDirection::Down
+        };
+        if let Err(e) = monio::simulate(&Event::mouse_wheel(0.0, 0.0, direction, delta)) {
+            log::error!("Failed to simulate scroll {delta}: {e}");
+        }
+    }
+
     pub(super) fn perform_scroll_action(&mut self, sa: ScrollAction) {
         let Some(selected) = self.selected.as_ref() else {
             return;
@@ -248,19 +250,13 @@ impl AppEngine {
                 }
             }
         } else {
-            let distance = (frame.size().1 * self.config.scroll_distance).max(1.0) as i64;
+            let distance = (frame.size().1 * self.config.scroll_distance).max(1.0);
             match sa {
                 ScrollAction::DownRight => {
-                    self.simulate_event(&EventType::Wheel {
-                        delta_x: 0,
-                        delta_y: -distance,
-                    });
+                    Self::simulate_scroll(-distance);
                 }
                 ScrollAction::UpLeft => {
-                    self.simulate_event(&EventType::Wheel {
-                        delta_x: 0,
-                        delta_y: distance,
-                    });
+                    Self::simulate_scroll(distance);
                 }
                 ScrollAction::IncreaseDistance => {
                     self.config.scroll_distance *= 1.5;
@@ -269,17 +265,11 @@ impl AppEngine {
                     self.config.scroll_distance /= 1.5;
                 }
                 ScrollAction::Top => {
-                    self.simulate_event(&EventType::Wheel {
-                        delta_x: 0,
-                        delta_y: 999999,
-                    });
+                    Self::simulate_scroll(999999.0);
                     self.draw_element_menu("", RoleOfInterest::ScrollBar, false);
                 }
                 ScrollAction::Bottom => {
-                    self.simulate_event(&EventType::Wheel {
-                        delta_x: 0,
-                        delta_y: -999999,
-                    });
+                    Self::simulate_scroll(-999999.0);
                     self.draw_element_menu("", RoleOfInterest::ScrollBar, false);
                 }
             }
@@ -300,14 +290,11 @@ impl AppEngine {
     pub(super) fn update_editing_text(&mut self, new_text: String) {
         if let Some(selected) = self.editing.as_ref()
             && let Some(ele) = selected.element()
+            && let Err(e) = ele.set_value(CFString::new(&new_text).as_CFType())
         {
-            use accessibility::AXUIElementAttributes;
-            use core_foundation::{base::TCFType, string::CFString};
-            if let Err(e) = ele.set_value(CFString::new(&new_text).as_CFType()) {
-                log::warn!("Failed to set the text of focused element: {ele:?}\n Error: {e}");
-                // Reset editing upon failure
-                self.editing = None;
-            }
+            log::warn!("Failed to set the text of focused element: {ele:?}\n Error: {e}");
+            // Reset editing upon failure
+            self.editing = None;
         }
     }
 
