@@ -9,17 +9,15 @@ use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
 use accessibility_sys::{
     kAXErrorAttributeUnsupported, kAXErrorCannotComplete, kAXFocusedAttribute,
 };
-use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber};
+use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber, string::CFString};
 use log::Level;
-use monio::Button;
-use objc2_app_kit::NSEvent;
-use std::time::Duration;
+use monio::{Button, Event, ScrollDirection};
 
 impl AppEngine {
     /// Move the mouse to `(end_x, end_y)` with a fading triangle cursor trail animation.
     pub(super) fn move_mouse_with_trail(&self, end_x: f64, end_y: f64) {
         // Get current mouse position (Cocoa bottom-left origin)
-        let mouse_loc = NSEvent::mouseLocation();
+        let mouse_loc = objc2_app_kit::NSEvent::mouseLocation();
 
         if self.config.theme.enable_animation {
             self.drawer
@@ -46,13 +44,9 @@ impl AppEngine {
             let color = frame_colors.get(color_idx).unwrap_or(default_color);
             self.drawer.draw_ripple(x, y, color);
         }
-        std::thread::sleep(Duration::from_millis(20));
-        if let Err(e) = monio::mouse_press(button) {
-            log::error!("Failed to press mouse button {button:?}: {e}");
-        }
-        std::thread::sleep(Duration::from_millis(20));
-        if let Err(e) = monio::mouse_release(button) {
-            log::error!("Failed to release mouse button {button:?}: {e}");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        if let Err(e) = monio::mouse_click(button) {
+            log::error!("Failed to click mouse button {button:?}: {e}");
         }
     }
 
@@ -200,20 +194,14 @@ impl AppEngine {
         }
     }
 
-    fn simulate_scroll(&self, delta_y: f64) {
-        let mut event = monio::Event::new(monio::EventType::MouseWheel);
-        event.wheel = Some(monio::WheelData {
-            x: 0.0,
-            y: 0.0,
-            direction: if delta_y > 0.0 {
-                monio::ScrollDirection::Up
-            } else {
-                monio::ScrollDirection::Down
-            },
-            delta: delta_y,
-        });
-        if let Err(e) = monio::simulate(&event) {
-            log::error!("Failed to simulate scroll {delta_y}: {e}");
+    fn simulate_scroll(delta: f64) {
+        let direction = if delta > 0.0 {
+            ScrollDirection::Up
+        } else {
+            ScrollDirection::Down
+        };
+        if let Err(e) = monio::simulate(&Event::mouse_wheel(0.0, 0.0, direction, delta)) {
+            log::error!("Failed to simulate scroll {delta}: {e}");
         }
     }
 
@@ -265,10 +253,10 @@ impl AppEngine {
             let distance = (frame.size().1 * self.config.scroll_distance).max(1.0);
             match sa {
                 ScrollAction::DownRight => {
-                    self.simulate_scroll(-distance);
+                    Self::simulate_scroll(-distance);
                 }
                 ScrollAction::UpLeft => {
-                    self.simulate_scroll(distance);
+                    Self::simulate_scroll(distance);
                 }
                 ScrollAction::IncreaseDistance => {
                     self.config.scroll_distance *= 1.5;
@@ -277,11 +265,11 @@ impl AppEngine {
                     self.config.scroll_distance /= 1.5;
                 }
                 ScrollAction::Top => {
-                    self.simulate_scroll(999999.0);
+                    Self::simulate_scroll(999999.0);
                     self.draw_element_menu("", RoleOfInterest::ScrollBar, false);
                 }
                 ScrollAction::Bottom => {
-                    self.simulate_scroll(-999999.0);
+                    Self::simulate_scroll(-999999.0);
                     self.draw_element_menu("", RoleOfInterest::ScrollBar, false);
                 }
             }
@@ -302,14 +290,11 @@ impl AppEngine {
     pub(super) fn update_editing_text(&mut self, new_text: String) {
         if let Some(selected) = self.editing.as_ref()
             && let Some(ele) = selected.element()
+            && let Err(e) = ele.set_value(CFString::new(&new_text).as_CFType())
         {
-            use accessibility::AXUIElementAttributes;
-            use core_foundation::{base::TCFType, string::CFString};
-            if let Err(e) = ele.set_value(CFString::new(&new_text).as_CFType()) {
-                log::warn!("Failed to set the text of focused element: {ele:?}\n Error: {e}");
-                // Reset editing upon failure
-                self.editing = None;
-            }
+            log::warn!("Failed to set the text of focused element: {ele:?}\n Error: {e}");
+            // Reset editing upon failure
+            self.editing = None;
         }
     }
 
