@@ -107,24 +107,19 @@ async fn main() {
             if k_s.is_simulating {
                 return Some(event.clone());
             }
-            let swallow = match event.event_type {
-                EventType::KeyPressed => {
-                    if let Some(kb) = &event.keyboard {
+
+            let mut pass_on = true;
+            if let Some(kb) = &event.keyboard {
+                match event.event_type {
+                    EventType::KeyPressed => {
                         k_s.key_down(&kb.key);
-                        key_listener.key_down(kb.key, &state, &mut k_s)
-                    } else {
-                        false
+                        pass_on = !key_listener.key_down(kb.key, &state, &mut k_s)
                     }
+                    EventType::KeyReleased => k_s.key_up(&kb.key),
+                    _ => (),
                 }
-                EventType::KeyReleased => {
-                    if let Some(kb) = &event.keyboard {
-                        k_s.key_up(&kb.key);
-                    }
-                    false
-                }
-                _ => false,
             };
-            (!swallow).then(|| event.clone())
+            pass_on.then(|| event.clone())
         });
     });
 
