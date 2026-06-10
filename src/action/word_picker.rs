@@ -28,6 +28,7 @@ body {
 struct Word {
     text: String,
     label: String,
+    ascii: String,
 }
 
 pub struct WordPicker {
@@ -50,7 +51,8 @@ impl WordPicker {
         let mut words = Vec::new();
         for (i, text) in word_strings.into_iter().enumerate() {
             let label = hint_label_from_index(i, Some(digits));
-            words.push(Word { text, label });
+            let ascii = any_ascii::any_ascii(&text).to_ascii_lowercase();
+            words.push(Word { text, label, ascii });
         }
 
         let word_picker = Self {
@@ -147,7 +149,7 @@ impl WordPicker {
                 && w.label.starts_with(label_prefix)
                 && text_pattern
                     .as_ref()
-                    .is_none_or(|pattern| pattern.is_match(&w.text.to_lowercase()))
+                    .is_none_or(|pattern| pattern.is_match(&w.ascii))
             {
                 // For matched, highlight the label suffix
                 matched.push(idx);
