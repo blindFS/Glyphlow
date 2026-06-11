@@ -151,7 +151,11 @@ impl AppEngine {
                 self.menu_refresh(&key_prefix, false);
             }
             AppSignal::ActOnSelected => {
-                self.clear_cache();
+                if self.target == Target::ChildElement {
+                    self.clear_cache();
+                    self.set_mode(Mode::DashBoard);
+                    self.menu_refresh("", false);
+                }
             }
             AppSignal::ToggleMultiSelection => match self.target {
                 Target::Text | Target::ImageOCR => {

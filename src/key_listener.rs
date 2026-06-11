@@ -357,8 +357,6 @@ impl KeyListener {
             // To act on selected parent node
             Mode::Filtering if key == Key::Enter => {
                 self.send(AppSignal::ActOnSelected);
-                self.send(AppSignal::MenuRefresh("".into()));
-                *state = Mode::DashBoard;
                 true
             }
             Mode::WordPicking | Mode::Filtering | Mode::OCRResultFiltering
