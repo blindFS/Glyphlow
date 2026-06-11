@@ -51,7 +51,7 @@ impl AppEngine {
                     let choices: Vec<(String, Frame, bool)> = self
                         .ocr_cache
                         .as_ref()
-                        .unwrap()
+                        .expect("Internal Error: OCR cache not set.")
                         .iter()
                         .map(|(s, rect)| (s.clone(), Frame::from_cgrect(rect), true))
                         .collect::<Vec<_>>();
@@ -68,7 +68,7 @@ impl AppEngine {
                 let (selected_text, cg_rect) = self
                     .ocr_cache
                     .as_ref()
-                    .unwrap()
+                    .expect("Internal Error: OCR cache not set.")
                     .get(hb_idx)
                     .expect("Internal Error: wrong ocr hint indexing.");
                 let selected_text = selected_text.clone();
@@ -209,7 +209,7 @@ impl AppEngine {
                     let text = context.clone().unwrap_or_default();
                     match self.open_editor(&text) {
                         Ok(_) => {
-                            self.set_mode(Mode::Editing);
+                            self.set_mode(Mode::Idle);
                             self.selected = None;
                         }
                         Err(e) => {
@@ -261,12 +261,32 @@ impl AppEngine {
         }
     }
 
+    pub(super) fn build_search_targets(&mut self) {
+        self.search_targets = if let Some(ocr_cache) = &self.ocr_cache {
+            ocr_cache
+                .iter()
+                .map(|(s, _)| any_ascii::any_ascii(s).to_ascii_lowercase())
+                .collect()
+        } else {
+            self.element_cache
+                .cache
+                .iter()
+                .map(|eoi| eoi.ascii_search_target())
+                .collect()
+        };
+    }
+
     pub(super) async fn perform_filtering(&mut self, key_char: char, mode: FilterMode) {
         if self.is_searching {
             if key_char == '-' {
                 if self.search_prefix.is_empty() {
                     self.is_searching = false;
-                    self.drawer.clear_menus();
+                    self.set_mode(mode.to_app_mode());
+                    if self.word_picker.is_some() {
+                        self.draw_word_picker();
+                    } else {
+                        self.drawer.clear_menus();
+                    }
                     return;
                 } else {
                     self.search_prefix.pop();

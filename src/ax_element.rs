@@ -210,6 +210,19 @@ impl ElementOfInterest {
             ElementKind::Pseudo => None,
         }
     }
+
+    pub fn ascii_search_target(&self) -> String {
+        let raw = self
+            .context
+            .clone()
+            .or_else(|| {
+                todo!();
+                self.element()
+                    .and_then(|e| e.get_string_value_or_description())
+            })
+            .unwrap_or_default();
+        any_ascii::any_ascii(&raw).to_ascii_lowercase()
+    }
 }
 
 #[derive(Default)]

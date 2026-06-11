@@ -33,11 +33,21 @@ pub enum ScrollAction {
     Bottom,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum FilterMode {
     WordPicking,
     Generic,
     OCR,
+}
+
+impl FilterMode {
+    pub fn to_app_mode(&self) -> Mode {
+        match self {
+            FilterMode::WordPicking => Mode::WordPicking,
+            FilterMode::Generic => Mode::Filtering,
+            FilterMode::OCR => Mode::OCRResultFiltering,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -61,6 +71,7 @@ pub enum AppSignal {
     ScreenShot,
     FrameOCR,
     StartSearch,
+    FinishSearch(FilterMode),
 }
 
 #[derive(Debug, PartialEq)]
@@ -163,8 +174,8 @@ pub enum Mode {
     Scrolling,
     TextActionMenu,
     ImageActionMenu,
-    Editing,
     WordPicking,
+    Searching(FilterMode),
     OCRResultFiltering,
     WaitAndDeactivate,
 }
@@ -322,16 +333,19 @@ impl KeyListener {
     fn filter_helper(&self, key: &Key, mut state: MutexGuard<'_, Mode>, mode: FilterMode) -> bool {
         match key {
             Key::ShiftLeft | Key::ShiftRight => self.send(AppSignal::ToggleMultiSelection),
-            Key::Slash => self.send(AppSignal::StartSearch),
-            Key::Enter => self.send(AppSignal::ActOnEnter),
-            Key::Escape => {
-                self.send(AppSignal::DeActivate);
-                *state = Mode::Idle;
+            Key::Slash => {
+                self.send(AppSignal::StartSearch);
+                *state = Mode::Searching(mode)
             }
+            Key::Enter => self.send(AppSignal::ActOnEnter),
             _ => {
                 let key_char = key.to_char();
-                let key_char = if key_char == ' ' { '󱁐' } else { key_char };
-                self.send(AppSignal::Filter(key_char, mode));
+                if key_char == ' ' {
+                    self.send(AppSignal::DeActivate);
+                    *state = Mode::Idle;
+                } else {
+                    self.send(AppSignal::Filter(key_char, mode));
+                }
             }
         }
         true
@@ -344,7 +358,7 @@ impl KeyListener {
         };
 
         match *state {
-            Mode::Editing | Mode::Idle => {
+            Mode::Idle => {
                 if self.global_key_binding.keys.iter().all(|k| {
                     k == &key
                         || key_state.pressed_keys.contains(k)
@@ -367,6 +381,21 @@ impl KeyListener {
                 self.menu_helper(&key, MenuType::ImageAction, state, key_state)
             }
             Mode::Scrolling => self.menu_helper(&key, MenuType::Scroll, state, key_state),
+            Mode::Searching(mode) => {
+                match key {
+                    Key::Enter => self.send(AppSignal::FinishSearch(mode)),
+                    Key::Escape => {
+                        self.send(AppSignal::DeActivate);
+                        *state = Mode::Idle
+                    }
+                    _ => {
+                        let key_char = key.to_char();
+                        let key_char = if key_char == ' ' { '󱁐' } else { key_char };
+                        self.send(AppSignal::Filter(key_char, mode));
+                    }
+                };
+                true
+            }
             Mode::WaitAndDeactivate => {
                 self.send(AppSignal::DeActivate);
                 *state = Mode::Idle;
