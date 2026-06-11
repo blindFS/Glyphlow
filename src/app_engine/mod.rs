@@ -64,7 +64,9 @@ pub struct AppEngine {
     /// Used for drawing hint boxes on screen
     pub(super) hint_boxes: Vec<HintBox>,
     pub(super) element_cache: ElementCache,
-    pub(super) key_prefix: String,
+    pub(super) hint_prefix: String,
+    pub(super) is_searching: bool,
+    pub(super) search_prefix: String,
     pub(super) overlay_frame: Frame,
     pub(super) drawer: UIDrawer,
     /// Which elements of interest to look for
@@ -111,7 +113,9 @@ impl AppEngine {
                 config.element_min_height as f64,
                 config.image_min_size as f64,
             ),
-            key_prefix: String::new(),
+            is_searching: false,
+            search_prefix: String::new(),
+            hint_prefix: String::new(),
             target: Target::default(),
             hint_width: 0,
             overlay_frame,
@@ -175,18 +179,19 @@ impl AppEngine {
                 self.perform_scroll_action(sa);
             }
             AppSignal::TextAction(ta) => self.perform_text_action(ta),
-            AppSignal::WordPickerStartSearch => {
-                if let Some(wp) = self.word_picker.as_mut() {
-                    wp.start_searching(&self.drawer, self.multi_selection.one_side_idex);
-                    self.key_prefix.clear();
+            AppSignal::StartSearch => {
+                self.is_searching = true;
+                self.search_prefix.clear();
+                if self.word_picker.is_some() {
+                    self.draw_word_picker();
                 }
             }
-            AppSignal::WordPickerFinishSearch => {
-                if let Some(wp) = self.word_picker.as_mut() {
-                    wp.finish_searching(&self.drawer, self.multi_selection.one_side_idex);
-                    self.key_prefix = wp.label_prefix.clone();
+            AppSignal::FinishSearch => {
+                self.is_searching = false;
+                if self.word_picker.is_some() {
+                    self.draw_word_picker();
+                    self.check_word_picker();
                 }
-                self.check_word_picker();
             }
             AppSignal::ScreenShot => {
                 self.clear_cache();

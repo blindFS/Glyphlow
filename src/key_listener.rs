@@ -61,8 +61,8 @@ pub enum AppSignal {
     ScreenShot,
     FrameOCR,
     // Word Picker
-    WordPickerStartSearch,
-    WordPickerFinishSearch,
+    StartSearch,
+    FinishSearch,
 }
 
 #[derive(Debug, PartialEq)]
@@ -322,12 +322,18 @@ impl KeyListener {
     }
 
     fn filter_helper(&self, key: &Key, mut state: MutexGuard<'_, Mode>, mode: FilterMode) -> bool {
-        let key_char = key.to_char();
-        if key_char == ' ' {
-            self.send(AppSignal::DeActivate);
-            *state = Mode::Idle;
-        } else {
-            self.send(AppSignal::Filter(key_char, mode));
+        match key {
+            Key::Slash => self.send(AppSignal::StartSearch),
+            Key::Enter => self.send(AppSignal::FinishSearch),
+            Key::Escape => {
+                self.send(AppSignal::DeActivate);
+                *state = Mode::Idle;
+            }
+            _ => {
+                let key_char = key.to_char();
+                let key_char = if key_char == ' ' { '󱁐' } else { key_char };
+                self.send(AppSignal::Filter(key_char, mode));
+            }
         }
         true
     }
@@ -365,22 +371,7 @@ impl KeyListener {
                 self.send(AppSignal::ToggleMultiSelection);
                 true
             }
-            Mode::WordPicking => {
-                match key {
-                    Key::Slash => self.send(AppSignal::WordPickerStartSearch),
-                    Key::Enter => self.send(AppSignal::WordPickerFinishSearch),
-                    Key::Escape => {
-                        self.send(AppSignal::DeActivate);
-                        *state = Mode::Idle;
-                    }
-                    _ => {
-                        let key_char = key.to_char();
-                        let key_char = if key_char == ' ' { '󱁐' } else { key_char };
-                        self.send(AppSignal::Filter(key_char, FilterMode::WordPicking));
-                    }
-                }
-                true
-            }
+            Mode::WordPicking => self.filter_helper(&key, state, FilterMode::WordPicking),
             Mode::Filtering => self.filter_helper(&key, state, FilterMode::Generic),
             Mode::OCRResultFiltering => self.filter_helper(&key, state, FilterMode::OCR),
             Mode::TextActionMenu => self.menu_helper(&key, MenuType::TextAction, state, key_state),

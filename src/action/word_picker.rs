@@ -35,11 +35,8 @@ pub struct WordPicker {
     raw: String,
     words: Vec<Word>,
     offsets: Vec<usize>,
-    pub label_prefix: String,
-    pub text_prefix: String,
     screen_ratio: f64,
     theme: GlyphlowTheme,
-    pub is_searching: bool,
     pub digits: u32,
     matched: Vec<usize>,
 }
@@ -60,16 +57,13 @@ impl WordPicker {
             words,
             offsets,
             digits,
-            is_searching: false,
-            label_prefix: String::new(),
-            text_prefix: String::new(),
             screen_ratio,
             theme,
             matched: Vec::new(),
         };
 
         autoreleasepool(|_| {
-            if let Some((attr_string, _)) = word_picker.get_attributed_string(None) {
+            if let Some((attr_string, _)) = word_picker.get_attributed_string(None, false, "", "") {
                 drawer.draw_attributed_string(attr_string, true);
             }
         });
@@ -77,32 +71,25 @@ impl WordPicker {
         word_picker
     }
 
-    pub fn start_searching(&mut self, drawer: &UIDrawer, multi_selection_idx: Option<usize>) {
-        self.is_searching = true;
-        self.text_prefix.clear();
-        self.update_text_layer(drawer, multi_selection_idx);
-    }
-
-    pub fn finish_searching(&mut self, drawer: &UIDrawer, multi_selection_idx: Option<usize>) {
-        self.is_searching = false;
-        self.update_text_layer(drawer, multi_selection_idx);
-    }
-
-    pub fn update_text_layer(&mut self, drawer: &UIDrawer, multi_selection_idx: Option<usize>) {
+    pub fn update_text_layer(
+        &mut self,
+        drawer: &UIDrawer,
+        multi_selection_idx: Option<usize>,
+        is_searching: bool,
+        label_prefix: &str,
+        text_prefix: &str,
+    ) {
         autoreleasepool(|_| {
-            if let Some((attr_string, matched)) = self.get_attributed_string(multi_selection_idx) {
+            if let Some((attr_string, matched)) = self.get_attributed_string(
+                multi_selection_idx,
+                is_searching,
+                label_prefix,
+                text_prefix,
+            ) {
                 self.matched = matched;
                 drawer.draw_attributed_string(attr_string, true);
             };
         })
-    }
-
-    pub fn update_prefix(&mut self, prefix: &str) {
-        if self.is_searching {
-            self.text_prefix = prefix.to_lowercase();
-        } else {
-            self.label_prefix = prefix.to_string();
-        }
     }
 
     /// Returns HTML string and matched indices
@@ -110,9 +97,10 @@ impl WordPicker {
         &self,
         width_height_ratio: f64,
         multi_selection_idx: Option<usize>,
+        is_searching: bool,
+        label_prefix: &str,
+        text_prefix: &str,
     ) -> (String, Vec<usize>) {
-        let label_prefix = self.label_prefix.as_str();
-        let text_prefix = self.text_prefix.as_str();
         let text_pattern = (!text_prefix.is_empty())
             .then_some({
                 let text_pattern = text_prefix
@@ -190,9 +178,9 @@ impl WordPicker {
 
         let buffer = format!(
             "<span class=\"h\">{}</span>\n{buffer}",
-            if self.is_searching {
+            if is_searching {
                 format!("/{}", text_prefix)
-            } else if !self.label_prefix.is_empty() && matched.is_empty() {
+            } else if !label_prefix.is_empty() && matched.is_empty() {
                 "Press 󰁮 to go back".into()
             } else {
                 "Press / to search".into()
@@ -224,8 +212,17 @@ impl WordPicker {
     fn get_attributed_string(
         &self,
         multi_selection_idx: Option<usize>,
+        is_searching: bool,
+        label_prefix: &str,
+        text_prefix: &str,
     ) -> Option<(Retained<NSMutableAttributedString>, Vec<usize>)> {
-        let (html_str, matched) = self.to_string(self.screen_ratio, multi_selection_idx);
+        let (html_str, matched) = self.to_string(
+            self.screen_ratio,
+            multi_selection_idx,
+            is_searching,
+            label_prefix,
+            text_prefix,
+        );
 
         // CSS colors
         let attr_string = html_to_attributed_string(

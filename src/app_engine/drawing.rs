@@ -38,7 +38,7 @@ impl AppEngine {
                 hb.draw(
                     &self.drawer.root,
                     &self.config.theme,
-                    self.key_prefix.len(),
+                    self.hint_prefix.len(),
                     &self.overlay_frame,
                 );
             }
@@ -47,12 +47,12 @@ impl AppEngine {
 
     /// Show/Hide hint_boxes/colored_frames, update hint text and positions
     pub(super) fn update_hints(&mut self) {
-        let prefix_len = self.key_prefix.len();
+        let prefix_len = self.hint_prefix.len();
 
         autoreleasepool(|_| {
             let mut nothing_visible = true;
             for hb in self.hint_boxes.iter_mut() {
-                let visible = hb.label.starts_with(&self.key_prefix)
+                let visible = hb.label.starts_with(&self.hint_prefix)
                     && !(self.multi_selection.is_on
                         && self
                             .multi_selection
@@ -277,6 +277,12 @@ impl AppEngine {
             .as_mut()
             .expect("Internal Error: No word picker set.");
 
-        word_picker.update_text_layer(&self.drawer, self.multi_selection.one_side_idex);
+        word_picker.update_text_layer(
+            &self.drawer,
+            self.multi_selection.one_side_idex,
+            self.is_searching,
+            &self.hint_prefix,
+            &self.search_prefix,
+        );
     }
 }
