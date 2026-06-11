@@ -34,6 +34,7 @@ impl Menu {
             let container = CALayer::new();
             container.setBorderWidth(BORDER_WIDTH);
             container.addSublayer(&text_layer);
+            container.setZPosition(1.0);
             // Hidden by default
             container.setHidden(true);
 

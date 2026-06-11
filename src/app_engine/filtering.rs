@@ -266,13 +266,15 @@ impl AppEngine {
             if key_char == '-' {
                 if self.search_prefix.is_empty() {
                     self.is_searching = false;
-                    todo!("Hide search menu")
+                    self.drawer.clear_menus();
+                    return;
                 } else {
                     self.search_prefix.pop();
                 }
             } else {
                 self.search_prefix.push(key_char.to_ascii_lowercase());
             }
+            self.drawer.draw_menu(&format!("/{}", self.search_prefix));
         } else if key_char == '-' {
             if self.hint_prefix.is_empty() {
                 self.go_back_in_filtering(mode);

@@ -53,6 +53,7 @@ impl AppEngine {
         self.element_cache.clear();
         self.hint_prefix.clear();
         self.search_prefix.clear();
+        self.is_searching = false;
         self.multi_selection.reset();
     }
 

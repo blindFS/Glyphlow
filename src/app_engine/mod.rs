@@ -176,6 +176,7 @@ impl AppEngine {
                 if self.is_searching {
                     return;
                 }
+                self.drawer.draw_menu("/");
                 self.is_searching = true;
                 self.search_prefix.clear();
                 if self.word_picker.is_some() {
@@ -185,6 +186,7 @@ impl AppEngine {
             AppSignal::ActOnEnter => {
                 if self.is_searching {
                     self.is_searching = false;
+                    self.drawer.clear_menus();
                     if self.word_picker.is_some() {
                         self.draw_word_picker();
                         self.check_word_picker();
