@@ -47,7 +47,7 @@ pub enum AppSignal {
     DeActivate,
     Filter(char, FilterMode),
     MenuRefresh(String),
-    ActOnSelected,
+    ActOnEnter,
     // Sub state signals
     FileUpdate(PathBuf),
     ClearNotification(usize),
@@ -60,9 +60,7 @@ pub enum AppSignal {
     ReadClipboard,
     ScreenShot,
     FrameOCR,
-    // Word Picker
     StartSearch,
-    FinishSearch,
 }
 
 #[derive(Debug, PartialEq)]
@@ -323,8 +321,9 @@ impl KeyListener {
 
     fn filter_helper(&self, key: &Key, mut state: MutexGuard<'_, Mode>, mode: FilterMode) -> bool {
         match key {
+            Key::ShiftLeft | Key::ShiftRight => self.send(AppSignal::ToggleMultiSelection),
             Key::Slash => self.send(AppSignal::StartSearch),
-            Key::Enter => self.send(AppSignal::FinishSearch),
+            Key::Enter => self.send(AppSignal::ActOnEnter),
             Key::Escape => {
                 self.send(AppSignal::DeActivate);
                 *state = Mode::Idle;
@@ -360,17 +359,6 @@ impl KeyListener {
                 }
             }
             Mode::DashBoard => self.menu_helper(&key, MenuType::Dashboard, state, key_state),
-            // To act on selected parent node
-            Mode::Filtering if key == Key::Enter => {
-                self.send(AppSignal::ActOnSelected);
-                true
-            }
-            Mode::WordPicking | Mode::Filtering | Mode::OCRResultFiltering
-                if key == Key::ShiftLeft || key == Key::ShiftRight =>
-            {
-                self.send(AppSignal::ToggleMultiSelection);
-                true
-            }
             Mode::WordPicking => self.filter_helper(&key, state, FilterMode::WordPicking),
             Mode::Filtering => self.filter_helper(&key, state, FilterMode::Generic),
             Mode::OCRResultFiltering => self.filter_helper(&key, state, FilterMode::OCR),

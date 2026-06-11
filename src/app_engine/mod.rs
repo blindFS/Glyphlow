@@ -154,13 +154,6 @@ impl AppEngine {
             AppSignal::MenuRefresh(key_prefix) => {
                 self.menu_refresh(&key_prefix, false);
             }
-            AppSignal::ActOnSelected => {
-                if self.target == Target::ChildElement {
-                    self.clear_cache();
-                    self.set_mode(Mode::DashBoard);
-                    self.menu_refresh("", false);
-                }
-            }
             AppSignal::ToggleMultiSelection => match self.target {
                 Target::Text | Target::ImageOCR => {
                     self.toggle_multiselection();
@@ -180,17 +173,27 @@ impl AppEngine {
             }
             AppSignal::TextAction(ta) => self.perform_text_action(ta),
             AppSignal::StartSearch => {
+                if self.is_searching {
+                    return;
+                }
                 self.is_searching = true;
                 self.search_prefix.clear();
                 if self.word_picker.is_some() {
                     self.draw_word_picker();
                 }
             }
-            AppSignal::FinishSearch => {
-                self.is_searching = false;
-                if self.word_picker.is_some() {
-                    self.draw_word_picker();
-                    self.check_word_picker();
+            AppSignal::ActOnEnter => {
+                if self.is_searching {
+                    self.is_searching = false;
+                    if self.word_picker.is_some() {
+                        self.draw_word_picker();
+                        self.check_word_picker();
+                    }
+                } else if self.target == Target::ChildElement {
+                    // To act on selected parent node
+                    self.clear_cache();
+                    self.set_mode(Mode::DashBoard);
+                    self.menu_refresh("", false);
                 }
             }
             AppSignal::ScreenShot => {
