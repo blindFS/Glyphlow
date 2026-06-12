@@ -1,6 +1,6 @@
 use crate::{
     config::{CustomTarget, GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
-    util::{Frame, select_range_helper},
+    util::{Frame, lower_ascii, select_range_helper},
 };
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
@@ -215,13 +215,9 @@ impl ElementOfInterest {
         let raw = self
             .context
             .clone()
-            .or_else(|| {
-                todo!();
-                self.element()
-                    .and_then(|e| e.get_string_value_or_description())
-            })
+            .or_else(|| self.element().map(|e| e.search_target()))
             .unwrap_or_default();
-        any_ascii::any_ascii(&raw).to_ascii_lowercase()
+        lower_ascii(&raw)
     }
 }
 
@@ -394,6 +390,7 @@ pub trait GetAttribute {
     fn get_frame(&self, default: Frame) -> Frame;
     fn get_dom_classes(&self) -> Option<Vec<String>>;
     fn inspect(&self) -> String;
+    fn search_target(&self) -> String;
     fn is_clickable(&self) -> bool;
     fn has_children(&self) -> bool;
     fn match_custom_target(&self, target: &CustomTarget) -> bool;
@@ -502,12 +499,28 @@ impl GetAttribute for AXUIElement {
         }
 
         msg
-        // for attr in &self.attribute_names().unwrap() {
-        //     println!(
-        //         "{role:?} - {attr:?} - {:?}",
-        //         self.get_attribute(attr.to_string().as_str()),
-        //     );
-        // }
+    }
+
+    fn search_target(&self) -> String {
+        let mut msg = String::new();
+
+        if let Ok(t) = self.title() {
+            msg.push_str(&format!("{t} "));
+        }
+
+        if let Ok(l) = self.label_value() {
+            msg.push_str(&format!("{l} "));
+        }
+
+        if let Ok(d) = self.description() {
+            msg.push_str(&format!("{d} "));
+        }
+
+        if let Some(v) = self.value().ok().and_then(|v| v.downcast::<CFString>()) {
+            msg.push_str(&format!("{v}"));
+        }
+
+        msg
     }
 
     fn is_clickable(&self) -> bool {

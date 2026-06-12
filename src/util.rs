@@ -5,6 +5,7 @@ use core_text::framesetter::CTFramesetter;
 use objc2::rc::Retained;
 use objc2_core_foundation::{CGPoint, CGRect, CGSize as OCGSize};
 use objc2_foundation::{NSMutableAttributedString, NSSize};
+use regex::Regex;
 use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Clone, PartialEq, Copy, Default)]
@@ -268,6 +269,23 @@ pub fn select_range_helper(
 
 pub fn digits_by_length(len: usize) -> u32 {
     if len <= 1 { 1 } else { (len - 1).ilog(26) + 1 }
+}
+
+pub fn search_regex(text: &str) -> Option<Regex> {
+    (!text.is_empty())
+        .then_some({
+            let text_pattern = text
+                .split('󱁐')
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join(".*");
+            Regex::new(&format!(".*{text_pattern}.*"))
+        })
+        .and_then(|r| r.ok())
+}
+
+pub fn lower_ascii(text: &str) -> String {
+    any_ascii::any_ascii(text).to_ascii_lowercase()
 }
 
 #[cfg(test)]

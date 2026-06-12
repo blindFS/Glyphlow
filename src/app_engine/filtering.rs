@@ -7,7 +7,7 @@ use crate::{
     ax_element::{ElementOfInterest, Target},
     config::RoleOfInterest,
     user_interface::{HintBox, hint_boxes_from_frames},
-    util::{Frame, select_range_helper},
+    util::{Frame, lower_ascii, select_range_helper},
 };
 use log::Level;
 
@@ -33,50 +33,45 @@ impl AppEngine {
             self.hint_boxes = ocr_hints;
             self.draw_hints();
         } else {
-            self.update_hints();
-        }
+            let filtered_idx = self.update_hints();
 
-        let filtered_idx = self
-            .hint_boxes
-            .iter()
-            .filter(|b| b.label.starts_with(&self.hint_prefix))
-            .map(|b| b.idx)
-            .collect::<Vec<_>>();
-
-        if self.hint_prefix.len() == self.hint_width as usize
-            && let Some(&hb_idx) = filtered_idx.first()
-        {
-            if self.multi_selection.is_on {
-                if let Some((idx1, idx2)) = self.multi_selection.set_one_side(hb_idx) {
-                    let choices: Vec<(String, Frame, bool)> = self
+            if self.ready_for_unique()
+                && filtered_idx.len() == 1
+                && let Some(&hb_idx) = filtered_idx.first()
+            {
+                if self.multi_selection.is_on {
+                    if let Some((idx1, idx2)) = self.multi_selection.set_one_side(hb_idx) {
+                        let choices: Vec<(String, Frame, bool)> = self
+                            .ocr_cache
+                            .as_ref()
+                            .expect("Internal Error: OCR cache not set.")
+                            .iter()
+                            .map(|(s, rect)| (s.clone(), Frame::from_cgrect(rect), true))
+                            .collect::<Vec<_>>();
+                        let (text, frame) = select_range_helper(&choices, idx1, idx2)
+                            .expect("Internal Error: wrong ocr hint indexing.");
+                        self.select(ElementOfInterest::pseudo(None, frame));
+                        self.clear_hints();
+                        self.update_selected_text_and_show_menu(text.clone());
+                    } else {
+                        self.hint_prefix.clear();
+                        self.search_prefix.clear();
+                        self.update_hints();
+                    }
+                } else {
+                    let (selected_text, cg_rect) = self
                         .ocr_cache
                         .as_ref()
                         .expect("Internal Error: OCR cache not set.")
-                        .iter()
-                        .map(|(s, rect)| (s.clone(), Frame::from_cgrect(rect), true))
-                        .collect::<Vec<_>>();
-                    let (text, frame) = select_range_helper(&choices, idx1, idx2)
+                        .get(hb_idx)
                         .expect("Internal Error: wrong ocr hint indexing.");
+                    let selected_text = selected_text.clone();
+                    let frame = Frame::from_cgrect(cg_rect);
+                    // Context initialized as None, but updated right after
                     self.select(ElementOfInterest::pseudo(None, frame));
                     self.clear_hints();
-                    self.update_selected_text_and_show_menu(text.clone());
-                } else {
-                    self.hint_prefix.clear();
-                    self.update_hints();
+                    self.update_selected_text_and_show_menu(selected_text);
                 }
-            } else {
-                let (selected_text, cg_rect) = self
-                    .ocr_cache
-                    .as_ref()
-                    .expect("Internal Error: OCR cache not set.")
-                    .get(hb_idx)
-                    .expect("Internal Error: wrong ocr hint indexing.");
-                let selected_text = selected_text.clone();
-                let frame = Frame::from_cgrect(cg_rect);
-                // Context initialized as None, but updated right after
-                self.select(ElementOfInterest::pseudo(None, frame));
-                self.clear_hints();
-                self.update_selected_text_and_show_menu(selected_text);
             }
         }
     }
@@ -104,17 +99,13 @@ impl AppEngine {
 
     /// Filter the UI elements and redraw hints.
     async fn filter_by_key(&mut self) {
-        let filtered_boxes = self
-            .hint_boxes
-            .iter()
-            .filter(|b| b.label.starts_with(&self.hint_prefix))
-            .cloned()
-            .collect::<Vec<_>>();
+        let filtered_indices = self.update_hints();
 
         // Only 1 remaining, take some actions
-        if self.hint_prefix.len() == self.hint_width as usize
-            && filtered_boxes.len() == 1
-            && let Some(HintBox { idx, .. }) = filtered_boxes.first()
+        if self.ready_for_unique()
+            && filtered_indices.len() == 1
+            && let Some(hb_idx) = filtered_indices.first()
+            && let Some(HintBox { idx, .. }) = self.hint_boxes.get(*hb_idx)
             && let Some(eoi) = self.element_cache.cache.get(*idx)
             && let Some(element) = eoi.element()
         {
@@ -164,6 +155,7 @@ impl AppEngine {
                         } else {
                             self.multi_selection.role = Some(role);
                             self.hint_prefix.clear();
+                            self.search_prefix.clear();
                             self.update_hints();
                         }
                     } else if context.is_some() {
@@ -221,8 +213,6 @@ impl AppEngine {
                     }
                 }
             }
-        } else {
-            self.update_hints();
         }
     }
 
@@ -240,7 +230,7 @@ impl AppEngine {
                 self.activate(Target::ChildElement);
             }
             FilterMode::WordPicking => {
-                if !self.multi_selection.is_on || self.multi_selection.one_side_idex.is_none() {
+                if !self.multi_selection.is_on || self.multi_selection.one_side_idx.is_none() {
                     // Go back to text action menu
                     self.word_picker = None;
                     self.draw_element_menu("", RoleOfInterest::PseudoText, true);
@@ -263,10 +253,7 @@ impl AppEngine {
 
     pub(super) fn build_search_targets(&mut self) {
         self.search_targets = if let Some(ocr_cache) = &self.ocr_cache {
-            ocr_cache
-                .iter()
-                .map(|(s, _)| any_ascii::any_ascii(s).to_ascii_lowercase())
-                .collect()
+            ocr_cache.iter().map(|(s, _)| lower_ascii(s)).collect()
         } else {
             self.element_cache
                 .cache
@@ -306,6 +293,16 @@ impl AppEngine {
             self.hint_prefix.push(key_char);
         }
 
+        self.check_filtering(mode).await;
+    }
+
+    fn ready_for_unique(&self) -> bool {
+        !self.is_searching
+            && (self.hint_prefix.len() == self.hint_width as usize
+                || (!self.search_prefix.is_empty() && self.hint_prefix.is_empty()))
+    }
+
+    pub(super) async fn check_filtering(&mut self, mode: FilterMode) {
         match mode {
             FilterMode::OCR => {
                 self.ocr_res_filtering();
@@ -337,9 +334,7 @@ impl AppEngine {
                     .len()
                     == 1);
 
-        if !self.is_searching
-            && (self.hint_prefix.len() == self.hint_width as usize
-                || (!self.search_prefix.is_empty() && self.hint_prefix.is_empty()))
+        if self.ready_for_unique()
             && unique_matching
             && let Some((idx, text)) = matched_words.first()
         {

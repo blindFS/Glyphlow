@@ -2,7 +2,7 @@ use crate::{
     action::html_to_attributed_string,
     config::{GlyphlowTheme, cgcolor_to_rgba},
     user_interface::{UIDrawer, hint_label_from_index},
-    util::digits_by_length,
+    util::{digits_by_length, lower_ascii, search_regex},
 };
 use objc2::rc::{Retained, autoreleasepool};
 use objc2_app_kit::NSFontAttributeName;
@@ -48,7 +48,7 @@ impl WordPicker {
         let mut words = Vec::new();
         for (i, text) in word_strings.into_iter().enumerate() {
             let label = hint_label_from_index(i, Some(digits));
-            let ascii = any_ascii::any_ascii(&text).to_ascii_lowercase();
+            let ascii = lower_ascii(&text);
             words.push(Word { text, label, ascii });
         }
 
@@ -101,17 +101,7 @@ impl WordPicker {
         label_prefix: &str,
         text_prefix: &str,
     ) -> (String, Vec<usize>) {
-        let text_pattern = (!text_prefix.is_empty())
-            .then_some({
-                let text_pattern = text_prefix
-                    .split('󱁐')
-                    .filter(|s| !s.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(".*");
-                Regex::new(&format!(".*{text_pattern}.*"))
-            })
-            .and_then(|r| r.ok());
-
+        let text_pattern = search_regex(text_prefix);
         let total_unicode_width = self.words.iter().map(|w| w.text.width()).sum::<usize>()
             + self.words.len() * (2 + self.digits as usize);
         // ideal_width / (total_unicode_width / ideal_width) 󰾞 ratio * 3

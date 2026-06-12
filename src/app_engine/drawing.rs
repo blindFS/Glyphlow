@@ -4,6 +4,7 @@ use crate::{
     TEXT_ACTION_MENU_ITEMS,
     ax_element::{ElementOfInterest, Target},
     config::RoleOfInterest,
+    util::search_regex,
 };
 use objc2::rc::autoreleasepool;
 
@@ -45,32 +46,43 @@ impl AppEngine {
         })
     }
 
-    /// Show/Hide hint_boxes/colored_frames, update hint text and positions
-    pub(super) fn update_hints(&mut self) {
+    /// Show/Hide hint_boxes/colored_frames, update hint text and positions.
+    /// Returns indices of visible hint boxes
+    pub(super) fn update_hints(&mut self) -> Vec<usize> {
         let prefix_len = self.hint_prefix.len();
+        let mut visible_indices = vec![];
+        let mut nothing_visible = true;
+        let search_pattern = search_regex(&self.search_prefix);
 
         autoreleasepool(|_| {
-            let mut nothing_visible = true;
-            for hb in self.hint_boxes.iter_mut() {
+            for (idx, hb) in self.hint_boxes.iter_mut().enumerate() {
+                let is_selected_side = self.multi_selection.is_on
+                    && self
+                        .multi_selection
+                        .one_side_idx
+                        .is_some_and(|idx| idx == hb.idx);
+                let matches_search_prefix = search_pattern
+                    .as_ref()
+                    .is_none_or(|p| self.search_targets.get(idx).is_some_and(|h| p.is_match(h)));
                 let visible = hb.label.starts_with(&self.hint_prefix)
-                    && !(self.multi_selection.is_on
-                        && self
-                            .multi_selection
-                            .one_side_idex
-                            .is_some_and(|idx| idx == hb.idx));
+                    && matches_search_prefix
+                    && !is_selected_side;
 
                 hb.set_visible(visible);
 
                 if visible {
                     hb.refresh(prefix_len, &self.overlay_frame, &self.config.theme);
                     nothing_visible = false;
+                    visible_indices.push(idx);
                 }
             }
 
-            if nothing_visible {
+            if !self.is_searching && nothing_visible {
                 self.notify("Nothing matches, press 󰁮 to go back", log::Level::Warn);
             }
-        })
+        });
+
+        visible_indices
     }
 
     fn menu_format_helper(
@@ -279,7 +291,7 @@ impl AppEngine {
 
         word_picker.update_text_layer(
             &self.drawer,
-            self.multi_selection.one_side_idex,
+            self.multi_selection.one_side_idx,
             self.is_searching,
             &self.hint_prefix,
             &self.search_prefix,

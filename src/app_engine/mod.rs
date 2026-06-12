@@ -25,32 +25,32 @@ mod workflow;
 #[derive(Debug, Default)]
 pub(super) struct MultiSeletionState {
     pub(super) is_on: bool,
-    pub(super) one_side_idex: Option<usize>,
+    pub(super) one_side_idx: Option<usize>,
     pub(super) role: Option<RoleOfInterest>,
 }
 
 impl MultiSeletionState {
     pub(super) fn toggle(&mut self) {
         self.is_on = !self.is_on;
-        self.one_side_idex = None;
+        self.one_side_idx = None;
         self.role = None;
     }
 
     pub(super) fn reset(&mut self) {
         self.is_on = false;
-        self.one_side_idex = None;
+        self.one_side_idx = None;
         self.role = None;
     }
 
     pub(super) fn clear_one_side(&mut self) {
-        self.one_side_idex = None;
+        self.one_side_idx = None;
     }
 
     pub(super) fn set_one_side(&mut self, other: usize) -> Option<(usize, usize)> {
-        if let Some(one) = self.one_side_idex {
+        if let Some(one) = self.one_side_idx {
             Some((one, other))
         } else {
-            self.one_side_idex = Some(other);
+            self.one_side_idx = Some(other);
             None
         }
     }
@@ -179,23 +179,20 @@ impl AppEngine {
                     return;
                 }
                 self.is_searching = true;
-                self.search_prefix.clear();
                 if self.word_picker.is_some() {
                     self.draw_word_picker();
                 } else {
-                    self.drawer.draw_menu("/");
+                    self.drawer.draw_menu(&format!("/{}", self.search_prefix));
                     self.build_search_targets();
                 }
             }
             AppSignal::FinishSearch(mode) => {
                 self.is_searching = false;
                 self.set_mode(mode.to_app_mode());
-                if self.word_picker.is_some() {
-                    self.draw_word_picker();
-                    self.check_word_picker();
-                } else {
+                if self.word_picker.is_none() {
                     self.drawer.clear_menus();
                 }
+                self.check_filtering(mode).await;
             }
             AppSignal::ActOnEnter => {
                 if self.target == Target::ChildElement {
