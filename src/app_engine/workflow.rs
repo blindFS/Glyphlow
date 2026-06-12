@@ -176,10 +176,12 @@ impl AppEngine {
             .cloned()
             .expect("Internal Error: text workflow index out of bounds.");
 
-        // Silently quit if workflow is not valid for current selected element
         if self.is_workflow_valid(&workflow) {
             self.pending_workflow_actions = workflow.actions.into();
             self.execute_pending_workflow_actions();
+        } else {
+            self.drawer
+                .draw_menu("Wrong key sequence\nPress 󰁮 to go back");
         }
     }
 }

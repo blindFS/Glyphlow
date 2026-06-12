@@ -51,7 +51,9 @@ impl AppEngine {
         self.clear_hints();
         self.hint_boxes.clear();
         self.element_cache.clear();
-        self.key_prefix.clear();
+        self.hint_prefix.clear();
+        self.search_prefix.clear();
+        self.is_searching = false;
         self.multi_selection.reset();
     }
 

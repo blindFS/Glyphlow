@@ -25,32 +25,32 @@ mod workflow;
 #[derive(Debug, Default)]
 pub(super) struct MultiSeletionState {
     pub(super) is_on: bool,
-    pub(super) one_side_idex: Option<usize>,
+    pub(super) one_side_idx: Option<usize>,
     pub(super) role: Option<RoleOfInterest>,
 }
 
 impl MultiSeletionState {
     pub(super) fn toggle(&mut self) {
         self.is_on = !self.is_on;
-        self.one_side_idex = None;
+        self.one_side_idx = None;
         self.role = None;
     }
 
     pub(super) fn reset(&mut self) {
         self.is_on = false;
-        self.one_side_idex = None;
+        self.one_side_idx = None;
         self.role = None;
     }
 
     pub(super) fn clear_one_side(&mut self) {
-        self.one_side_idex = None;
+        self.one_side_idx = None;
     }
 
     pub(super) fn set_one_side(&mut self, other: usize) -> Option<(usize, usize)> {
-        if let Some(one) = self.one_side_idex {
+        if let Some(one) = self.one_side_idx {
             Some((one, other))
         } else {
-            self.one_side_idex = Some(other);
+            self.one_side_idx = Some(other);
             None
         }
     }
@@ -61,10 +61,15 @@ impl MultiSeletionState {
 pub struct AppEngine {
     pub(super) state: Arc<Mutex<Mode>>,
     pub(super) key_state: Arc<Mutex<KeyState>>,
+    pub(super) element_cache: ElementCache,
+    pub(super) ocr_cache: Option<OCRResult>,
+    pub(super) word_picker: Option<WordPicker>,
     /// Used for drawing hint boxes on screen
     pub(super) hint_boxes: Vec<HintBox>,
-    pub(super) element_cache: ElementCache,
-    pub(super) key_prefix: String,
+    pub(super) hint_prefix: String,
+    pub(super) is_searching: bool,
+    pub(super) search_prefix: String,
+    pub(super) search_targets: Vec<String>,
     pub(super) overlay_frame: Frame,
     pub(super) drawer: UIDrawer,
     /// Which elements of interest to look for
@@ -77,8 +82,6 @@ pub struct AppEngine {
     pub(super) editing: Option<ElementOfInterest>,
     /// For editing element text values
     pub(super) temp_file: PathBuf,
-    pub(super) word_picker: Option<WordPicker>,
-    pub(super) ocr_cache: Option<OCRResult>,
     pub(super) timeout_sender: Sender<usize>,
     /// Special treatment for Electron based apps.
     /// Like simulate mouse clicking instead of `element.press()`
@@ -105,13 +108,18 @@ impl AppEngine {
         Self {
             state,
             key_state,
-            hint_boxes: vec![],
             element_cache: ElementCache::new(
                 config.element_min_width as f64,
                 config.element_min_height as f64,
                 config.image_min_size as f64,
             ),
-            key_prefix: String::new(),
+            ocr_cache: None,
+            word_picker: None,
+            hint_boxes: vec![],
+            hint_prefix: String::new(),
+            is_searching: false,
+            search_prefix: String::new(),
+            search_targets: vec![],
             target: Target::default(),
             hint_width: 0,
             overlay_frame,
@@ -121,8 +129,6 @@ impl AppEngine {
             selected: None,
             editing: None,
             temp_file,
-            word_picker: None,
-            ocr_cache: None,
             last_app_window_info: AppWindowInfo::default(overlay_frame),
             multi_selection: MultiSeletionState::default(),
             pending_workflow_actions: VecDeque::new(),
@@ -150,13 +156,6 @@ impl AppEngine {
             AppSignal::MenuRefresh(key_prefix) => {
                 self.menu_refresh(&key_prefix, false);
             }
-            AppSignal::ActOnSelected => {
-                if self.target == Target::ChildElement {
-                    self.clear_cache();
-                    self.set_mode(Mode::DashBoard);
-                    self.menu_refresh("", false);
-                }
-            }
             AppSignal::ToggleMultiSelection => match self.target {
                 Target::Text | Target::ImageOCR => {
                     self.toggle_multiselection();
@@ -175,18 +174,33 @@ impl AppEngine {
                 self.perform_scroll_action(sa);
             }
             AppSignal::TextAction(ta) => self.perform_text_action(ta),
-            AppSignal::WordPickerStartSearch => {
-                if let Some(wp) = self.word_picker.as_mut() {
-                    wp.start_searching(&self.drawer, self.multi_selection.one_side_idex);
-                    self.key_prefix.clear();
+            AppSignal::StartSearch => {
+                if self.is_searching {
+                    return;
+                }
+                self.is_searching = true;
+                if self.word_picker.is_some() {
+                    self.draw_word_picker();
+                } else {
+                    self.drawer.draw_search_bar(&self.search_prefix, true);
+                    self.build_search_targets();
                 }
             }
-            AppSignal::WordPickerFinishSearch => {
-                if let Some(wp) = self.word_picker.as_mut() {
-                    wp.finish_searching(&self.drawer, self.multi_selection.one_side_idex);
-                    self.key_prefix = wp.label_prefix.clone();
+            AppSignal::FinishSearch(mode) => {
+                self.is_searching = false;
+                self.set_mode(mode.to_app_mode());
+                if self.word_picker.is_none() {
+                    self.drawer.clear_menus();
                 }
-                self.check_word_picker();
+                self.check_filtering(mode).await;
+            }
+            AppSignal::ActOnEnter => {
+                if self.target == Target::ChildElement {
+                    // To act on selected parent node
+                    self.clear_cache();
+                    self.set_mode(Mode::DashBoard);
+                    self.menu_refresh("", false);
+                }
             }
             AppSignal::ScreenShot => {
                 self.clear_cache();

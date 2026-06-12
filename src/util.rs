@@ -5,7 +5,8 @@ use core_text::framesetter::CTFramesetter;
 use objc2::rc::Retained;
 use objc2_core_foundation::{CGPoint, CGRect, CGSize as OCGSize};
 use objc2_foundation::{NSMutableAttributedString, NSSize};
-use unicode_width::UnicodeWidthStr;
+use regex::Regex;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 #[derive(Debug, Clone, PartialEq, Copy, Default)]
 pub struct Frame {
@@ -268,6 +269,68 @@ pub fn select_range_helper(
 
 pub fn digits_by_length(len: usize) -> u32 {
     if len <= 1 { 1 } else { (len - 1).ilog(26) + 1 }
+}
+
+pub fn search_regex(text: &str) -> Option<Regex> {
+    (!text.is_empty())
+        .then_some({
+            let text_pattern = text
+                .split('󱁐')
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join(".*");
+            Regex::new(&format!(".*{text_pattern}.*"))
+        })
+        .and_then(|r| r.ok())
+}
+
+pub fn lower_ascii(text: &str) -> String {
+    any_ascii::any_ascii(text).to_ascii_lowercase()
+}
+
+pub fn format_fixed_width(input: &str, fixed_length: usize) -> String {
+    if fixed_length == 0 {
+        return "".into();
+    }
+    let target_suffix_w = fixed_length - 1;
+    let mut current_width = 0;
+    let mut trunc_byte_idx = input.len();
+    let mut trunc_width = 0;
+
+    // Scan backwards: Only inspects up to `fixed_length + 1` worth of characters
+    for (idx, ch) in input.char_indices().rev() {
+        let ch_width = ch.width().unwrap_or(1);
+        current_width += ch_width;
+
+        // Track the best byte cut-off point for the suffix
+        if current_width <= target_suffix_w {
+            trunc_byte_idx = idx;
+            trunc_width = current_width;
+        }
+
+        // Early exit: The moment we know the string is too long, we build the truncation
+        if current_width > fixed_length {
+            let suffix = &input[trunc_byte_idx..];
+            let padding_spaces = target_suffix_w - trunc_width;
+
+            let mut s = String::with_capacity(1 + padding_spaces + suffix.len());
+            s.push('.');
+            for _ in 0..padding_spaces {
+                s.push(' ');
+            }
+            s.push_str(suffix);
+            return s;
+        }
+    }
+
+    // Case: The entire string fits within the layout -> Pad it out
+    let padding_spaces = fixed_length - current_width;
+    let mut s = String::with_capacity(input.len() + padding_spaces);
+    s.push_str(input);
+    for _ in 0..padding_spaces {
+        s.push(' ');
+    }
+    s
 }
 
 #[cfg(test)]
@@ -591,5 +654,82 @@ mod select_range_tests {
         let height = estimate_font_height("any text", &frame);
 
         assert_eq!(height, 0.5);
+    }
+}
+
+#[cfg(test)]
+mod misc_tests {
+    use super::format_fixed_width;
+
+    #[test]
+    fn test_exact_and_padding_ascii() {
+        // Exact match: No padding, no truncation
+        assert_eq!(format_fixed_width("hello", 5), "hello");
+
+        // Needs padding: Short string, padded to the right with spaces
+        assert_eq!(format_fixed_width("abc", 6), "abc   ");
+    }
+
+    #[test]
+    fn test_truncation_ascii() {
+        // Standard truncation from the left with a single dot
+        // "abcdefghijk" length is 11. Target is 10.
+        // 10 - 1 (for ".") = 9 slots for the suffix ("cdefghijk")
+        assert_eq!(format_fixed_width("abcdefghijk", 10), ".cdefghijk");
+
+        // Tight truncation
+        assert_eq!(format_fixed_width("abcdef", 4), ".def");
+    }
+
+    #[test]
+    fn test_empty_and_minimal_lengths() {
+        // Empty string should just turn into pure padding
+        assert_eq!(format_fixed_width("", 5), "     ");
+        assert_eq!(format_fixed_width("", 0), "");
+
+        // Extreme edge case: Requested length is exactly 1 or 2
+        assert_eq!(format_fixed_width("longstring", 2), ".g");
+        assert_eq!(format_fixed_width("longstring", 1), ".");
+    }
+
+    #[test]
+    fn test_unicode_padding() {
+        // "こんにちは" (Konnichiwa) has 5 characters, but a visual width of 10.
+        // Target 12 means it needs exactly 2 trailing spaces.
+        assert_eq!(format_fixed_width("こんにちは", 12), "こんにちは  ");
+    }
+
+    #[test]
+    fn test_unicode_clean_truncation() {
+        // Target 7 -> Suffix target is 6 (7 - 1).
+        // "にちは" is 3 characters of width 2 each = 6 total width. Fits perfectly.
+        assert_eq!(format_fixed_width("こんにちは", 7), ".にちは");
+    }
+
+    #[test]
+    fn test_unicode_mid_character_truncation_alignment() {
+        // CRITICAL EDGE CASE: Truncation hits right in the middle of a wide character.
+        // Target 8 -> Suffix target is 7 (8 - 1).
+        // "にちは" has a width of 6. The next char "ん" has a width of 2 (Total 8).
+        // 8 exceeds our suffix target of 7, so "ん" must be dropped.
+        // This leaves 1 empty visual slot (7 - 6 = 1), which must be filled with a space.
+        assert_eq!(format_fixed_width("こんにちは", 8), ". にちは");
+
+        // Verify total visual width of the output is exactly 8
+        // "." (1) + " " (1) + "に" (2) + "ち" (2) + "は" (2) = 8
+        let result = format_fixed_width("こんにちは", 8);
+        let actual_width: usize = result
+            .chars()
+            .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1))
+            .sum();
+        assert_eq!(actual_width, 8);
+    }
+
+    #[test]
+    fn test_fallback_width_handling() {
+        // Control characters like '\n' return None from .width()
+        // Your updated logic defaults them to 1 via .unwrap_or(1)
+        // "\n\n" is treated as width 2. Target 5 -> pads with 3 spaces.
+        assert_eq!(format_fixed_width("\n\n", 5), "\n\n   ");
     }
 }

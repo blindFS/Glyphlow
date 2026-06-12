@@ -33,11 +33,21 @@ pub enum ScrollAction {
     Bottom,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum FilterMode {
     WordPicking,
     Generic,
     OCR,
+}
+
+impl FilterMode {
+    pub fn to_app_mode(&self) -> Mode {
+        match self {
+            FilterMode::WordPicking => Mode::WordPicking,
+            FilterMode::Generic => Mode::Filtering,
+            FilterMode::OCR => Mode::OCRResultFiltering,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -47,7 +57,7 @@ pub enum AppSignal {
     DeActivate,
     Filter(char, FilterMode),
     MenuRefresh(String),
-    ActOnSelected,
+    ActOnEnter,
     // Sub state signals
     FileUpdate(PathBuf),
     ClearNotification(usize),
@@ -60,9 +70,8 @@ pub enum AppSignal {
     ReadClipboard,
     ScreenShot,
     FrameOCR,
-    // Word Picker
-    WordPickerStartSearch,
-    WordPickerFinishSearch,
+    StartSearch,
+    FinishSearch(FilterMode),
 }
 
 #[derive(Debug, PartialEq)]
@@ -165,8 +174,8 @@ pub enum Mode {
     Scrolling,
     TextActionMenu,
     ImageActionMenu,
-    Editing,
     WordPicking,
+    Searching(FilterMode),
     OCRResultFiltering,
     WaitAndDeactivate,
 }
@@ -295,7 +304,7 @@ impl KeyListener {
         key_state: &mut KeyState,
     ) -> bool {
         let key_char = key.to_char();
-        if key_char == '-' {
+        if *key == Key::Backspace || *key == Key::Delete {
             key_state.pop();
         } else if key_state.prefix.chars().count() < self.menu_action_max_key_len[&menu_type] {
             key_state.push(key_char);
@@ -322,12 +331,22 @@ impl KeyListener {
     }
 
     fn filter_helper(&self, key: &Key, mut state: MutexGuard<'_, Mode>, mode: FilterMode) -> bool {
-        let key_char = key.to_char();
-        if key_char == ' ' {
-            self.send(AppSignal::DeActivate);
-            *state = Mode::Idle;
-        } else {
-            self.send(AppSignal::Filter(key_char, mode));
+        match key {
+            Key::ShiftLeft | Key::ShiftRight => self.send(AppSignal::ToggleMultiSelection),
+            Key::Slash => {
+                self.send(AppSignal::StartSearch);
+                *state = Mode::Searching(mode)
+            }
+            Key::Enter => self.send(AppSignal::ActOnEnter),
+            _ => {
+                let key_char = key.to_char();
+                if key_char == ' ' {
+                    self.send(AppSignal::DeActivate);
+                    *state = Mode::Idle;
+                } else {
+                    self.send(AppSignal::Filter(key_char, mode));
+                }
+            }
         }
         true
     }
@@ -339,7 +358,7 @@ impl KeyListener {
         };
 
         match *state {
-            Mode::Editing | Mode::Idle => {
+            Mode::Idle => {
                 if self.global_key_binding.keys.iter().all(|k| {
                     k == &key
                         || key_state.pressed_keys.contains(k)
@@ -354,33 +373,7 @@ impl KeyListener {
                 }
             }
             Mode::DashBoard => self.menu_helper(&key, MenuType::Dashboard, state, key_state),
-            // To act on selected parent node
-            Mode::Filtering if key == Key::Enter => {
-                self.send(AppSignal::ActOnSelected);
-                true
-            }
-            Mode::WordPicking | Mode::Filtering | Mode::OCRResultFiltering
-                if key == Key::ShiftLeft || key == Key::ShiftRight =>
-            {
-                self.send(AppSignal::ToggleMultiSelection);
-                true
-            }
-            Mode::WordPicking => {
-                match key {
-                    Key::Slash => self.send(AppSignal::WordPickerStartSearch),
-                    Key::Enter => self.send(AppSignal::WordPickerFinishSearch),
-                    Key::Escape => {
-                        self.send(AppSignal::DeActivate);
-                        *state = Mode::Idle;
-                    }
-                    _ => {
-                        let key_char = key.to_char();
-                        let key_char = if key_char == ' ' { '󱁐' } else { key_char };
-                        self.send(AppSignal::Filter(key_char, FilterMode::WordPicking));
-                    }
-                }
-                true
-            }
+            Mode::WordPicking => self.filter_helper(&key, state, FilterMode::WordPicking),
             Mode::Filtering => self.filter_helper(&key, state, FilterMode::Generic),
             Mode::OCRResultFiltering => self.filter_helper(&key, state, FilterMode::OCR),
             Mode::TextActionMenu => self.menu_helper(&key, MenuType::TextAction, state, key_state),
@@ -388,6 +381,28 @@ impl KeyListener {
                 self.menu_helper(&key, MenuType::ImageAction, state, key_state)
             }
             Mode::Scrolling => self.menu_helper(&key, MenuType::Scroll, state, key_state),
+            Mode::Searching(mode) => {
+                match key {
+                    Key::Enter => self.send(AppSignal::FinishSearch(mode)),
+                    Key::ShiftLeft | Key::ShiftRight => (),
+                    Key::Escape => {
+                        self.send(AppSignal::DeActivate);
+                        *state = Mode::Idle
+                    }
+                    _ => {
+                        let key_char = if key_state.pressed_keys.contains(&Key::ShiftLeft)
+                            || key_state.pressed_keys.contains(&Key::ShiftRight)
+                        {
+                            key.shifted_char()
+                        } else {
+                            key.to_char()
+                        };
+                        let key_char = if key_char == ' ' { '󱁐' } else { key_char };
+                        self.send(AppSignal::Filter(key_char, mode));
+                    }
+                };
+                true
+            }
             Mode::WaitAndDeactivate => {
                 self.send(AppSignal::DeActivate);
                 *state = Mode::Idle;
