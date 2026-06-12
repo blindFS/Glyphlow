@@ -208,6 +208,7 @@ pub fn cgcolor_to_rgba(cgcolor: &CFRetained<CGColor>) -> Option<(u8, u8, u8, u8)
 
 pub trait AlphabeticKey {
     fn to_char(&self) -> char;
+    fn shifted_char(&self) -> char;
     fn to_str(&self) -> String;
     fn from_str(c: &str) -> Option<Key>;
     fn right_alternative(&self) -> Option<Key>;
@@ -252,10 +253,73 @@ impl AlphabeticKey for Key {
             Key::Num8 => '8',
             Key::Num9 => '9',
             Key::Num0 => '0',
-            Key::Backspace | Key::Delete => '-',
+            Key::Grave => '`',
+            Key::Minus => '-',
+            Key::Equal => '=',
             Key::BracketLeft => '[',
             Key::BracketRight => ']',
+            Key::Backslash => '\\',
+            Key::Semicolon => ';',
+            Key::Quote => '\'',
+            Key::Comma => ',',
+            Key::Period => '.',
+            Key::Slash => '/',
+            Key::Backspace | Key::Delete => '󰁮',
             Key::ShiftLeft | Key::ShiftRight => '󰘶',
+            _ => ' ',
+        }
+    }
+
+    fn shifted_char(&self) -> char {
+        match self {
+            Key::KeyA => 'A',
+            Key::KeyB => 'B',
+            Key::KeyC => 'C',
+            Key::KeyD => 'D',
+            Key::KeyE => 'E',
+            Key::KeyF => 'F',
+            Key::KeyG => 'G',
+            Key::KeyH => 'H',
+            Key::KeyI => 'I',
+            Key::KeyJ => 'J',
+            Key::KeyK => 'K',
+            Key::KeyL => 'L',
+            Key::KeyM => 'M',
+            Key::KeyN => 'N',
+            Key::KeyO => 'O',
+            Key::KeyP => 'P',
+            Key::KeyQ => 'Q',
+            Key::KeyR => 'R',
+            Key::KeyS => 'S',
+            Key::KeyT => 'T',
+            Key::KeyU => 'U',
+            Key::KeyV => 'V',
+            Key::KeyW => 'W',
+            Key::KeyX => 'X',
+            Key::KeyY => 'Y',
+            Key::KeyZ => 'Z',
+            Key::Num1 => '!',
+            Key::Num2 => '@',
+            Key::Num3 => '#',
+            Key::Num4 => '$',
+            Key::Num5 => '%',
+            Key::Num6 => '^',
+            Key::Num7 => '&',
+            Key::Num8 => '*',
+            Key::Num9 => '(',
+            Key::Num0 => ')',
+            Key::Grave => '~',
+            Key::Minus => '_',
+            Key::Equal => '+',
+            Key::BracketLeft => '{',
+            Key::BracketRight => '}',
+            Key::Backslash => '|',
+            Key::Semicolon => ':',
+            Key::Quote => '"',
+            Key::Comma => '<',
+            Key::Period => '>',
+            Key::Slash => '?',
+            Key::Backspace | Key::Delete => '󰁮',
             _ => ' ',
         }
     }

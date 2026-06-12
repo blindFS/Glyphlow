@@ -304,7 +304,7 @@ impl KeyListener {
         key_state: &mut KeyState,
     ) -> bool {
         let key_char = key.to_char();
-        if key_char == '-' {
+        if *key == Key::Backspace || *key == Key::Delete {
             key_state.pop();
         } else if key_state.prefix.chars().count() < self.menu_action_max_key_len[&menu_type] {
             key_state.push(key_char);
@@ -384,12 +384,19 @@ impl KeyListener {
             Mode::Searching(mode) => {
                 match key {
                     Key::Enter => self.send(AppSignal::FinishSearch(mode)),
+                    Key::ShiftLeft | Key::ShiftRight => (),
                     Key::Escape => {
                         self.send(AppSignal::DeActivate);
                         *state = Mode::Idle
                     }
                     _ => {
-                        let key_char = key.to_char();
+                        let key_char = if key_state.pressed_keys.contains(&Key::ShiftLeft)
+                            || key_state.pressed_keys.contains(&Key::ShiftRight)
+                        {
+                            key.shifted_char()
+                        } else {
+                            key.to_char()
+                        };
                         let key_char = if key_char == ' ' { '󱁐' } else { key_char };
                         self.send(AppSignal::Filter(key_char, mode));
                     }

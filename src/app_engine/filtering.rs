@@ -265,7 +265,7 @@ impl AppEngine {
 
     pub(super) async fn perform_filtering(&mut self, key_char: char, mode: FilterMode) {
         if self.is_searching {
-            if key_char == '-' {
+            if key_char == '󰁮' {
                 if self.search_prefix.is_empty() {
                     self.is_searching = false;
                     self.set_mode(mode.to_app_mode());
@@ -282,7 +282,7 @@ impl AppEngine {
                 self.search_prefix.push(key_char.to_ascii_lowercase());
             }
             self.drawer.draw_menu(&format!("/{}", self.search_prefix));
-        } else if key_char == '-' {
+        } else if key_char == '󰁮' {
             if self.hint_prefix.is_empty() {
                 self.go_back_in_filtering(mode);
                 return;
