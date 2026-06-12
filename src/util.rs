@@ -173,7 +173,6 @@ pub fn select_range_helper(
     let x_thres = font_height * 2.5;
     let y_thres = (font_height * 0.8).min(MIN_HEIGHT_THRESHOLD);
 
-    // Roughly sort all elements in y range
     let mut within_y_range = choices
         .iter()
         .filter(|(_, f, v)| {
@@ -185,14 +184,17 @@ pub fn select_range_helper(
             }
 
             // Fuzzy boundaries for elements on the same line as start or end
-            if (f.bottom_right.y - s_frame.bottom_right.y).abs() < y_thres
-                && f.top_left.x >= s_frame.top_left.x
-            {
+            let is_on_s_line = (f.bottom_right.y - s_frame.bottom_right.y).abs() < y_thres;
+            let is_on_e_line = (f.bottom_right.y - e_frame.bottom_right.y).abs() < y_thres;
+
+            if is_on_s_line && is_on_e_line {
+                return f.top_left.x >= s_frame.top_left.x
+                    && f.top_left.x <= e_frame.bottom_right.x;
+            }
+            if is_on_s_line && f.top_left.x >= s_frame.top_left.x {
                 return true;
             }
-            if (f.bottom_right.y - e_frame.bottom_right.y).abs() < y_thres
-                && f.top_left.x <= e_frame.bottom_right.x
-            {
+            if is_on_e_line && f.top_left.x <= e_frame.bottom_right.x {
                 return true;
             }
             false
@@ -627,6 +629,29 @@ mod select_range_tests {
 
         // The invisible element should be skipped during the `.filter(|(_, f, v)| *v ...)` step
         assert_eq!(text, "Keep1 Keep2");
+    }
+
+    #[test]
+    fn test_select_same_line_exclude_before_after() {
+        let choices = vec![
+            make_choice("Before ", 0.0, 0.0, 40.0, 10.0, true),
+            make_choice("Start ", 45.0, 0.0, 40.0, 10.0, true),
+            make_choice("Middle ", 90.0, 0.0, 40.0, 10.0, true),
+            make_choice("End ", 135.0, 0.0, 40.0, 10.0, true),
+            make_choice("After", 180.0, 0.0, 40.0, 10.0, true),
+        ];
+
+        // Select from "Start " (idx 1) to "End " (idx 3)
+        let (text, frame) = select_range_helper(&choices, 1, 3).unwrap();
+
+        // It should ONLY include "Start ", "Middle ", and "End "
+        assert_eq!(text, "Start Middle End ");
+
+        // Bounding box should encompass only the selected range
+        assert_eq!(frame.top_left.x, 45.0);
+        assert_eq!(frame.top_left.y, 0.0);
+        assert_eq!(frame.bottom_right.x, 175.0);
+        assert_eq!(frame.bottom_right.y, 10.0);
     }
 
     #[test]
