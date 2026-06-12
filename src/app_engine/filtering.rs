@@ -263,26 +263,8 @@ impl AppEngine {
         };
     }
 
-    pub(super) async fn perform_filtering(&mut self, key_char: char, mode: FilterMode) {
-        if self.is_searching {
-            if key_char == '󰁮' {
-                if self.search_prefix.is_empty() {
-                    self.is_searching = false;
-                    self.set_mode(mode.to_app_mode());
-                    if self.word_picker.is_some() {
-                        self.draw_word_picker();
-                    } else {
-                        self.drawer.clear_menus();
-                    }
-                    return;
-                } else {
-                    self.search_prefix.pop();
-                }
-            } else {
-                self.search_prefix.push(key_char.to_ascii_lowercase());
-            }
-            self.drawer.draw_search_bar(&self.search_prefix, false);
-        } else if key_char == '󰁮' {
+    pub(super) async fn filter_by_hint(&mut self, key_char: char, mode: FilterMode) {
+        if key_char == '󰁮' {
             if self.hint_prefix.is_empty() {
                 self.go_back_in_filtering(mode);
                 return;
@@ -291,6 +273,31 @@ impl AppEngine {
             }
         } else if self.hint_prefix.len() < self.hint_width as usize {
             self.hint_prefix.push(key_char);
+        }
+
+        self.check_filtering(mode).await;
+    }
+
+    pub(super) async fn filter_by_search(&mut self, key_char: char, mode: FilterMode) {
+        if key_char == '󰁮' {
+            if self.search_prefix.is_empty() {
+                self.is_searching = false;
+                self.set_mode(mode.to_app_mode());
+                if self.word_picker.is_some() {
+                    self.draw_word_picker();
+                } else {
+                    self.drawer.clear_menus();
+                }
+                return;
+            } else {
+                self.search_prefix.pop();
+            }
+        } else {
+            self.search_prefix.push(key_char.to_ascii_lowercase());
+        }
+
+        if mode != FilterMode::WordPicking {
+            self.drawer.draw_search_bar(&self.search_prefix, false);
         }
 
         // TODO: debounce in searching mode?

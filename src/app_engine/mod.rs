@@ -167,8 +167,11 @@ impl AppEngine {
                     self.notify("Multi selection only works for text.", Level::Warn);
                 }
             },
-            AppSignal::Filter(key_char, mode) => {
-                self.perform_filtering(key_char, mode).await;
+            AppSignal::HintFilter(key_char, mode) => {
+                self.filter_by_hint(key_char, mode).await;
+            }
+            AppSignal::SearchFilter(key_char, mode) => {
+                self.filter_by_search(key_char, mode).await;
             }
             AppSignal::ScrollAction(sa) => {
                 self.perform_scroll_action(sa);

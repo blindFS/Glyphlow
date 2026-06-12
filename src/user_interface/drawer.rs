@@ -279,9 +279,12 @@ impl UIDrawer {
             self.draw_menu(&msg.replace(' ', "_"));
         }
         autoreleasepool(|_| {
+            CATransaction::begin();
+            CATransaction::setDisableActions(true);
             let ns_string = NSString::from_str(&msg);
             self.menu.menu_string.mutableString().setString(&ns_string);
             unsafe { self.menu.text_layer.setString(Some(&self.menu.menu_string)) };
+            CATransaction::commit();
         })
     }
 

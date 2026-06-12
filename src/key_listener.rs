@@ -55,7 +55,8 @@ pub enum AppSignal {
     // State signals
     Activate(Target),
     DeActivate,
-    Filter(char, FilterMode),
+    HintFilter(char, FilterMode),
+    SearchFilter(char, FilterMode),
     MenuRefresh(String),
     ActOnEnter,
     // Sub state signals
@@ -344,7 +345,7 @@ impl KeyListener {
                     self.send(AppSignal::DeActivate);
                     *state = Mode::Idle;
                 } else {
-                    self.send(AppSignal::Filter(key_char, mode));
+                    self.send(AppSignal::HintFilter(key_char, mode));
                 }
             }
         }
@@ -398,7 +399,7 @@ impl KeyListener {
                             key.to_char()
                         };
                         let key_char = if key_char == ' ' { '󱁐' } else { key_char };
-                        self.send(AppSignal::Filter(key_char, mode));
+                        self.send(AppSignal::SearchFilter(key_char, mode));
                     }
                 };
                 true
