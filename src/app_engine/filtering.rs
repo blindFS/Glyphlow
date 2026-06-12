@@ -239,13 +239,13 @@ impl AppEngine {
                     self.draw_word_picker();
                 }
             }
-            FilterMode::Generic if self.multi_selection.is_on => {
-                self.multi_selection.clear_one_side();
+            FilterMode::Generic | FilterMode::OCR if !self.search_prefix.is_empty() => {
+                self.search_prefix.clear();
                 self.update_hints();
             }
-            FilterMode::OCR if self.multi_selection.is_on => {
+            FilterMode::Generic | FilterMode::OCR if self.multi_selection.is_on => {
                 self.multi_selection.clear_one_side();
-                self.ocr_res_filtering();
+                self.update_hints();
             }
             _ => (),
         }
@@ -281,7 +281,7 @@ impl AppEngine {
             } else {
                 self.search_prefix.push(key_char.to_ascii_lowercase());
             }
-            self.drawer.draw_menu(&format!("/{}", self.search_prefix));
+            self.drawer.draw_search_bar(&self.search_prefix, false);
         } else if key_char == '󰁮' {
             if self.hint_prefix.is_empty() {
                 self.go_back_in_filtering(mode);
@@ -293,6 +293,7 @@ impl AppEngine {
             self.hint_prefix.push(key_char);
         }
 
+        // TODO: debounce in searching mode?
         self.check_filtering(mode).await;
     }
 

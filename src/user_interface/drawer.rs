@@ -1,6 +1,6 @@
 use crate::{
     config::GlyphlowTheme,
-    util::{Frame, estimate_frame_for_text},
+    util::{Frame, estimate_frame_for_text, format_fixed_width},
 };
 use objc2::{
     AnyThread, MainThreadMarker, MainThreadOnly,
@@ -23,6 +23,7 @@ struct Menu {
 
 const BORDER_WIDTH: f64 = 2.0;
 const MIN_FONT_SIZE: f64 = 10.0;
+const SEARCH_BAR_WIDTH: usize = 10;
 
 impl Menu {
     fn new(theme: &GlyphlowTheme) -> Self {
@@ -269,6 +270,19 @@ impl UIDrawer {
             &self.overlay_frame,
             &self.theme,
         );
+    }
+
+    pub fn draw_search_bar(&self, prefix: &str, init: bool) {
+        let msg = format!("/{}", format_fixed_width(prefix, SEARCH_BAR_WIDTH));
+        if init {
+            // HACK:: trailing spaces lead to wrong size estimation
+            self.draw_menu(&msg.replace(' ', "_"));
+        }
+        autoreleasepool(|_| {
+            let ns_string = NSString::from_str(&msg);
+            self.menu.menu_string.mutableString().setString(&ns_string);
+            unsafe { self.menu.text_layer.setString(Some(&self.menu.menu_string)) };
+        })
     }
 
     /// Shrink font size on large estimated frame size if `auto_resize` is true

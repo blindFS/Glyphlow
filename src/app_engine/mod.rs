@@ -182,7 +182,7 @@ impl AppEngine {
                 if self.word_picker.is_some() {
                     self.draw_word_picker();
                 } else {
-                    self.drawer.draw_menu(&format!("/{}", self.search_prefix));
+                    self.drawer.draw_search_bar(&self.search_prefix, true);
                     self.build_search_targets();
                 }
             }
