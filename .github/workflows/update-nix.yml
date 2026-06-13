@@ -32,8 +32,8 @@ jobs:
 
       - name: Update flake.nix
         run: |
-          sed -i '' "s/version = \".*\";/version = \"${{ inputs.version }}\";/" flake.nix
-          sed -i '' "s/hash = \"sha256-.*\";/hash = \"${{ inputs.hash }}\";/" flake.nix
+          sed -i '' "s|version = \".*\";|version = \"${{ inputs.version }}\";|" flake.nix
+          sed -i '' "s|hash = \"sha256-.*\";|hash = \"${{ inputs.hash }}\";|" flake.nix
           
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
