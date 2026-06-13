@@ -12,6 +12,8 @@ use crate::{
 };
 use log::Level;
 
+const DEBOUNCE_TIMEOUT: u64 = 150;
+
 impl AppEngine {
     fn ocr_res_filtering(&mut self) {
         if self.hint_boxes.is_empty() {
@@ -310,7 +312,12 @@ impl AppEngine {
         let current_id = self.search_debounce_counter;
         let sender = self.signal_sender.clone();
         tokio::spawn(async move {
-            delay(sender, AppSignal::SearchDebounce(current_id, mode), 150).await
+            delay(
+                sender,
+                AppSignal::SearchDebounce(current_id, mode),
+                DEBOUNCE_TIMEOUT,
+            )
+            .await
         });
     }
 
