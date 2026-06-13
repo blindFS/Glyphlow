@@ -241,7 +241,9 @@ impl AppEngine {
                 self.notify("Press Enter to act.", Level::Trace);
             }
             // For internal activations like workflow action / element explorer
-            self.set_mode(Mode::Filtering);
+            if matches!(target, Target::ChildElement | Target::Custom(_)) {
+                self.set_mode(Mode::Filtering);
+            }
         } else if self.target == Target::Scrollable
             && let Some(eoi) = self.selected.as_ref()
         {
