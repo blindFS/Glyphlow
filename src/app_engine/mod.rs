@@ -82,7 +82,6 @@ pub struct AppEngine {
     pub(super) editing: Option<ElementOfInterest>,
     /// For editing element text values
     pub(super) temp_file: PathBuf,
-    pub(super) timeout_sender: Sender<usize>,
     pub(super) signal_sender: Sender<AppSignal>,
     pub(super) search_debounce_counter: usize,
     /// Special treatment for Electron based apps.
@@ -100,7 +99,6 @@ impl AppEngine {
         key_state: Arc<Mutex<KeyState>>,
         config: GlyphlowConfig,
         temp_file: PathBuf,
-        timeout_sender: Sender<usize>,
         signal_sender: Sender<AppSignal>,
     ) -> Self {
         let mtm = MainThreadMarker::new().expect("Not on main thread");
@@ -128,7 +126,6 @@ impl AppEngine {
             overlay_frame,
             drawer,
             config,
-            timeout_sender,
             signal_sender,
             search_debounce_counter: 0,
             selected: None,

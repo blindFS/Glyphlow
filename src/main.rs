@@ -93,14 +93,11 @@ async fn main() {
         log::error!("Failed to watch config file: {e}");
     }
 
-    // Listen to notification timeout
-    let (ttx, mut trx) = mpsc::channel::<usize>(100);
     let mut app_engine = AppEngine::new(
         state.clone(),
         key_state.clone(),
         config,
         cache_file,
-        ttx,
         tx.clone(),
     );
 
@@ -134,7 +131,6 @@ async fn main() {
         tokio::select! {
             Some(signal) = rx.recv() => app_engine.handle_signal(signal).await,
             Some(pb) = frx.recv() => app_engine.handle_signal(AppSignal::FileUpdate(pb)).await,
-            Some(id) = trx.recv() => app_engine.handle_signal(AppSignal::ClearNotification(id)).await,
             _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
                 // NOTE: necessary for up-to-date get_focused_pid and UI drawing
                 unsafe {

@@ -1,6 +1,6 @@
 use super::AppEngine;
 use crate::{
-    Mode,
+    AppSignal, Mode,
     ax_element::{ElementOfInterest, ElementSignal, Target, ThreadSafeElement, traverse},
     config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
     os_util::get_focused_window,
@@ -71,8 +71,10 @@ impl AppEngine {
         } * 1000;
         log::log!(log_level, "{msg}");
         let id = self.drawer.notify(msg);
-        let sender = self.timeout_sender.clone();
-        tokio::spawn(async move { delay(sender, id, timeout_secs).await });
+        let sender = self.signal_sender.clone();
+        tokio::spawn(
+            async move { delay(sender, AppSignal::ClearNotification(id), timeout_secs).await },
+        );
     }
 
     pub(super) fn get_app_window_info(&mut self) {
