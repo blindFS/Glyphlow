@@ -1,6 +1,6 @@
 use super::AppEngine;
 use crate::{
-    Mode,
+    AppSignal, Mode,
     ax_element::{ElementOfInterest, ElementSignal, Target, ThreadSafeElement, traverse},
     config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
     os_util::get_focused_window,
@@ -55,6 +55,7 @@ impl AppEngine {
         self.search_prefix.clear();
         self.is_searching = false;
         self.multi_selection.reset();
+        self.search_debounce_counter = self.search_debounce_counter.wrapping_add(1);
     }
 
     pub(super) fn notify_then_deactivate(&mut self, msg: &str, log_level: Level) {
@@ -67,11 +68,13 @@ impl AppEngine {
             Level::Trace | Level::Info => SHORT_TIMEOUT,
             Level::Debug => DEBUG_TIMEOUT,
             _ => LONG_TIMEOUT,
-        };
+        } * 1000;
         log::log!(log_level, "{msg}");
         let id = self.drawer.notify(msg);
-        let sender = self.timeout_sender.clone();
-        tokio::spawn(async move { delay(sender, id, timeout_secs).await });
+        let sender = self.signal_sender.clone();
+        tokio::spawn(
+            async move { delay(sender, AppSignal::ClearNotification(id), timeout_secs).await },
+        );
     }
 
     pub(super) fn get_app_window_info(&mut self) {
@@ -238,7 +241,9 @@ impl AppEngine {
                 self.notify("Press Enter to act.", Level::Trace);
             }
             // For internal activations like workflow action / element explorer
-            self.set_mode(Mode::Filtering);
+            if matches!(target, Target::ChildElement | Target::Custom(_)) {
+                self.set_mode(Mode::Filtering);
+            }
         } else if self.target == Target::Scrollable
             && let Some(eoi) = self.selected.as_ref()
         {
@@ -282,7 +287,7 @@ impl AppEngine {
     }
 }
 
-async fn delay(sender: Sender<usize>, id: usize, timeout_secs: u64) {
-    tokio::time::sleep(Duration::from_secs(timeout_secs)).await;
+pub async fn delay<T>(sender: Sender<T>, id: T, timeout_millis: u64) {
+    tokio::time::sleep(Duration::from_millis(timeout_millis)).await;
     let _ = sender.send(id).await;
 }

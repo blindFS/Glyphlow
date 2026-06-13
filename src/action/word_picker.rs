@@ -63,7 +63,7 @@ impl WordPicker {
         };
 
         autoreleasepool(|_| {
-            if let Some((attr_string, _)) = word_picker.get_attributed_string(None, false, "", "") {
+            if let Some((attr_string, _)) = word_picker.get_attributed_string(None, "", "") {
                 drawer.draw_attributed_string(attr_string, true);
             }
         });
@@ -75,17 +75,13 @@ impl WordPicker {
         &mut self,
         drawer: &UIDrawer,
         multi_selection_idx: Option<usize>,
-        is_searching: bool,
         label_prefix: &str,
         text_prefix: &str,
     ) {
         autoreleasepool(|_| {
-            if let Some((attr_string, matched)) = self.get_attributed_string(
-                multi_selection_idx,
-                is_searching,
-                label_prefix,
-                text_prefix,
-            ) {
+            if let Some((attr_string, matched)) =
+                self.get_attributed_string(multi_selection_idx, label_prefix, text_prefix)
+            {
                 self.matched = matched;
                 drawer.draw_attributed_string(attr_string, true);
             };
@@ -97,7 +93,6 @@ impl WordPicker {
         &self,
         width_height_ratio: f64,
         multi_selection_idx: Option<usize>,
-        is_searching: bool,
         label_prefix: &str,
         text_prefix: &str,
     ) -> (String, Vec<usize>) {
@@ -168,12 +163,10 @@ impl WordPicker {
 
         let buffer = format!(
             "<span class=\"h\">{}</span>\n{buffer}",
-            if is_searching {
-                format!("/{}", text_prefix)
-            } else if !label_prefix.is_empty() && matched.is_empty() {
-                "Press 󰁮 to go back".into()
+            if !(label_prefix.is_empty() && text_prefix.is_empty()) && matched.is_empty() {
+                "Press 󰁮 to return"
             } else {
-                "Press / to search".into()
+                "Press / to search"
             }
         );
 
@@ -202,14 +195,12 @@ impl WordPicker {
     fn get_attributed_string(
         &self,
         multi_selection_idx: Option<usize>,
-        is_searching: bool,
         label_prefix: &str,
         text_prefix: &str,
     ) -> Option<(Retained<NSMutableAttributedString>, Vec<usize>)> {
         let (html_str, matched) = self.to_string(
             self.screen_ratio,
             multi_selection_idx,
-            is_searching,
             label_prefix,
             text_prefix,
         );

@@ -292,7 +292,6 @@ impl AppEngine {
         word_picker.update_text_layer(
             &self.drawer,
             self.multi_selection.one_side_idx,
-            self.is_searching,
             &self.hint_prefix,
             &self.search_prefix,
         );

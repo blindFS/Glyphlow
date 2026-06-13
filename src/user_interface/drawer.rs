@@ -155,10 +155,14 @@ impl Menu {
             size,
         ));
 
+        self.refresh_text();
+        self.container.setHidden(false);
+    }
+
+    fn refresh_text(&self) {
         unsafe {
             self.text_layer.setString(Some(&self.menu_string));
         }
-        self.container.setHidden(false);
     }
 
     fn draw(&self, text: &str, screen_frame: &Frame, overlay_frame: &Frame, theme: &GlyphlowTheme) {
@@ -188,6 +192,10 @@ impl Menu {
     fn hide(&self) {
         self.container.setHidden(true);
     }
+
+    fn show(&self) {
+        self.container.setHidden(false);
+    }
 }
 
 pub struct UIDrawer {
@@ -202,6 +210,7 @@ pub struct UIDrawer {
     next_notification_id: usize,
     selected_frame: Retained<CALayer>,
     menu: Menu,
+    search_bar: Menu,
 }
 
 impl UIDrawer {
@@ -215,6 +224,7 @@ impl UIDrawer {
         let root = CALayer::from_window(&ns_window).expect("Failed to get root layer of window.");
 
         let menu = Menu::new(theme);
+        let search_bar = Menu::new(theme);
         let selected_frame = CALayer::new();
         selected_frame.setBorderWidth(BORDER_WIDTH);
         selected_frame.setBorderColor(Some(&theme.hint_bg_color));
@@ -230,8 +240,14 @@ impl UIDrawer {
         menu.container.setFrame(middle_rect);
         selected_frame.setFrame(middle_rect);
 
+        // Search bar initialized as fixed width
+        let dummy_text = format!("/{}", "_".repeat(SEARCH_BAR_WIDTH));
+        search_bar.draw(&dummy_text, &current_screen_frame, &overlay_frame, theme);
+        search_bar.hide();
+
         root.addSublayer(&selected_frame);
         root.addSublayer(&menu.container);
+        root.addSublayer(&search_bar.container);
 
         Self {
             theme: theme.clone(),
@@ -243,6 +259,7 @@ impl UIDrawer {
             next_notification_id: 0,
             selected_frame,
             menu,
+            search_bar,
         }
     }
 
@@ -260,6 +277,7 @@ impl UIDrawer {
         self.selected_frame
             .setBorderColor(Some(&new_theme.hint_bg_color));
         self.menu.load_theme(new_theme);
+        self.search_bar.load_theme(new_theme);
         self.theme = new_theme.clone();
     }
 
@@ -272,17 +290,49 @@ impl UIDrawer {
         );
     }
 
+    pub fn hide_search_bar(&self) {
+        self.search_bar.hide();
+    }
+
     pub fn draw_search_bar(&self, prefix: &str, init: bool) {
         let msg = format!("/{}", format_fixed_width(prefix, SEARCH_BAR_WIDTH));
-        if init {
-            // HACK:: trailing spaces lead to wrong size estimation
-            self.draw_menu(&msg.replace(' ', "_"));
-        }
         autoreleasepool(|_| {
+            if init {
+                self.reposition_search_bar();
+                self.search_bar.show();
+            }
+
+            // Disable animation to improve responsiveness
+            CATransaction::begin();
+            CATransaction::setDisableActions(true);
             let ns_string = NSString::from_str(&msg);
-            self.menu.menu_string.mutableString().setString(&ns_string);
-            unsafe { self.menu.text_layer.setString(Some(&self.menu.menu_string)) };
-        })
+            self.search_bar
+                .menu_string
+                .mutableString()
+                .setString(&ns_string);
+            self.search_bar.refresh_text();
+            CATransaction::commit();
+        });
+    }
+
+    fn reposition_search_bar(&self) {
+        if self.menu.container.isHidden() {
+            let (x, y) = self.current_screen_frame.center();
+            self.search_bar.container.setPosition(NSPoint::new(x, y));
+            return;
+        }
+        let menu_frame = self.menu.container.frame();
+        let search_frame = self.search_bar.container.frame();
+        let search_height = search_frame.size.height;
+        let y = if menu_frame.size.height + search_height > self.current_screen_frame.size().1 {
+            menu_frame.origin.y + menu_frame.size.height - search_height
+        } else {
+            menu_frame.origin.y + menu_frame.size.height
+        };
+        let origin = NSPoint::new(menu_frame.origin.x, y);
+        self.search_bar
+            .container
+            .setFrame(NSRect::new(origin, search_frame.size));
     }
 
     /// Shrink font size on large estimated frame size if `auto_resize` is true
@@ -349,6 +399,7 @@ impl UIDrawer {
 
     pub fn clear_menus(&mut self) {
         self.menu.hide();
+        self.search_bar.hide();
         self.clear_notifications();
         CATransaction::flush();
     }
@@ -357,6 +408,7 @@ impl UIDrawer {
         CATransaction::begin();
         CATransaction::setDisableActions(true);
         self.menu.hide();
+        self.search_bar.hide();
         self.clear_notifications();
         CATransaction::commit();
         CATransaction::flush();
@@ -366,6 +418,7 @@ impl UIDrawer {
         CATransaction::begin();
         CATransaction::setDisableActions(true);
         self.menu.hide();
+        self.search_bar.hide();
         self.selected_frame.setHidden(true);
         self.clear_notifications();
         CATransaction::commit();

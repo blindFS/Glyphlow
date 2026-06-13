@@ -2,14 +2,17 @@ use std::collections::HashSet;
 
 use super::AppEngine;
 use crate::{
-    FilterMode, Mode,
+    AppSignal, FilterMode, Mode,
     action::perform_ocr,
+    app_engine::lifecycle::delay,
     ax_element::{ElementOfInterest, Target},
     config::RoleOfInterest,
     user_interface::{HintBox, hint_boxes_from_frames},
     util::{Frame, lower_ascii, select_range_helper},
 };
 use log::Level;
+
+const DEBOUNCE_TIMEOUT: u64 = 150;
 
 impl AppEngine {
     fn ocr_res_filtering(&mut self) {
@@ -230,7 +233,11 @@ impl AppEngine {
                 self.activate(Target::ChildElement);
             }
             FilterMode::WordPicking => {
-                if !self.multi_selection.is_on || self.multi_selection.one_side_idx.is_none() {
+                if !self.search_prefix.is_empty() {
+                    self.search_prefix.clear();
+                    self.draw_word_picker();
+                } else if !self.multi_selection.is_on || self.multi_selection.one_side_idx.is_none()
+                {
                     // Go back to text action menu
                     self.word_picker = None;
                     self.draw_element_menu("", RoleOfInterest::PseudoText, true);
@@ -263,26 +270,8 @@ impl AppEngine {
         };
     }
 
-    pub(super) async fn perform_filtering(&mut self, key_char: char, mode: FilterMode) {
-        if self.is_searching {
-            if key_char == '󰁮' {
-                if self.search_prefix.is_empty() {
-                    self.is_searching = false;
-                    self.set_mode(mode.to_app_mode());
-                    if self.word_picker.is_some() {
-                        self.draw_word_picker();
-                    } else {
-                        self.drawer.clear_menus();
-                    }
-                    return;
-                } else {
-                    self.search_prefix.pop();
-                }
-            } else {
-                self.search_prefix.push(key_char.to_ascii_lowercase());
-            }
-            self.drawer.draw_search_bar(&self.search_prefix, false);
-        } else if key_char == '󰁮' {
+    pub(super) async fn filter_by_hint(&mut self, key_char: char, mode: FilterMode) {
+        if key_char == '󰁮' {
             if self.hint_prefix.is_empty() {
                 self.go_back_in_filtering(mode);
                 return;
@@ -293,8 +282,43 @@ impl AppEngine {
             self.hint_prefix.push(key_char);
         }
 
-        // TODO: debounce in searching mode?
         self.check_filtering(mode).await;
+    }
+
+    pub(super) async fn filter_by_search(&mut self, key_char: char, mode: FilterMode) {
+        if key_char == '󰁮' {
+            if self.search_prefix.is_empty() {
+                self.is_searching = false;
+                self.set_mode(mode.to_app_mode());
+                if self.word_picker.is_some() {
+                    self.drawer.hide_search_bar();
+                    self.draw_word_picker();
+                } else {
+                    self.drawer.clear_menus();
+                    self.update_hints();
+                }
+                return;
+            } else {
+                self.search_prefix.pop();
+            }
+        } else {
+            self.search_prefix.push(key_char.to_ascii_lowercase());
+        }
+
+        self.drawer.draw_search_bar(&self.search_prefix, false);
+
+        // Delay the heavy `check_filtering` call
+        self.search_debounce_counter = self.search_debounce_counter.wrapping_add(1);
+        let current_id = self.search_debounce_counter;
+        let sender = self.signal_sender.clone();
+        tokio::spawn(async move {
+            delay(
+                sender,
+                AppSignal::SearchDebounce(current_id, mode),
+                DEBOUNCE_TIMEOUT,
+            )
+            .await
+        });
     }
 
     fn ready_for_unique(&self) -> bool {
