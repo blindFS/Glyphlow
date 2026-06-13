@@ -163,8 +163,8 @@ impl WordPicker {
 
         let buffer = format!(
             "<span class=\"h\">{}</span>\n{buffer}",
-            if !label_prefix.is_empty() && matched.is_empty() {
-                "Press 󰁮 to go back"
+            if !(label_prefix.is_empty() && text_prefix.is_empty()) && matched.is_empty() {
+                "Press 󰁮 to return"
             } else {
                 "Press / to search"
             }

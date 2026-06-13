@@ -231,7 +231,11 @@ impl AppEngine {
                 self.activate(Target::ChildElement);
             }
             FilterMode::WordPicking => {
-                if !self.multi_selection.is_on || self.multi_selection.one_side_idx.is_none() {
+                if !self.search_prefix.is_empty() {
+                    self.search_prefix.clear();
+                    self.draw_word_picker();
+                } else if !self.multi_selection.is_on || self.multi_selection.one_side_idx.is_none()
+                {
                     // Go back to text action menu
                     self.word_picker = None;
                     self.draw_element_menu("", RoleOfInterest::PseudoText, true);
