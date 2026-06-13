@@ -95,7 +95,14 @@ async fn main() {
 
     // Listen to notification timeout
     let (ttx, mut trx) = mpsc::channel::<usize>(100);
-    let mut app_engine = AppEngine::new(state.clone(), key_state.clone(), config, cache_file, ttx, tx.clone());
+    let mut app_engine = AppEngine::new(
+        state.clone(),
+        key_state.clone(),
+        config,
+        cache_file,
+        ttx,
+        tx.clone(),
+    );
 
     thread::spawn(move || {
         let key_state = key_state.clone();
