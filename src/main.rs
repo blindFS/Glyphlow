@@ -50,7 +50,7 @@ async fn main() {
         config.global_trigger_key.keys
     );
 
-    let key_listener = KeyListener::new(tx, &config);
+    let key_listener = KeyListener::new(tx.clone(), &config);
 
     let state = Arc::new(Mutex::new(Mode::Idle));
     // Key state for tracking pressed keys and simulating state
@@ -95,7 +95,7 @@ async fn main() {
 
     // Listen to notification timeout
     let (ttx, mut trx) = mpsc::channel::<usize>(100);
-    let mut app_engine = AppEngine::new(state.clone(), key_state.clone(), config, cache_file, ttx);
+    let mut app_engine = AppEngine::new(state.clone(), key_state.clone(), config, cache_file, ttx, tx.clone());
 
     thread::spawn(move || {
         let key_state = key_state.clone();

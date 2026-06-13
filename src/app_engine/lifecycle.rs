@@ -55,6 +55,7 @@ impl AppEngine {
         self.search_prefix.clear();
         self.is_searching = false;
         self.multi_selection.reset();
+        self.search_debounce_counter = self.search_debounce_counter.wrapping_add(1);
     }
 
     pub(super) fn notify_then_deactivate(&mut self, msg: &str, log_level: Level) {
@@ -67,7 +68,7 @@ impl AppEngine {
             Level::Trace | Level::Info => SHORT_TIMEOUT,
             Level::Debug => DEBUG_TIMEOUT,
             _ => LONG_TIMEOUT,
-        };
+        } * 1000;
         log::log!(log_level, "{msg}");
         let id = self.drawer.notify(msg);
         let sender = self.timeout_sender.clone();
@@ -282,7 +283,7 @@ impl AppEngine {
     }
 }
 
-async fn delay(sender: Sender<usize>, id: usize, timeout_secs: u64) {
-    tokio::time::sleep(Duration::from_secs(timeout_secs)).await;
+pub async fn delay<T>(sender: Sender<T>, id: T, timeout_millis: u64) {
+    tokio::time::sleep(Duration::from_millis(timeout_millis)).await;
     let _ = sender.send(id).await;
 }

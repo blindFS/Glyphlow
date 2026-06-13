@@ -73,6 +73,7 @@ pub enum AppSignal {
     FrameOCR,
     StartSearch,
     FinishSearch(FilterMode),
+    SearchDebounce(usize, FilterMode),
 }
 
 #[derive(Debug, PartialEq)]

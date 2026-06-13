@@ -2,8 +2,9 @@ use std::collections::HashSet;
 
 use super::AppEngine;
 use crate::{
-    FilterMode, Mode,
+    AppSignal, FilterMode, Mode,
     action::perform_ocr,
+    app_engine::lifecycle::delay,
     ax_element::{ElementOfInterest, Target},
     config::RoleOfInterest,
     user_interface::{HintBox, hint_boxes_from_frames},
@@ -284,9 +285,11 @@ impl AppEngine {
                 self.is_searching = false;
                 self.set_mode(mode.to_app_mode());
                 if self.word_picker.is_some() {
+                    self.drawer.hide_search_bar();
                     self.draw_word_picker();
                 } else {
                     self.drawer.clear_menus();
+                    self.update_hints();
                 }
                 return;
             } else {
@@ -296,12 +299,15 @@ impl AppEngine {
             self.search_prefix.push(key_char.to_ascii_lowercase());
         }
 
-        if mode != FilterMode::WordPicking {
-            self.drawer.draw_search_bar(&self.search_prefix, false);
-        }
+        self.drawer.draw_search_bar(&self.search_prefix, false);
 
-        // TODO: debounce in searching mode?
-        self.check_filtering(mode).await;
+        // Delay the heavy `check_filtering` call
+        self.search_debounce_counter = self.search_debounce_counter.wrapping_add(1);
+        let current_id = self.search_debounce_counter;
+        let sender = self.signal_sender.clone();
+        tokio::spawn(async move {
+            delay(sender, AppSignal::SearchDebounce(current_id, mode), 150).await
+        });
     }
 
     fn ready_for_unique(&self) -> bool {

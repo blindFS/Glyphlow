@@ -83,6 +83,8 @@ pub struct AppEngine {
     /// For editing element text values
     pub(super) temp_file: PathBuf,
     pub(super) timeout_sender: Sender<usize>,
+    pub(super) signal_sender: Sender<AppSignal>,
+    pub(super) search_debounce_counter: usize,
     /// Special treatment for Electron based apps.
     /// Like simulate mouse clicking instead of `element.press()`
     pub(super) last_app_window_info: AppWindowInfo,
@@ -99,6 +101,7 @@ impl AppEngine {
         config: GlyphlowConfig,
         temp_file: PathBuf,
         timeout_sender: Sender<usize>,
+        signal_sender: Sender<AppSignal>,
     ) -> Self {
         let mtm = MainThreadMarker::new().expect("Not on main thread");
         let screen_frames = get_screen_frames(mtm);
@@ -126,6 +129,8 @@ impl AppEngine {
             drawer,
             config,
             timeout_sender,
+            signal_sender,
+            search_debounce_counter: 0,
             selected: None,
             editing: None,
             temp_file,
@@ -149,13 +154,17 @@ impl AppEngine {
             AppSignal::DeActivate => {
                 self.deactivate();
             }
+            AppSignal::MenuRefresh(key_prefix) => {
+                self.menu_refresh(&key_prefix, false);
+            }
             AppSignal::RunWorkFlow(idx) => {
                 self.drawer.clear_menus();
                 self.execute_workflow(idx);
             }
-            AppSignal::MenuRefresh(key_prefix) => {
-                self.menu_refresh(&key_prefix, false);
+            AppSignal::ScrollAction(sa) => {
+                self.perform_scroll_action(sa);
             }
+            AppSignal::TextAction(ta) => self.perform_text_action(ta),
             AppSignal::ToggleMultiSelection => match self.target {
                 Target::Text | Target::ImageOCR => {
                     self.toggle_multiselection();
@@ -173,26 +182,30 @@ impl AppEngine {
             AppSignal::SearchFilter(key_char, mode) => {
                 self.filter_by_search(key_char, mode).await;
             }
-            AppSignal::ScrollAction(sa) => {
-                self.perform_scroll_action(sa);
+            AppSignal::SearchDebounce(id, mode) => {
+                if self.is_searching && id == self.search_debounce_counter {
+                    self.check_filtering(mode).await;
+                }
             }
-            AppSignal::TextAction(ta) => self.perform_text_action(ta),
             AppSignal::StartSearch => {
                 if self.is_searching {
                     return;
                 }
                 self.is_searching = true;
+                self.drawer.draw_search_bar(&self.search_prefix, true);
                 if self.word_picker.is_some() {
                     self.draw_word_picker();
                 } else {
-                    self.drawer.draw_search_bar(&self.search_prefix, true);
                     self.build_search_targets();
                 }
             }
             AppSignal::FinishSearch(mode) => {
                 self.is_searching = false;
+                self.search_debounce_counter = self.search_debounce_counter.wrapping_add(1);
                 self.set_mode(mode.to_app_mode());
-                if self.word_picker.is_none() {
+                if self.word_picker.is_some() {
+                    self.drawer.hide_search_bar();
+                } else {
                     self.drawer.clear_menus();
                 }
                 self.check_filtering(mode).await;
