@@ -67,9 +67,11 @@ pub struct AppEngine {
     /// Used for drawing hint boxes on screen
     pub(super) hint_boxes: Vec<HintBox>,
     pub(super) hint_prefix: String,
+    /// Search related
     pub(super) is_searching: bool,
     pub(super) search_prefix: String,
     pub(super) search_targets: Vec<String>,
+    pub(super) search_debounce_counter: usize,
     pub(super) overlay_frame: Frame,
     pub(super) drawer: UIDrawer,
     /// Which elements of interest to look for
@@ -83,7 +85,6 @@ pub struct AppEngine {
     /// For editing element text values
     pub(super) temp_file: PathBuf,
     pub(super) signal_sender: Sender<AppSignal>,
-    pub(super) search_debounce_counter: usize,
     /// Special treatment for Electron based apps.
     /// Like simulate mouse clicking instead of `element.press()`
     pub(super) last_app_window_info: AppWindowInfo,
@@ -198,7 +199,7 @@ impl AppEngine {
             }
             AppSignal::FinishSearch(mode) => {
                 self.is_searching = false;
-                self.search_debounce_counter = self.search_debounce_counter.wrapping_add(1);
+                self.search_debounce_counter = 0;
                 self.set_mode(mode.to_app_mode());
                 if self.word_picker.is_some() {
                     self.drawer.hide_search_bar();
