@@ -316,8 +316,6 @@ impl UIDrawer {
     }
 
     fn reposition_search_bar(&self) {
-        CATransaction::begin();
-        CATransaction::setDisableActions(true);
         if self.menu.container.isHidden() {
             let (x, y) = self.current_screen_frame.center();
             self.search_bar.container.setPosition(NSPoint::new(x, y));
@@ -335,7 +333,6 @@ impl UIDrawer {
         self.search_bar
             .container
             .setFrame(NSRect::new(origin, search_frame.size));
-        CATransaction::commit();
     }
 
     /// Shrink font size on large estimated frame size if `auto_resize` is true
