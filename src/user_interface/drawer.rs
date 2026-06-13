@@ -296,10 +296,12 @@ impl UIDrawer {
 
     pub fn draw_search_bar(&self, prefix: &str, init: bool) {
         let msg = format!("/{}", format_fixed_width(prefix, SEARCH_BAR_WIDTH));
-        if init {
-            self.search_bar.show();
-        }
         autoreleasepool(|_| {
+            if init {
+                self.reposition_search_bar();
+                self.search_bar.show();
+            }
+
             // Disable animation to improve responsiveness
             CATransaction::begin();
             CATransaction::setDisableActions(true);
@@ -310,7 +312,30 @@ impl UIDrawer {
                 .setString(&ns_string);
             self.search_bar.refresh_text();
             CATransaction::commit();
-        })
+        });
+    }
+
+    fn reposition_search_bar(&self) {
+        CATransaction::begin();
+        CATransaction::setDisableActions(true);
+        if self.menu.container.isHidden() {
+            let (x, y) = self.current_screen_frame.center();
+            self.search_bar.container.setPosition(NSPoint::new(x, y));
+            return;
+        }
+        let menu_frame = self.menu.container.frame();
+        let search_frame = self.search_bar.container.frame();
+        let search_height = search_frame.size.height;
+        let y = if menu_frame.size.height + search_height > self.current_screen_frame.size().1 {
+            menu_frame.origin.y + menu_frame.size.height - search_height
+        } else {
+            menu_frame.origin.y + menu_frame.size.height
+        };
+        let origin = NSPoint::new(menu_frame.origin.x, y);
+        self.search_bar
+            .container
+            .setFrame(NSRect::new(origin, search_frame.size));
+        CATransaction::commit();
     }
 
     /// Shrink font size on large estimated frame size if `auto_resize` is true
@@ -396,6 +421,7 @@ impl UIDrawer {
         CATransaction::begin();
         CATransaction::setDisableActions(true);
         self.menu.hide();
+        self.search_bar.hide();
         self.selected_frame.setHidden(true);
         self.clear_notifications();
         CATransaction::commit();
