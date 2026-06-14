@@ -673,7 +673,7 @@ fn traverse_elements(
         return;
     };
 
-    // WARN: Performance critical! Exclude electron elements scrolled off y axis,
+    // PERF: Performance critical! Exclude electron elements scrolled off y axis,
     if ele_fp.frame.is_some_and(|f| {
         let (w, h) = f.size();
         (h == 0.0 && f.bottom_right.y == window_frame.bottom_right.y)

@@ -1,14 +1,12 @@
-use std::collections::{HashMap, VecDeque};
-
+use crate::config::GlyphlowTheme;
+use crate::user_interface::calibrated_origin;
+use crate::util::{Frame, digits_by_length, estimate_frame_for_text};
 use objc2::{AnyThread, rc::Retained};
 use objc2_core_foundation::{CFRetained, CGSize};
 use objc2_core_graphics::{CGColor, CGMutablePath};
 use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer, kCAAlignmentCenter};
-
-use crate::config::GlyphlowTheme;
-use crate::user_interface::calibrated_origin;
-use crate::util::{Frame, digits_by_length, estimate_frame_for_text};
+use std::collections::{HashMap, VecDeque};
 
 pub fn hint_label_from_index(i: usize, digits: Option<u32>) -> String {
     if i == 0 && digits.is_none() {

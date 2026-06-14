@@ -1,11 +1,11 @@
-use std::cmp::Ordering;
-
-use core_foundation::attributed_string::CFAttributedStringRef;
+use core_foundation::{attributed_string::CFAttributedStringRef, base::CFRange};
+use core_graphics_types::geometry::CGSize;
 use core_text::framesetter::CTFramesetter;
 use objc2::rc::Retained;
 use objc2_core_foundation::{CGPoint, CGRect, CGSize as OCGSize};
 use objc2_foundation::{NSMutableAttributedString, NSSize};
 use regex::Regex;
+use std::cmp::Ordering;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 #[derive(Debug, Clone, PartialEq, Copy, Default)]
@@ -20,15 +20,11 @@ pub fn estimate_frame_for_text(
 ) -> (OCGSize, isize) {
     let cf_attr_string = Retained::as_ptr(attr_string) as CFAttributedStringRef;
     let framesetter = CTFramesetter::new_with_attributed_string(cf_attr_string);
-    let (core_graphics_types::geometry::CGSize { width, height }, range) = framesetter
-        .suggest_frame_size_with_constraints(
-            core_foundation::base::CFRange {
-                location: 0,
-                length: 0,
-            },
-            std::ptr::null(),
-            core_graphics_types::geometry::CGSize::new(size.0, size.1),
-        );
+    let (CGSize { width, height }, range) = framesetter.suggest_frame_size_with_constraints(
+        CFRange::init(0, 0),
+        std::ptr::null(),
+        CGSize::new(size.0, size.1),
+    );
     (OCGSize::new(width, height), range.length)
 }
 
