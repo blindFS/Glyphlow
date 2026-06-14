@@ -298,7 +298,11 @@ impl UIDrawer {
         let msg = format!("/{}", format_fixed_width(prefix, SEARCH_BAR_WIDTH));
         autoreleasepool(|_| {
             if init {
+                // Disable movement animations
+                CATransaction::begin();
+                CATransaction::setDisableActions(true);
                 self.reposition_search_bar();
+                CATransaction::commit();
                 self.search_bar.show();
             }
 
