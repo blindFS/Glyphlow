@@ -1,7 +1,7 @@
 use super::AppEngine;
 use crate::{
     Mode, ScrollAction, TextAction,
-    action::{WordPicker, get_dictionary_attributed_string},
+    action::{WordPicker, get_dictionary_attributed_string, text_to_clipboard},
     ax_element::{ElementOfInterest, GetAttribute, SetAttribute},
     config::RoleOfInterest,
 };
@@ -143,7 +143,7 @@ impl AppEngine {
         // 1. URL handling
         let keep_drawing = match ta {
             TextAction::Copy => {
-                crate::action::text_to_clipboard(&text);
+                text_to_clipboard(&text);
                 self.notify_then_deactivate("Copied to clipboard.", Level::Info);
                 true
             }

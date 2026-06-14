@@ -1,11 +1,11 @@
-use std::cmp::Ordering;
-
-use core_foundation::attributed_string::CFAttributedStringRef;
+use core_foundation::{attributed_string::CFAttributedStringRef, base::CFRange};
+use core_graphics_types::geometry::CGSize;
 use core_text::framesetter::CTFramesetter;
 use objc2::rc::Retained;
 use objc2_core_foundation::{CGPoint, CGRect, CGSize as OCGSize};
 use objc2_foundation::{NSMutableAttributedString, NSSize};
 use regex::Regex;
+use std::{borrow::Cow, cmp::Ordering};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 #[derive(Debug, Clone, PartialEq, Copy, Default)]
@@ -20,15 +20,11 @@ pub fn estimate_frame_for_text(
 ) -> (OCGSize, isize) {
     let cf_attr_string = Retained::as_ptr(attr_string) as CFAttributedStringRef;
     let framesetter = CTFramesetter::new_with_attributed_string(cf_attr_string);
-    let (core_graphics_types::geometry::CGSize { width, height }, range) = framesetter
-        .suggest_frame_size_with_constraints(
-            core_foundation::base::CFRange {
-                location: 0,
-                length: 0,
-            },
-            std::ptr::null(),
-            core_graphics_types::geometry::CGSize::new(size.0, size.1),
-        );
+    let (CGSize { width, height }, range) = framesetter.suggest_frame_size_with_constraints(
+        CFRange::init(0, 0),
+        std::ptr::null(),
+        CGSize::new(size.0, size.1),
+    );
     (OCGSize::new(width, height), range.length)
 }
 
@@ -290,49 +286,30 @@ pub fn lower_ascii(text: &str) -> String {
     any_ascii::any_ascii(text).to_ascii_lowercase()
 }
 
-pub fn format_fixed_width(input: &str, fixed_length: usize) -> String {
+pub fn format_fixed_width(input: &str, fixed_length: usize) -> Cow<'_, str> {
+    if input.width() <= fixed_length {
+        return Cow::Borrowed(input);
+    }
+
     if fixed_length == 0 {
         return "".into();
     }
-    let target_suffix_w = fixed_length - 1;
+
     let mut current_width = 0;
     let mut trunc_byte_idx = input.len();
-    let mut trunc_width = 0;
 
-    // Scan backwards: Only inspects up to `fixed_length + 1` worth of characters
-    for (idx, ch) in input.char_indices().rev() {
-        let ch_width = ch.width().unwrap_or(1);
+    for ch in input.chars().rev() {
+        let ch_width = ch.width().unwrap_or_default();
         current_width += ch_width;
-
-        // Track the best byte cut-off point for the suffix
-        if current_width <= target_suffix_w {
-            trunc_byte_idx = idx;
-            trunc_width = current_width;
+        if current_width > fixed_length - 1 {
+            break;
         }
-
-        // Early exit: The moment we know the string is too long, we build the truncation
-        if current_width > fixed_length {
-            let suffix = &input[trunc_byte_idx..];
-            let padding_spaces = target_suffix_w - trunc_width;
-
-            let mut s = String::with_capacity(1 + padding_spaces + suffix.len());
-            s.push('.');
-            for _ in 0..padding_spaces {
-                s.push(' ');
-            }
-            s.push_str(suffix);
-            return s;
-        }
+        trunc_byte_idx -= ch.len_utf8();
     }
 
-    // Case: The entire string fits within the layout -> Pad it out
-    let padding_spaces = fixed_length - current_width;
-    let mut s = String::with_capacity(input.len() + padding_spaces);
-    s.push_str(input);
-    for _ in 0..padding_spaces {
-        s.push(' ');
-    }
-    s
+    let mut s = ".".to_string();
+    s.push_str(&input[trunc_byte_idx..]);
+    Cow::Owned(s)
 }
 
 #[cfg(test)]
@@ -683,78 +660,74 @@ mod select_range_tests {
 }
 
 #[cfg(test)]
-mod misc_tests {
+mod format_str_tests {
     use super::format_fixed_width;
 
     #[test]
-    fn test_exact_and_padding_ascii() {
-        // Exact match: No padding, no truncation
-        assert_eq!(format_fixed_width("hello", 5), "hello");
+    fn test_empty_and_zero_edges() {
+        // Empty input should always result in an empty string
+        assert_eq!(format_fixed_width("", 5).to_string(), "");
+        assert_eq!(format_fixed_width("", 0).to_string(), "");
 
-        // Needs padding: Short string, padded to the right with spaces
-        assert_eq!(format_fixed_width("abc", 6), "abc   ");
+        // Fixed length of 0 on non-empty input should return an empty string
+        assert_eq!(format_fixed_width("hello", 0).to_string(), "");
     }
 
     #[test]
-    fn test_truncation_ascii() {
-        // Standard truncation from the left with a single dot
-        // "abcdefghijk" length is 11. Target is 10.
-        // 10 - 1 (for ".") = 9 slots for the suffix ("cdefghijk")
-        assert_eq!(format_fixed_width("abcdefghijk", 10), ".cdefghijk");
-
-        // Tight truncation
-        assert_eq!(format_fixed_width("abcdef", 4), ".def");
+    fn test_ascii_no_truncation() {
+        assert_eq!(format_fixed_width("hello", 5).to_string(), "hello");
+        assert_eq!(format_fixed_width("abc", 5).to_string(), "abc");
     }
 
     #[test]
-    fn test_empty_and_minimal_lengths() {
-        // Empty string should just turn into pure padding
-        assert_eq!(format_fixed_width("", 5), "     ");
-        assert_eq!(format_fixed_width("", 0), "");
+    fn test_ascii_truncation() {
+        // Budget = 3. Suffix width = 3 - 1 = 2 ("lo")
+        assert_eq!(format_fixed_width("hello", 3).to_string(), ".lo");
 
-        // Extreme edge case: Requested length is exactly 1 or 2
-        assert_eq!(format_fixed_width("longstring", 2), ".g");
-        assert_eq!(format_fixed_width("longstring", 1), ".");
+        // Budget = 1. Suffix width = 1 - 1 = 0 ("")
+        assert_eq!(format_fixed_width("hello", 1).to_string(), ".");
     }
 
     #[test]
-    fn test_unicode_padding() {
-        // "こんにちは" (Konnichiwa) has 5 characters, but a visual width of 10.
-        // Target 12 means it needs exactly 2 trailing spaces.
-        assert_eq!(format_fixed_width("こんにちは", 12), "こんにちは  ");
+    fn test_cjk_characters() {
+        // "こんにちは" (Konnichiwa) has a total visual width of 10
+        let input = "こんにちは";
+
+        assert_eq!(format_fixed_width(input, 10).to_string(), "こんにちは");
+
+        // Exact fit truncation: Dot (1) + "に" (2) + "は" (2) = 5
+        assert_eq!(format_fixed_width(input, 5).to_string(), ".ちは");
+
+        // Truncation with 1 unit of slack space (next character doesn't fit)
+        assert_eq!(format_fixed_width(input, 6).to_string(), ".ちは");
     }
 
     #[test]
-    fn test_unicode_clean_truncation() {
-        // Target 7 -> Suffix target is 6 (7 - 1).
-        // "にちは" is 3 characters of width 2 each = 6 total width. Fits perfectly.
-        assert_eq!(format_fixed_width("こんにちは", 7), ".にちは");
+    fn test_emojis() {
+        // "🦀" has a visual width of 2. "🦀🦀🦀" total width = 6.
+        let input = "🦀🦀🦀";
+
+        assert_eq!(format_fixed_width(input, 6).to_string(), "🦀🦀🦀");
+
+        // Truncation: Dot (1) + "🦀" (2) + "🦀" (2) = 5
+        assert_eq!(format_fixed_width(input, 5).to_string(), ".🦀🦀");
     }
 
     #[test]
-    fn test_unicode_mid_character_truncation_alignment() {
-        // CRITICAL EDGE CASE: Truncation hits right in the middle of a wide character.
-        // Target 8 -> Suffix target is 7 (8 - 1).
-        // "にちは" has a width of 6. The next char "ん" has a width of 2 (Total 8).
-        // 8 exceeds our suffix target of 7, so "ん" must be dropped.
-        // This leaves 1 empty visual slot (7 - 6 = 1), which must be filled with a space.
-        assert_eq!(format_fixed_width("こんにちは", 8), ". にちは");
+    fn test_mixed_width_strings() {
+        // "Rust🦀" -> "Rust" (4) + "🦀" (2) = Total width 6
+        let input = "Rust🦀";
 
-        // Verify total visual width of the output is exactly 8
-        // "." (1) + " " (1) + "に" (2) + "ち" (2) + "は" (2) = 8
-        let result = format_fixed_width("こんにちは", 8);
-        let actual_width: usize = result
-            .chars()
-            .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1))
-            .sum();
-        assert_eq!(actual_width, 8);
+        assert_eq!(format_fixed_width(input, 3).to_string(), ".🦀");
+        assert_eq!(format_fixed_width(input, 5).to_string(), ".st🦀");
     }
 
     #[test]
-    fn test_fallback_width_handling() {
-        // Control characters like '\n' return None from .width()
-        // Your updated logic defaults them to 1 via .unwrap_or(1)
-        // "\n\n" is treated as width 2. Target 5 -> pads with 3 spaces.
-        assert_eq!(format_fixed_width("\n\n", 5), "\n\n   ");
+    fn test_combining_diacritic_quirk() {
+        // "xyz" + combining acute accent (\u{301})
+        let input = "xyz\u{301}";
+
+        // Accent detaches and glues itself to the ellipsis dot
+        assert_eq!(format_fixed_width(input, 1).to_string(), ".\u{301}");
     }
 }

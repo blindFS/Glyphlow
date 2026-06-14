@@ -53,9 +53,10 @@ impl AppEngine {
         self.element_cache.clear();
         self.hint_prefix.clear();
         self.search_prefix.clear();
+        self.search_targets.clear();
+        self.search_debounce_counter = 0;
         self.is_searching = false;
         self.multi_selection.reset();
-        self.search_debounce_counter = self.search_debounce_counter.wrapping_add(1);
     }
 
     pub(super) fn notify_then_deactivate(&mut self, msg: &str, log_level: Level) {
