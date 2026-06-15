@@ -141,9 +141,8 @@ impl AppEngine {
     pub async fn handle_signal(&mut self, signal: AppSignal) {
         match signal {
             AppSignal::Activate(target) => {
-                let quick_follow = target == Target::Scrollable
-                    || target == Target::Editable
-                    || target == Target::Edit;
+                let quick_follow =
+                    matches!(target, Target::Scrollable | Target::Editable | Target::Edit);
                 self.activate(target);
                 if quick_follow {
                     self.quick_follow().await;
@@ -164,7 +163,7 @@ impl AppEngine {
             }
             AppSignal::TextAction(ta) => self.perform_text_action(ta),
             AppSignal::ToggleMultiSelection => match self.target {
-                Target::Text | Target::ImageOCR => {
+                Target::Text => {
                     self.toggle_multiselection();
                 }
                 _ if self.word_picker.is_some() => {
