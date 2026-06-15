@@ -148,6 +148,9 @@ impl AppEngine {
     const HINTBOX_FLUSH_BATCH_SIZE: usize = 5;
 
     pub(super) fn activate(&mut self, target: Target) {
+        // NOTE: make sure filtering mode is set for all kinds of activations
+        self.set_mode(Mode::Filtering);
+
         log::debug!("Start traversing, target: {target:?}");
         self.clear_cache();
         self.drawer.clear_menus();
@@ -240,10 +243,6 @@ impl AppEngine {
 
             if need_help_msg {
                 self.notify("Press Enter to act.", Level::Trace);
-            }
-            // For internal activations like workflow action / element explorer
-            if matches!(target, Target::ChildElement | Target::Custom(_)) {
-                self.set_mode(Mode::Filtering);
             }
         } else if target == Target::Scrollable
             && let Some(eoi) = self.selected.as_ref()
