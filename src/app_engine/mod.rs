@@ -235,6 +235,7 @@ impl AppEngine {
                     self.target = Target::ImageOCR;
                     self.perform_ocr_on_frame(*frame).await;
                 } else {
+                    self.set_mode(Mode::Filtering);
                     self.activate(Target::ImageOCR);
                 }
             }

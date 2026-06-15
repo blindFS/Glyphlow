@@ -245,7 +245,7 @@ impl AppEngine {
             if matches!(target, Target::ChildElement | Target::Custom(_)) {
                 self.set_mode(Mode::Filtering);
             }
-        } else if self.target == Target::Scrollable
+        } else if target == Target::Scrollable
             && let Some(eoi) = self.selected.as_ref()
         {
             // Fallback to mouse scroll if no scrollbar found
