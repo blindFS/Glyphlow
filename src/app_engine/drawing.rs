@@ -49,8 +49,11 @@ impl AppEngine {
     /// Show/Hide hint_boxes/colored_frames, update hint text and positions.
     /// Returns indices of visible hint boxes
     pub(super) fn update_hints(&mut self) -> Vec<usize> {
-        let prefix_len = self.hint_prefix.len();
         let mut visible_indices = vec![];
+        if self.hint_boxes.is_empty() {
+            return visible_indices;
+        }
+        let prefix_len = self.hint_prefix.len();
         let mut nothing_visible = true;
         let search_pattern = search_regex(&self.search_prefix);
 
