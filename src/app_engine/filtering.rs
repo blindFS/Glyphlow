@@ -82,6 +82,7 @@ impl AppEngine {
     pub(super) async fn perform_ocr_on_frame(&mut self, frame: Frame) {
         self.drawer.clear_menus_instant();
         self.clear_cache();
+        self.target = Target::Text;
         // NOTE: for images with parts out of sight
         let frame = frame.intersect(&self.overlay_frame).unwrap_or(frame);
         match perform_ocr(&frame, &self.config.ocr_languages).await {
