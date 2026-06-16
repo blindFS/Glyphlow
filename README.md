@@ -29,7 +29,7 @@ Like those in a video game or in a button.
 
 Text can be extracted from either UI elements or Apple VisionKit OCR results
 
-<https://github.com/user-attachments/assets/7955f04a-2d4d-4f58-ac66-26677904e0c7>
+![demo](assets/recordings/cuno.gif)
 
 ### Image Copying and Input Text Editing
 
@@ -37,7 +37,7 @@ For users who are not satisfied with the default text editing experiences of edi
 text fields, this app allows you to edit them in your favorite editor,
 and automatically sync the saved content back to the UI element.
 
-<https://github.com/user-attachments/assets/2ecb1a80-435c-467d-abfa-e58bde521a00>
+![demo](assets/recordings/prompt.gif)
 
 ### Multi-selection
 
@@ -48,7 +48,7 @@ paragraph of intention
 
 Here's an example of how to select and translate the lyrics in Apple Music.
 
-<https://github.com/user-attachments/assets/e1a2d66d-627a-4bd4-8601-90b841fb477e>
+![demo](assets/recordings/multi-selection.gif)
 
 #### Precise selection
 
@@ -59,7 +59,7 @@ you can
 2. Toggle multi-selection mode on within the word picker
 3. Select both sides according to the hint keys
 
-<img width="440" height="387" alt="Image" src="https://github.com/user-attachments/assets/7320969c-344f-40bd-b74d-960768420b2e" />
+<img src="./assets/recordings/word-picker.png" width="300">
 
 ### Workflow
 
@@ -69,7 +69,7 @@ of primitive actions.
 For instance, with the following configuration snippet,
 we can swiftly execute the utilities of the apple intelligence writing tool.
 
-<https://github.com/user-attachments/assets/b9b4b031-5350-4ed4-b36a-ee5a549792d4>
+![demo](assets/recordings/workflow.gif)
 
 ```toml
 [[text_workflows]]
@@ -94,7 +94,7 @@ actions = [
   - Avoids the hassle of opening the dictionary app, like what PopClip will do
   - Dictionary CSS is respected to make the text more readable
 
-<img width="363" height="316" alt="Image" src="https://github.com/user-attachments/assets/5d89c973-c043-4ba9-a760-727e81fc5c96" />
+<img src="./assets/recordings/dict-view.png" width="300">
 
 - Easily extensible text actions, please refer to the [Configuration](#configuration) section
   - Avoids the hassle of plugin management, easier to share across devices
