@@ -10,7 +10,6 @@ use tokio::sync::mpsc;
 
 fn main() {
     let _mtm = MainThreadMarker::new().expect("This test must run on the main thread");
-    println!("MainThreadMarker acquired successfully.");
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -77,7 +76,7 @@ async fn test_app_lifecycle_keystrokes() {
         );
 
         // Wait for state to transition to DashBoard
-        wait_for_state(&sim_state, Mode::DashBoard, wait_timeout);
+        wait_for_states(&sim_state, &[Mode::DashBoard], wait_timeout);
         println!("[Sim] State successfully changed to DashBoard!");
 
         // --- Step 2: In DashBoard mode, press "T" (Key::KeyT) to activate Text target ---
@@ -120,7 +119,7 @@ async fn test_app_lifecycle_keystrokes() {
         assert!(swallowed, "Deactivation key should be swallowed");
 
         // Wait for state to return to Idle
-        wait_for_state(&sim_state, Mode::Idle, wait_timeout);
+        wait_for_states(&sim_state, &[Mode::Idle], wait_timeout);
         println!("[Sim] State successfully returned to Idle!");
 
         sim_done.store(true, Ordering::Relaxed);
@@ -144,17 +143,6 @@ async fn test_app_lifecycle_keystrokes() {
 
     sim_thread.join().unwrap();
     let _ = std::fs::remove_file(cache_file);
-}
-
-fn wait_for_state(state: &Arc<Mutex<Mode>>, target: Mode, timeout: Duration) {
-    let start = std::time::Instant::now();
-    while start.elapsed() < timeout {
-        if *state.lock().unwrap() == target {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    panic!("Timeout waiting for state {:?}", target);
 }
 
 fn wait_for_states(state: &Arc<Mutex<Mode>>, targets: &[Mode], timeout: Duration) -> Mode {
