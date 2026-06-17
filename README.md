@@ -29,7 +29,8 @@ Like those in a video game or in a button.
 
 Text can be extracted from either UI elements or Apple VisionKit OCR results
 
-![demo](assets/recordings/cuno.gif)
+
+[![demo](assets/recordings/cuno.gif)](https://github.com/user-attachments/assets/9ec1e79c-568f-4458-8b2f-9c95b6aaf541)
 
 ### Image Copying and Input Text Editing
 
@@ -37,7 +38,7 @@ For users who are not satisfied with the default text editing experiences of edi
 text fields, this app allows you to edit them in your favorite editor,
 and automatically sync the saved content back to the UI element.
 
-![demo](assets/recordings/prompt.gif)
+[![demo](assets/recordings/prompt.gif)](https://github.com/user-attachments/assets/b271c339-9733-4caa-b339-24959884af8f)
 
 ### Multi-selection
 
@@ -48,7 +49,7 @@ paragraph of intention
 
 Here's an example of how to select and translate the lyrics in Apple Music.
 
-![demo](assets/recordings/multi-selection.gif)
+[![demo](assets/recordings/multi-selection.gif)](https://github.com/user-attachments/assets/1acdabeb-bafb-4195-a3f9-ff75cb52d148)
 
 #### Precise selection
 
@@ -69,7 +70,7 @@ of primitive actions.
 For instance, with the following configuration snippet,
 we can swiftly execute the utilities of the apple intelligence writing tool.
 
-![demo](assets/recordings/workflow.gif)
+[![demo](assets/recordings/workflow.gif)](https://github.com/user-attachments/assets/3f16cc2b-4963-4cad-956d-4d0c9da5a548)
 
 ```toml
 [[text_workflows]]
