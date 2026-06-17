@@ -3,7 +3,7 @@ use crate::{
     AppSignal, Mode,
     ax_element::{ElementOfInterest, ElementSignal, Target, ThreadSafeElement, traverse},
     config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
-    os_util::get_focused_window,
+    os_util::{AppWindowInfo, get_focused_window},
     user_interface::{HintBox, hint_label_from_index, resolve_collisions},
     util::digits_by_length,
 };
@@ -244,6 +244,11 @@ impl AppEngine {
             if need_help_msg {
                 self.notify("Press Enter to act.", Level::Trace);
             }
+        } else if target == Target::ImageOCR {
+            // Fallback to full window OCR if no image or leaf group found
+            let AppWindowInfo { window, frame, .. } = &self.last_app_window_info;
+            let eoi = ElementOfInterest::new(window.clone(), None, RoleOfInterest::Image, *frame);
+            self.handle_element_found(eoi, &mut 0, true);
         } else if target == Target::Scrollable
             && let Some(eoi) = self.selected.as_ref()
         {
