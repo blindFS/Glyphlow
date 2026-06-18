@@ -1037,7 +1037,12 @@ fn traverse_elements(
             }
             _ => (),
         },
-        kAXMenuRole => {
+        kAXMenuRole
+            if element
+                .parent()
+                .and_then(|p| p.role())
+                .is_ok_and(|r| r == kAXMenuButtonRole) =>
+        {
             let _ = result_tx.send(ElementSignal::ClearOnPopUp);
             finish_early = true;
         }
