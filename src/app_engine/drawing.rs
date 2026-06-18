@@ -283,6 +283,8 @@ impl AppEngine {
             self.draw_element_menu(key_prefix, eoi.role(), set_mode);
         } else {
             self.draw_dashboard(key_prefix);
+            // NOTE: for slow element.press() call
+            self.set_mode(Mode::DashBoard);
         }
     }
 
