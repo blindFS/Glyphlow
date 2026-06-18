@@ -34,6 +34,7 @@ pub enum ElementSignal {
     // Traversal
     ElementFound(Option<ElementOfInterest>),
     TraversalFinished(Target),
+    ClearOnPopUp,
 }
 
 fn match_helper(pattern: &str, value: &impl ToString) -> bool {
@@ -832,6 +833,7 @@ fn traverse_elements(
     };
 
     let mut window_frame = *window_frame;
+    let mut finish_early = false;
 
     #[allow(non_upper_case_globals)]
     match ele_fp.role.as_str() {
@@ -1011,6 +1013,10 @@ fn traverse_elements(
                 )));
             }
         }
+        kAXGroupRole if element.subrole().is_ok_and(|r| r == "AXApplicationDialog") => {
+            let _ = result_tx.send(ElementSignal::ClearOnPopUp);
+            finish_early = true;
+        }
         kAXGroupRole => match target {
             Target::Clickable if element.is_clickable() => {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
@@ -1031,6 +1037,10 @@ fn traverse_elements(
             }
             _ => (),
         },
+        kAXMenuRole => {
+            let _ = result_tx.send(ElementSignal::ClearOnPopUp);
+            finish_early = true;
+        }
         kAXMenuItemRole => match target {
             Target::Text => {
                 if let Some(title) = element.get_attribute_string(kAXTitleAttribute) {
@@ -1094,6 +1104,9 @@ fn traverse_elements(
                 tx_clone,
                 depth + 1,
             );
+        }
+        if finish_early {
+            let _ = result_tx.send(ElementSignal::TraversalFinished(target.clone()));
         }
     }
 }

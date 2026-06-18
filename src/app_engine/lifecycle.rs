@@ -166,6 +166,12 @@ impl AppEngine {
                     }
                     ElementSignal::TraversalFinished(target) => {
                         self.handle_traversal_finished(target);
+                        break;
+                    }
+                    ElementSignal::ClearOnPopUp => {
+                        self.element_cache.clear();
+                        self.hint_boxes.iter().for_each(|hb| hb.free());
+                        self.hint_boxes.clear();
                     }
                     _ => (),
                 }
