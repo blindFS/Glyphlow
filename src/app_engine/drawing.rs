@@ -46,6 +46,12 @@ impl AppEngine {
         })
     }
 
+    pub(super) fn finalize_hints(&self) {
+        for hb in self.hint_boxes.iter() {
+            hb.refresh(0, &self.overlay_frame, &self.config.theme);
+        }
+    }
+
     /// Show/Hide hint_boxes/colored_frames, update hint text and positions.
     /// Returns indices of visible hint boxes
     pub(super) fn update_hints(&mut self) -> Vec<usize> {

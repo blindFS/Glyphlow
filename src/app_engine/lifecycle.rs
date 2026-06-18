@@ -157,21 +157,30 @@ impl AppEngine {
         let result_rx = self.ui_element_traverse_on_activation(target);
 
         let mut color_idx = 0;
+        let mut popup_level = 0;
+        let mut no_popup = true;
+
         autoreleasepool(|_| {
             for (idx, signal) in result_rx.iter().enumerate() {
                 match signal {
-                    ElementSignal::ElementFound(Some(ele)) => {
+                    ElementSignal::ElementFound(Some(ele)) if no_popup || popup_level > 0 => {
                         let need_flush = (idx + 1) % Self::HINTBOX_FLUSH_BATCH_SIZE == 0;
                         self.handle_element_found(ele, &mut color_idx, need_flush);
                     }
                     ElementSignal::TraversalFinished(target) => {
                         self.handle_traversal_finished(target);
-                        break;
                     }
-                    ElementSignal::ClearOnPopUp => {
-                        self.element_cache.clear();
-                        self.hint_boxes.iter().for_each(|hb| hb.free());
-                        self.hint_boxes.clear();
+                    ElementSignal::StartPopup => {
+                        if no_popup {
+                            self.hint_boxes.iter().for_each(|hb| hb.free());
+                            self.hint_boxes.clear();
+                            self.element_cache.clear();
+                            no_popup = false;
+                        }
+                        popup_level += 1;
+                    }
+                    ElementSignal::EndPopup => {
+                        popup_level -= 1;
                     }
                     _ => (),
                 }
@@ -245,7 +254,7 @@ impl AppEngine {
         if !self.hint_boxes.is_empty() {
             resolve_collisions(&mut self.hint_boxes, self.hint_width, &self.config.theme);
             // Update layers to match final positions and labels without clearing (avoid flicker)
-            self.update_hints();
+            self.finalize_hints();
 
             if need_help_msg {
                 self.notify("Press Enter to act.", Level::Trace);

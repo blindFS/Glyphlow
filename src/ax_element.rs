@@ -34,7 +34,8 @@ pub enum ElementSignal {
     // Traversal
     ElementFound(Option<ElementOfInterest>),
     TraversalFinished(Target),
-    ClearOnPopUp,
+    StartPopup,
+    EndPopup,
 }
 
 fn match_helper(pattern: &str, value: &impl ToString) -> bool {
@@ -833,7 +834,7 @@ fn traverse_elements(
     };
 
     let mut window_frame = *window_frame;
-    let mut finish_early = false;
+    let mut is_popup = false;
 
     #[allow(non_upper_case_globals)]
     match ele_fp.role.as_str() {
@@ -1014,8 +1015,8 @@ fn traverse_elements(
             }
         }
         kAXGroupRole if element.subrole().is_ok_and(|r| r == "AXApplicationDialog") => {
-            let _ = result_tx.send(ElementSignal::ClearOnPopUp);
-            finish_early = true;
+            let _ = result_tx.send(ElementSignal::StartPopup);
+            is_popup = true;
         }
         kAXGroupRole => match target {
             Target::Clickable if element.is_clickable() => {
@@ -1037,14 +1038,9 @@ fn traverse_elements(
             }
             _ => (),
         },
-        kAXMenuRole
-            if element
-                .parent()
-                .and_then(|p| p.role())
-                .is_ok_and(|r| r == kAXMenuButtonRole) =>
-        {
-            let _ = result_tx.send(ElementSignal::ClearOnPopUp);
-            finish_early = true;
+        kAXMenuRole => {
+            let _ = result_tx.send(ElementSignal::StartPopup);
+            is_popup = true;
         }
         kAXMenuItemRole => match target {
             Target::Text => {
@@ -1110,8 +1106,8 @@ fn traverse_elements(
                 depth + 1,
             );
         }
-        if finish_early {
-            let _ = result_tx.send(ElementSignal::TraversalFinished(target.clone()));
+        if is_popup {
+            let _ = result_tx.send(ElementSignal::EndPopup);
         }
     }
 }
