@@ -45,9 +45,9 @@ pub struct HintBox {
     frame: Option<Frame>,
     color: Option<CFRetained<CGColor>>,
     text_layer: Retained<CATextLayer>,
-    box_layer: Retained<CALayer>,
+    pub(super) box_layer: Retained<CALayer>,
     tri_layer: Retained<CAShapeLayer>,
-    frame_layer: Option<Retained<CALayer>>,
+    pub(super) frame_layer: Option<Retained<CALayer>>,
 }
 
 impl HintBox {

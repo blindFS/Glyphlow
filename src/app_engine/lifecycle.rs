@@ -184,7 +184,7 @@ impl AppEngine {
                                     .any(|p_f| p_f.intersect(&frame).is_some())
                                 {
                                     hb.disabled = true;
-                                    hb.set_visible(false);
+                                    hb.fade_out();
                                 }
                             }
                         }
@@ -275,7 +275,7 @@ impl AppEngine {
         if !self.hint_boxes.is_empty() {
             resolve_collisions(&mut self.hint_boxes, self.hint_width, &self.config.theme);
             // Update layers to match final positions and labels without clearing (avoid flicker)
-            self.update_hints();
+            self.finalize_hints();
 
             if need_help_msg {
                 self.notify("Press Enter to act.", Level::Trace);
