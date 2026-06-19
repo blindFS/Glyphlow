@@ -5,12 +5,12 @@ use crate::{
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     AXUIElementCopyMultipleAttributeValues, AXValueCreate, AXValueGetValue, AXValueRef,
-    kAXButtonRole, kAXCellRole, kAXCheckBoxRole, kAXComboBoxRole, kAXContentListSubrole,
-    kAXErrorSuccess, kAXGroupRole, kAXHiddenAttribute, kAXImageRole, kAXListRole, kAXMenuItemRole,
-    kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction, kAXRoleAttribute, kAXRowRole,
-    kAXScrollAreaRole, kAXScrollBarRole, kAXSelectedTextRangeAttribute, kAXSizeAttribute,
-    kAXStaticTextRole, kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueTypeCFRange,
-    kAXValueTypeCGPoint, kAXValueTypeCGSize, kAXWindowRole,
+    kAXButtonRole, kAXCellRole, kAXCheckBoxRole, kAXComboBoxRole, kAXErrorSuccess, kAXGroupRole,
+    kAXHiddenAttribute, kAXImageRole, kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute,
+    kAXPressAction, kAXRoleAttribute, kAXRowRole, kAXScrollAreaRole, kAXScrollBarRole,
+    kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
+    kAXTextFieldRole, kAXTitleAttribute, kAXValueTypeCFRange, kAXValueTypeCGPoint,
+    kAXValueTypeCGSize, kAXWindowRole,
 };
 use core_foundation::{
     array::{CFArray, CFArrayRef},
@@ -938,18 +938,6 @@ fn traverse_elements(
             if vis_level != VisibilityCheckingLevel::Loosest =>
         {
             if let Some(area_frame) = ele_fp.frame.and_then(|f| f.intersect(&window_frame)) {
-                window_frame = area_frame;
-            };
-        }
-        // NOTE: don't do it for AXSectionList, e.g. Apple Music
-        kAXListRole if element.subrole().is_ok_and(|r| r == kAXContentListSubrole) => {
-            if let Some(area_frame) = ele_fp.frame.and_then(|f| f.intersect(&window_frame))
-                && {
-                    let (w, h) = area_frame.size();
-                    // HACK: Some content lists may have fake sizes, e.g. Slack
-                    w > 10.0 && h > 10.0
-                }
-            {
                 window_frame = area_frame;
             };
         }
