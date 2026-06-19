@@ -116,7 +116,8 @@ impl Menu {
             unsafe {
                 self.menu_string.addAttribute_value_range(
                     NSFontAttributeName,
-                    &NSFont::fontWithName_size(&font.fontName(), font_size).unwrap(),
+                    &NSFont::fontWithName_size(&font.fontName(), font_size)
+                        .expect("Failed to resize font."),
                     NSRange::new(0, self.menu_string.length()),
                 )
             };
