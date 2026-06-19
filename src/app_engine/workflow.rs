@@ -1,6 +1,6 @@
 use super::AppEngine;
 use crate::{
-    ax_element::{GetAttribute, SetAttribute, Target},
+    ax_element::{CompiledTarget, GetAttribute, SetAttribute, Target},
     config::{RoleOfInterest, WorkFlow, WorkFlowAction},
 };
 use log::Level;
@@ -47,7 +47,13 @@ impl AppEngine {
             }
             WorkFlowAction::SearchFor(ct) => {
                 self.selected = None;
-                self.activate(Target::Custom(ct.clone()));
+                match CompiledTarget::new(ct) {
+                    Ok(compiled) => self.activate(Target::Custom(Box::new(compiled))),
+                    Err(e) => {
+                        log::error!("Invalid regex in SearchFor target: {e}");
+                        return true;
+                    }
+                }
                 if self.element_cache.cache.len() == 1 {
                     self.clear_hints();
                     self.select(self.element_cache.cache[0].clone());

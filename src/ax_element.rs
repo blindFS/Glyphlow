@@ -20,6 +20,7 @@ use core_foundation::{
 };
 use objc2::rc::autoreleasepool;
 use objc2_core_foundation::{CGPoint, CGSize};
+use regex::Regex;
 use std::{collections::HashMap, sync::mpsc::Sender};
 
 const BASIC_ATTRIBUTES: [&str; 4] = [
@@ -33,6 +34,14 @@ pub enum ElementSignal {
     // Traversal
     ElementFound(Option<ElementOfInterest>),
     TraversalFinished(Target),
+}
+
+fn match_helper(pattern: &str, value: &impl ToString) -> bool {
+    let value = value.to_string().to_lowercase();
+    pattern
+        .to_lowercase()
+        .split('|')
+        .any(|t| value.contains(t.trim()))
 }
 
 struct ElementBasicAttributes {
@@ -119,36 +128,62 @@ impl ElementBasicAttributes {
         }
     }
 
-    fn match_custom_target(&self, target: &CustomTarget) -> bool {
+    fn match_custom_target(&self, target: &CompiledTarget) -> bool {
         if let Some(size) = target.size
             && !self.frame.is_some_and(|f| f.size() == size)
         {
             return false;
         }
-        let role = self.role.to_lowercase();
-        let target_role = target.role.to_lowercase();
-        match_helper(&target_role, &role, true)
+        match_helper(&target.role, &self.role)
     }
 }
 
-fn match_helper(options: &str, value: &impl ToString, match_with_contains: bool) -> bool {
-    let value = value.to_string();
+/// A [`CustomTarget`] with string fields pre-compiled into [`Regex`] objects.
+/// Build once per workflow search action; reuse across the entire element traversal.
+#[derive(Debug, Clone)]
+pub struct CompiledTarget {
+    pub role: String,
+    pub subrole: Option<String>,
+    pub label: Option<Regex>,
+    pub value: Option<Regex>,
+    pub title: Option<Regex>,
+    pub description: Option<Regex>,
+    pub size: Option<(f64, f64)>,
+    pub action: Option<String>,
+}
 
-    // Special wildcard syntax
-    if options == "*" {
-        return true;
-    } else if options == "?*" {
-        return !value.is_empty();
+impl PartialEq for CompiledTarget {
+    fn eq(&self, other: &Self) -> bool {
+        let opt_re_eq = |a: &Option<Regex>, b: &Option<Regex>| match (a, b) {
+            (Some(x), Some(y)) => x.as_str() == y.as_str(),
+            (None, None) => true,
+            _ => false,
+        };
+        self.role == other.role
+            && self.subrole == other.subrole
+            && opt_re_eq(&self.label, &other.label)
+            && opt_re_eq(&self.value, &other.value)
+            && opt_re_eq(&self.title, &other.title)
+            && opt_re_eq(&self.description, &other.description)
+            && self.size == other.size
+            && self.action == other.action
     }
+}
 
-    options.split('|').any(|o| {
-        let o = o.trim();
-        if match_with_contains {
-            value.contains(o)
-        } else {
-            o == value
-        }
-    })
+impl CompiledTarget {
+    pub fn new(ct: &CustomTarget) -> Result<Self, regex::Error> {
+        let compile_opt = |opt: &Option<String>| opt.as_deref().map(Regex::new).transpose();
+        Ok(Self {
+            role: ct.role.to_owned(),
+            subrole: ct.subrole.to_owned(),
+            label: compile_opt(&ct.label)?,
+            value: compile_opt(&ct.value)?,
+            title: compile_opt(&ct.title)?,
+            description: compile_opt(&ct.description)?,
+            size: ct.size,
+            action: ct.action.to_owned(),
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -401,7 +436,7 @@ pub trait GetAttribute {
     fn search_target(&self) -> String;
     fn is_clickable(&self) -> bool;
     fn has_children(&self) -> bool;
-    fn match_custom_target(&self, target: &CustomTarget) -> bool;
+    fn match_custom_target(&self, target: &CompiledTarget) -> bool;
 }
 
 impl GetAttribute for AXUIElement {
@@ -559,49 +594,44 @@ impl GetAttribute for AXUIElement {
         Some(classes)
     }
 
-    fn match_custom_target(&self, target: &CustomTarget) -> bool {
-        if let Some(subroles) = target.subrole.as_ref() {
-            let Ok(subrole) = self.subrole() else {
-                return false;
-            };
-            if !match_helper(subroles, &subrole, true) {
-                return false;
-            }
+    fn match_custom_target(&self, target: &CompiledTarget) -> bool {
+        if let Some(sr) = target.subrole.as_ref()
+            && !self.subrole().is_ok_and(|s| match_helper(sr, &s))
+        {
+            return false;
         }
-        if let Some(description) = target.description.as_ref()
+        if let Some(re) = target.description.as_ref()
             && !self
                 .description()
-                .is_ok_and(|d| match_helper(description, &d, false))
+                .is_ok_and(|d| re.is_match(&d.to_string()))
         {
             return false;
         }
-        if let Some(title) = target.title.as_ref()
-            && !self.title().is_ok_and(|t| match_helper(title, &t, false))
+        if let Some(re) = target.title.as_ref()
+            && !self.title().is_ok_and(|t| re.is_match(&t.to_string()))
         {
             return false;
         }
-        if let Some(label) = target.label.as_ref()
+        if let Some(re) = target.label.as_ref()
             && !self
                 .label_value()
-                .is_ok_and(|l| match_helper(label, &l, false))
+                .is_ok_and(|l| re.is_match(&l.to_string()))
         {
             return false;
         }
-        if let Some(value) = target.value.as_ref()
+        if let Some(re) = target.value.as_ref()
             && !self
                 .value()
                 .ok()
                 .and_then(|v| v.downcast::<CFString>())
-                .is_some_and(|v| match_helper(value, &v, false))
+                .is_some_and(|v| re.is_match(&v.to_string()))
         {
             return false;
         }
-        if let Some(target_action) = target.action.as_ref()
-            && !self.action_names().is_ok_and(|actions| {
-                actions
-                    .iter()
-                    .any(|action| match_helper(target_action, &*action, true))
-            })
+        if let Some(a) = target.action.as_ref()
+            && !self
+                .action_names()
+                .is_ok_and(|names| names.iter().any(|n| match_helper(a, &*n)))
         {
             return false;
         }
@@ -669,7 +699,7 @@ pub enum Target {
     Text,
     ChildElement,
     Scrollable,
-    Custom(CustomTarget),
+    Custom(Box<CompiledTarget>),
 }
 
 const MAX_DEPTH: u8 = 200;

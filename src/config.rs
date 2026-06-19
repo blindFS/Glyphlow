@@ -557,7 +557,7 @@ fn default_workflows() -> Vec<WorkFlow> {
                 WorkFlowAction::Sleep(150),
                 WorkFlowAction::SearchFor(CustomTarget {
                     role: "MenuItem".into(),
-                    title: Some("?*".into()),
+                    title: Some(".+".into()),
                     ..Default::default()
                 }),
                 WorkFlowAction::Press,
