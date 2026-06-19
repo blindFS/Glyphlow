@@ -7,7 +7,7 @@ use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::{CGColor, CGMutablePath, CGPath};
 use objc2_foundation::{NSArray, NSNumber, ns_string};
 use objc2_quartz_core::{
-    CAAnimation, CAAnimationGroup, CABasicAnimation, CAGradientLayer, CALayer, CAMediaTiming,
+    CAAnimation, CAAnimationGroup, CABasicAnimation, CAGradientLayer, CAMediaTiming,
     CAMediaTimingFunction, CAShapeLayer, CATransaction, kCAMediaTimingFunctionEaseOut,
 };
 
@@ -253,32 +253,18 @@ impl UIDrawer {
 impl HintBox {
     /// Fades the hint box out, then hides it.
     pub fn fade_out(&self) {
-        let layers: Vec<Retained<CALayer>> = std::iter::once(self.box_layer.clone())
-            .chain(self.frame_layer.iter().cloned())
-            .collect();
-
-        for layer in layers {
+        for layer in std::iter::once(&self.box_layer).chain(self.frame_layer.iter()) {
             // Set the model opacity to 0 before the animation so the layer
             // stays hidden after the animation is removed.
             layer.setOpacity(0.0);
 
             CATransaction::begin();
-
-            let layer_clone = layer.clone();
-            let completion = RcBlock::new(move || {
-                layer_clone.setHidden(true);
-                // Restore opacity so the layer can be shown again later.
-                layer_clone.setOpacity(1.0);
-            });
             unsafe {
-                CATransaction::setCompletionBlock(Some(&completion));
-
                 let anim = CABasicAnimation::animationWithKeyPath(Some(ns_string!("opacity")));
                 anim.setFromValue(Some(&NSNumber::new_f64(1.0)));
                 anim.setToValue(Some(&NSNumber::new_f64(0.0)));
                 anim.setDuration(HINT_FADE_OUT_DURATION);
                 anim.setRemovedOnCompletion(true);
-
                 layer.addAnimation_forKey(&anim, Some(ns_string!("fade_out")));
             }
             CATransaction::commit();
