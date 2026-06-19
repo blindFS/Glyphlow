@@ -1133,3 +1133,188 @@ pub fn traverse(
         let _ = result_tx.send(ElementSignal::TraversalFinished(target));
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::CustomTarget;
+
+    /// Build a minimal `CustomTarget` with only the `role` field set.
+    fn ct_role(role: &str) -> CustomTarget {
+        CustomTarget {
+            role: role.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn match_helper_test() {
+        assert!(match_helper("Button", &"button"));
+        assert!(match_helper("BUTTON", &"AXButton"));
+        assert!(match_helper("button", &"AXBUTTON"));
+        assert!(match_helper("menu", &"AXMenuItem"));
+        // An empty string is always contained in any string (including itself).
+        assert!(match_helper("", &"anything"));
+        assert!(match_helper("", &""));
+        assert!(!match_helper("image", &"AXButton"));
+    }
+
+    #[test]
+    fn match_helper_pipe() {
+        assert!(match_helper("button|textfield", &"AXButton"));
+        assert!(match_helper("button|textfield", &"AXTextField"));
+        assert!(match_helper("button | textfield", &"AXTextField"));
+    }
+
+    #[test]
+    fn compiled_target_new_valid() {
+        let ct = CustomTarget {
+            role: "MenuItem".into(),
+            subrole: Some("AXContentList".into()),
+            label: Some(r"Save.*".into()),
+            value: Some(r"\d+".into()),
+            title: Some("File".into()),
+            description: Some("desc".into()),
+            size: Some((100.0, 50.0)),
+            action: Some("AXPress".into()),
+        };
+
+        let compiled = CompiledTarget::new(&ct).expect("Valid regexes should compile");
+
+        assert_eq!(compiled.role, "MenuItem");
+        assert_eq!(compiled.subrole.as_deref(), Some("AXContentList"));
+        assert!(compiled.label.is_some());
+        assert!(compiled.value.is_some());
+        assert!(compiled.title.is_some());
+        assert!(compiled.description.is_some());
+        assert_eq!(compiled.size, Some((100.0, 50.0)));
+        assert_eq!(compiled.action.as_deref(), Some("AXPress"));
+    }
+
+    #[test]
+    fn compiled_target_new_none_fields() {
+        let ct = ct_role("AXButton");
+        let compiled = CompiledTarget::new(&ct).expect("Should compile with all-None optionals");
+
+        assert_eq!(compiled.role, "AXButton");
+        assert!(compiled.subrole.is_none());
+        assert!(compiled.label.is_none());
+        assert!(compiled.value.is_none());
+        assert!(compiled.title.is_none());
+        assert!(compiled.description.is_none());
+        assert!(compiled.size.is_none());
+        assert!(compiled.action.is_none());
+    }
+
+    #[test]
+    fn compiled_target_new_invalid_regex_returns_err() {
+        // An unclosed bracket is an invalid regex pattern.
+        let ct = CustomTarget {
+            role: "Button".into(),
+            title: Some("[invalid".into()),
+            ..Default::default()
+        };
+
+        assert!(
+            CompiledTarget::new(&ct).is_err(),
+            "Invalid regex should produce an Err"
+        );
+    }
+
+    #[test]
+    fn compiled_target_new_action_field_propagated() {
+        let ct = CustomTarget {
+            role: "MenuItem".into(),
+            action: Some("press | highlight".into()),
+            ..Default::default()
+        };
+
+        let compiled = CompiledTarget::new(&ct).unwrap();
+        assert_eq!(compiled.action.as_deref(), Some("press | highlight"));
+    }
+
+    fn make_basic(role: &str, frame: Option<Frame>) -> ElementBasicAttributes {
+        ElementBasicAttributes {
+            role: role.into(),
+            frame,
+            hidden: false,
+        }
+    }
+
+    #[test]
+    fn basic_match_role_exact() {
+        let elem = make_basic("AXButton", None);
+        let target = CompiledTarget::new(&ct_role("AXButton")).unwrap();
+        assert!(elem.match_custom_target(&target));
+    }
+
+    #[test]
+    fn basic_match_role_substring() {
+        // "button" is a substring of "AXButton" (case-insensitive).
+        let elem = make_basic("AXButton", None);
+        let target = CompiledTarget::new(&ct_role("button")).unwrap();
+        assert!(elem.match_custom_target(&target));
+    }
+
+    #[test]
+    fn basic_match_role_pipe_or() {
+        let elem = make_basic("AXMenuItem", None);
+        let target = CompiledTarget::new(&ct_role("button|menuitem")).unwrap();
+        assert!(elem.match_custom_target(&target));
+    }
+
+    #[test]
+    fn basic_match_role_mismatch() {
+        let elem = make_basic("AXImage", None);
+        let target = CompiledTarget::new(&ct_role("button")).unwrap();
+        assert!(!elem.match_custom_target(&target));
+    }
+
+    #[test]
+    fn basic_match_size_matches() {
+        let frame = Frame::new(0.0, 0.0, 100.0, 50.0);
+        let elem = make_basic("AXButton", Some(frame));
+        let ct = CustomTarget {
+            role: "AXButton".into(),
+            size: Some((100.0, 50.0)),
+            ..Default::default()
+        };
+        let target = CompiledTarget::new(&ct).unwrap();
+        assert!(elem.match_custom_target(&target));
+    }
+
+    #[test]
+    fn basic_match_size_mismatch() {
+        let frame = Frame::new(0.0, 0.0, 200.0, 80.0);
+        let elem = make_basic("AXButton", Some(frame));
+        let ct = CustomTarget {
+            role: "AXButton".into(),
+            size: Some((100.0, 50.0)),
+            ..Default::default()
+        };
+        let target = CompiledTarget::new(&ct).unwrap();
+        assert!(!elem.match_custom_target(&target));
+    }
+
+    #[test]
+    fn basic_match_size_required_but_no_frame() {
+        // If the target requires a specific size but the element has no frame,
+        // it should not match.
+        let elem = make_basic("AXButton", None);
+        let ct = CustomTarget {
+            role: "AXButton".into(),
+            size: Some((100.0, 50.0)),
+            ..Default::default()
+        };
+        let target = CompiledTarget::new(&ct).unwrap();
+        assert!(!elem.match_custom_target(&target));
+    }
+
+    #[test]
+    fn basic_match_no_size_constraint_ignores_frame() {
+        // When the target has no size constraint the element frame is irrelevant.
+        let elem_no_frame = make_basic("AXButton", None);
+        let target = CompiledTarget::new(&ct_role("AXButton")).unwrap();
+        assert!(elem_no_frame.match_custom_target(&target));
+    }
+}
