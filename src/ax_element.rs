@@ -1014,11 +1014,7 @@ fn traverse_elements(
                 )));
             }
         }
-        kAXGroupRole
-            if element
-                .subrole()
-                .is_ok_and(|r| r == "AXApplicationDialog" || r == "AXLandmarkRegion") =>
-        {
+        kAXGroupRole if element.subrole().is_ok_and(|r| r == "AXApplicationDialog") => {
             if let Some(frame) = ele_fp.frame {
                 let _ = result_tx.send(ElementSignal::StartPopup(frame));
                 is_popup = true;
