@@ -6,10 +6,10 @@ use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     AXUIElementCopyMultipleAttributeValues, AXValueCreate, AXValueGetValue, AXValueRef,
     kAXButtonRole, kAXCellRole, kAXCheckBoxRole, kAXComboBoxRole, kAXErrorSuccess, kAXGroupRole,
-    kAXHiddenAttribute, kAXImageRole, kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute,
-    kAXPressAction, kAXRoleAttribute, kAXRowRole, kAXScrollAreaRole, kAXScrollBarRole,
-    kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
-    kAXTextFieldRole, kAXTitleAttribute, kAXValueTypeCFRange, kAXValueTypeCGPoint,
+    kAXHiddenAttribute, kAXImageRole, kAXMenuItemRole, kAXMenuRole, kAXPopUpButtonRole,
+    kAXPositionAttribute, kAXPressAction, kAXRoleAttribute, kAXRowRole, kAXScrollAreaRole,
+    kAXScrollBarRole, kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole,
+    kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueTypeCFRange, kAXValueTypeCGPoint,
     kAXValueTypeCGSize, kAXWindowRole,
 };
 use core_foundation::{
