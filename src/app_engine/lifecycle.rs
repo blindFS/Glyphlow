@@ -5,13 +5,13 @@ use crate::{
     config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
     os_util::{AppWindowInfo, get_focused_window},
     user_interface::{HintBox, hint_label_from_index, resolve_collisions},
-    util::digits_by_length,
+    util::{Frame, digits_by_length},
 };
 use accessibility::AXUIElementAttributes;
 use log::Level;
 use objc2::rc::autoreleasepool;
 use objc2_quartz_core::CATransaction;
-use std::{path::PathBuf, sync::mpsc::Receiver, time::Duration};
+use std::{ops::Range, path::PathBuf, sync::mpsc::Receiver, time::Duration};
 use tokio::sync::mpsc::Sender;
 
 const SHORT_TIMEOUT: u64 = 1;
@@ -157,30 +157,51 @@ impl AppEngine {
         let result_rx = self.ui_element_traverse_on_activation(target);
 
         let mut color_idx = 0;
+        let mut popup_ranges: Vec<Range<usize>> = vec![];
+        let mut popup_frames: Vec<Frame> = vec![];
+        let mut popup_start_idx = 0;
         let mut popup_level = 0;
-        let mut no_popup = true;
 
         autoreleasepool(|_| {
             for (idx, signal) in result_rx.iter().enumerate() {
                 match signal {
-                    ElementSignal::ElementFound(Some(ele)) if no_popup || popup_level > 0 => {
+                    ElementSignal::ElementFound(Some(ele)) => {
                         let need_flush = (idx + 1) % Self::HINTBOX_FLUSH_BATCH_SIZE == 0;
                         self.handle_element_found(ele, &mut color_idx, need_flush);
                     }
                     ElementSignal::TraversalFinished(target) => {
+                        // Disable hints that are covered by popups
+                        if !popup_frames.is_empty()
+                            && matches!(target, Target::Clickable | Target::Text)
+                        {
+                            for (idx, hb) in self.hint_boxes.iter_mut().enumerate() {
+                                if popup_ranges.iter().any(|r| r.contains(&idx)) {
+                                    continue;
+                                }
+                                let frame = self.element_cache.cache[idx].frame;
+                                if popup_frames
+                                    .iter()
+                                    .any(|p_f| p_f.intersect(&frame).is_some())
+                                {
+                                    hb.disabled = true;
+                                    hb.set_visible(false);
+                                }
+                            }
+                        }
                         self.handle_traversal_finished(target);
                     }
-                    ElementSignal::StartPopup => {
-                        if no_popup {
-                            self.hint_boxes.iter().for_each(|hb| hb.free());
-                            self.hint_boxes.clear();
-                            self.element_cache.clear();
-                            no_popup = false;
+                    ElementSignal::StartPopup(frame) => {
+                        if popup_level == 0 {
+                            popup_frames.push(frame);
+                            popup_start_idx = self.hint_boxes.len();
                         }
                         popup_level += 1;
                     }
                     ElementSignal::EndPopup => {
                         popup_level -= 1;
+                        if popup_level == 0 {
+                            popup_ranges.push(popup_start_idx..self.hint_boxes.len());
+                        }
                     }
                     _ => (),
                 }
@@ -254,7 +275,7 @@ impl AppEngine {
         if !self.hint_boxes.is_empty() {
             resolve_collisions(&mut self.hint_boxes, self.hint_width, &self.config.theme);
             // Update layers to match final positions and labels without clearing (avoid flicker)
-            self.finalize_hints();
+            self.update_hints();
 
             if need_help_msg {
                 self.notify("Press Enter to act.", Level::Trace);

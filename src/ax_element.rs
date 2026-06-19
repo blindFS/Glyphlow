@@ -34,7 +34,7 @@ pub enum ElementSignal {
     // Traversal
     ElementFound(Option<ElementOfInterest>),
     TraversalFinished(Target),
-    StartPopup,
+    StartPopup(Frame),
     EndPopup,
 }
 
@@ -1015,8 +1015,10 @@ fn traverse_elements(
             }
         }
         kAXGroupRole if element.subrole().is_ok_and(|r| r == "AXApplicationDialog") => {
-            let _ = result_tx.send(ElementSignal::StartPopup);
-            is_popup = true;
+            if let Some(frame) = ele_fp.frame {
+                let _ = result_tx.send(ElementSignal::StartPopup(frame));
+                is_popup = true;
+            }
         }
         kAXGroupRole => match target {
             Target::Clickable if element.is_clickable() => {
@@ -1038,13 +1040,11 @@ fn traverse_elements(
             }
             _ => (),
         },
-        kAXMenuRole
-            if element.parent().and_then(|p| p.role()).is_ok_and(|r| {
-                r == kAXMenuButtonRole || r == kAXButtonRole || r == kAXCellRole
-            }) =>
-        {
-            let _ = result_tx.send(ElementSignal::StartPopup);
-            is_popup = true;
+        kAXMenuRole => {
+            if let Some(frame) = ele_fp.frame {
+                let _ = result_tx.send(ElementSignal::StartPopup(frame));
+                is_popup = true;
+            }
         }
         kAXMenuItemRole => match target {
             Target::Text => {

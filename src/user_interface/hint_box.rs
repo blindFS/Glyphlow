@@ -39,6 +39,7 @@ pub struct HintBox {
     x: f64,
     y: f64,
     pub idx: usize,
+    pub disabled: bool,
     /// Moved distance to avoid collision
     delta: (f64, f64),
     frame: Option<Frame>,
@@ -82,6 +83,7 @@ impl HintBox {
             x,
             y,
             idx,
+            disabled: false,
             delta: (0.0, 0.0),
             frame,
             color,
@@ -369,10 +371,13 @@ fn resolve_collisions_reactive(boxes: &mut [HintBox], x_thres: f64, y_thres: f64
     let mut in_queue = vec![true; boxes.len()];
 
     // Initial setup
-    for i in 0..boxes.len() {
+    for (i, hb) in boxes.iter().enumerate() {
+        if hb.disabled {
+            continue;
+        }
         let coords = (
-            (boxes[i].x / x_thres).floor() as i32,
-            (boxes[i].y / y_thres).floor() as i32,
+            (hb.x / x_thres).floor() as i32,
+            (hb.y / y_thres).floor() as i32,
         );
         cell_coords[i] = coords;
         grid.entry(coords).or_default().push(i);

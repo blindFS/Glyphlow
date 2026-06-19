@@ -46,12 +46,6 @@ impl AppEngine {
         })
     }
 
-    pub(super) fn finalize_hints(&self) {
-        for hb in self.hint_boxes.iter() {
-            hb.refresh(0, &self.overlay_frame, &self.config.theme);
-        }
-    }
-
     /// Show/Hide hint_boxes/colored_frames, update hint text and positions.
     /// Returns indices of visible hint boxes
     pub(super) fn update_hints(&mut self) -> Vec<usize> {
@@ -73,7 +67,8 @@ impl AppEngine {
                 let matches_search_prefix = search_pattern
                     .as_ref()
                     .is_none_or(|p| self.search_targets.get(idx).is_some_and(|h| p.is_match(h)));
-                let visible = hb.label.starts_with(&self.hint_prefix)
+                let visible = !hb.disabled
+                    && hb.label.starts_with(&self.hint_prefix)
                     && matches_search_prefix
                     && !is_selected_side;
 
