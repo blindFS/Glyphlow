@@ -133,6 +133,14 @@ impl ElementBasicAttributes {
 
 fn match_helper(options: &str, value: &impl ToString, match_with_contains: bool) -> bool {
     let value = value.to_string();
+
+    // Special wildcard syntax
+    if options == "*" {
+        return true;
+    } else if options == "?*" {
+        return !value.is_empty();
+    }
+
     options.split('|').any(|o| {
         let o = o.trim();
         if match_with_contains {
@@ -588,6 +596,16 @@ impl GetAttribute for AXUIElement {
         {
             return false;
         }
+        if let Some(target_action) = target.action.as_ref()
+            && !self.action_names().is_ok_and(|actions| {
+                actions
+                    .iter()
+                    .any(|action| match_helper(target_action, &*action, true))
+            })
+        {
+            return false;
+        }
+
         true
     }
 }

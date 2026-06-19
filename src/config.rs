@@ -36,6 +36,7 @@ pub struct CustomTarget {
     pub title: Option<String>,
     pub description: Option<String>,
     pub size: Option<(f64, f64)>,
+    pub action: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -556,6 +557,7 @@ fn default_workflows() -> Vec<WorkFlow> {
                 WorkFlowAction::Sleep(150),
                 WorkFlowAction::SearchFor(CustomTarget {
                     role: "MenuItem".into(),
+                    title: Some("?*".into()),
                     ..Default::default()
                 }),
                 WorkFlowAction::Press,
