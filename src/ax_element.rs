@@ -6,10 +6,10 @@ use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
     AXUIElementCopyMultipleAttributeValues, AXValueCreate, AXValueGetValue, AXValueRef,
     kAXButtonRole, kAXCellRole, kAXCheckBoxRole, kAXComboBoxRole, kAXErrorSuccess, kAXGroupRole,
-    kAXHiddenAttribute, kAXImageRole, kAXMenuItemRole, kAXMenuRole, kAXPopUpButtonRole,
-    kAXPositionAttribute, kAXPressAction, kAXRoleAttribute, kAXRowRole, kAXScrollAreaRole,
-    kAXScrollBarRole, kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole,
-    kAXTextAreaRole, kAXTextFieldRole, kAXTitleAttribute, kAXValueTypeCFRange, kAXValueTypeCGPoint,
+    kAXHiddenAttribute, kAXImageRole, kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute,
+    kAXPressAction, kAXRoleAttribute, kAXRowRole, kAXScrollAreaRole, kAXScrollBarRole,
+    kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
+    kAXTextFieldRole, kAXTitleAttribute, kAXValueTypeCFRange, kAXValueTypeCGPoint,
     kAXValueTypeCGSize, kAXWindowRole,
 };
 use core_foundation::{
@@ -34,8 +34,6 @@ pub enum ElementSignal {
     // Traversal
     ElementFound(Option<ElementOfInterest>),
     TraversalFinished(Target),
-    StartPopup(Frame),
-    EndPopup,
 }
 
 fn match_helper(pattern: &str, value: &impl ToString) -> bool {
@@ -834,7 +832,6 @@ fn traverse_elements(
     };
 
     let mut window_frame = *window_frame;
-    let mut is_popup = false;
 
     #[allow(non_upper_case_globals)]
     match ele_fp.role.as_str() {
@@ -1014,12 +1011,6 @@ fn traverse_elements(
                 )));
             }
         }
-        kAXGroupRole if element.subrole().is_ok_and(|r| r == "AXApplicationDialog") => {
-            if let Some(frame) = ele_fp.frame {
-                let _ = result_tx.send(ElementSignal::StartPopup(frame));
-                is_popup = true;
-            }
-        }
         kAXGroupRole => match target {
             Target::Clickable if element.is_clickable() => {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
@@ -1040,12 +1031,6 @@ fn traverse_elements(
             }
             _ => (),
         },
-        kAXMenuRole => {
-            if let Some(frame) = ele_fp.frame {
-                let _ = result_tx.send(ElementSignal::StartPopup(frame));
-                is_popup = true;
-            }
-        }
         kAXMenuItemRole => match target {
             Target::Text => {
                 if let Some(title) = element.get_attribute_string(kAXTitleAttribute) {
@@ -1109,9 +1094,6 @@ fn traverse_elements(
                 tx_clone,
                 depth + 1,
             );
-        }
-        if is_popup {
-            let _ = result_tx.send(ElementSignal::EndPopup);
         }
     }
 }
