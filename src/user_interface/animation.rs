@@ -5,13 +5,13 @@ use objc2::{
 };
 use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::{CGColor, CGMutablePath, CGPath};
-use objc2_foundation::{NSArray, NSNumber, NSString};
+use objc2_foundation::{NSArray, NSNumber, ns_string};
 use objc2_quartz_core::{
     CAAnimation, CAAnimationGroup, CABasicAnimation, CAGradientLayer, CAMediaTiming,
     CAMediaTimingFunction, CAShapeLayer, CATransaction, kCAMediaTimingFunctionEaseOut,
 };
 
-use crate::user_interface::{UIDrawer, calibrated_origin};
+use crate::user_interface::{HintBox, UIDrawer, calibrated_origin};
 
 const RIPPLE_DURATION: f64 = 0.4;
 const RIPPLE_INIT_RADIUS: f64 = 5.0;
@@ -21,6 +21,9 @@ const TRAIL_DURATION: f64 = 0.5;
 /// Offset from the ending cursor position to the right-bottom corner of the cursor shape
 const CURSOR_OFFSET_X: f64 = 9.0;
 const CURSOR_OFFSET_Y: f64 = 15.0;
+
+const HINT_FADE_OUT_DURATION: f64 = 0.5;
+const HINT_DIM_OPACITY: f32 = 0.25;
 
 impl UIDrawer {
     /// Triggers a ripple animation at the given (x, y) coordinates inside a parent CALayer.
@@ -65,15 +68,13 @@ impl UIDrawer {
                 CATransaction::setCompletionBlock(Some(&completion_block));
 
                 // Create the Scale Animation (Expanding)
-                let scale_anim = CABasicAnimation::animationWithKeyPath(Some(&NSString::from_str(
-                    "transform.scale",
-                )));
+                let scale_anim =
+                    CABasicAnimation::animationWithKeyPath(Some(ns_string!("transform.scale")));
                 scale_anim.setFromValue(Some(&NSNumber::new_f64(1.0)));
                 scale_anim.setToValue(Some(&NSNumber::new_f64(RIPPLE_SCALE_FACTOR))); // Grows 6x the initial radius
 
                 // Create the Opacity Animation (Fading Out)
-                let fade_anim =
-                    CABasicAnimation::animationWithKeyPath(Some(&NSString::from_str("opacity")));
+                let fade_anim = CABasicAnimation::animationWithKeyPath(Some(ns_string!("opacity")));
                 fade_anim.setFromValue(Some(&NSNumber::new_f64(1.0)));
                 fade_anim.setToValue(Some(&NSNumber::new_f64(0.0)));
 
@@ -96,7 +97,7 @@ impl UIDrawer {
 
                 // Bind animation to layer and add layer to window/view hierarchy
                 // The key "ripple" can be anything unique
-                ripple_layer.addAnimation_forKey(&anim_group, Some(&NSString::from_str("ripple")));
+                ripple_layer.addAnimation_forKey(&anim_group, Some(ns_string!("ripple")));
 
                 CATransaction::commit();
             }
@@ -224,7 +225,7 @@ impl UIDrawer {
                 // At t=1, locations are [1.0, 2.0], meaning the entire range [0, 1] is transparent.
                 // This results in the "fade front" moving from the start point to the end point.
                 let loc_anim =
-                    CABasicAnimation::animationWithKeyPath(Some(&NSString::from_str("locations")));
+                    CABasicAnimation::animationWithKeyPath(Some(ns_string!("locations")));
                 let loc_start = NSArray::from_retained_slice(&[
                     NSNumber::new_f64(-0.2),
                     NSNumber::new_f64(0.0),
@@ -240,12 +241,41 @@ impl UIDrawer {
                     CAMediaTimingFunction::functionWithName(kCAMediaTimingFunctionEaseOut);
                 loc_anim.setTimingFunction(Some(&timing_function));
 
-                mask_layer.addAnimation_forKey(&loc_anim, Some(&NSString::from_str("locations")));
+                mask_layer.addAnimation_forKey(&loc_anim, Some(ns_string!("locations")));
                 // Set the model's locations to the final value to prevent flickering after animation
                 mask_layer.setLocations(Some(&loc_end));
 
                 CATransaction::commit();
             }
         });
+    }
+}
+
+impl HintBox {
+    /// Fades the hint box out, then hides it.
+    pub fn fade_out(&self, hide_box: bool) {
+        let mut layers = self.frame_layer.iter().collect::<Vec<_>>();
+        let mut ending_opacity = HINT_DIM_OPACITY;
+        if hide_box {
+            layers.push(&self.box_layer);
+            ending_opacity = 0.0;
+        }
+
+        for layer in layers {
+            // Set the model opacity to 0 before the animation so the layer
+            // stays hidden after the animation is removed.
+            layer.setOpacity(ending_opacity);
+
+            CATransaction::begin();
+            unsafe {
+                let anim = CABasicAnimation::animationWithKeyPath(Some(ns_string!("opacity")));
+                anim.setFromValue(Some(&NSNumber::new_f32(1.0)));
+                anim.setToValue(Some(&NSNumber::new_f32(ending_opacity)));
+                anim.setDuration(HINT_FADE_OUT_DURATION);
+                anim.setRemovedOnCompletion(true);
+                layer.addAnimation_forKey(&anim, Some(ns_string!("fade_out")));
+            }
+            CATransaction::commit();
+        }
     }
 }

@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use accessibility::{AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
-    AXIsProcessTrustedWithOptions, kAXPopoverRole, kAXTrustedCheckOptionPrompt,
+    AXIsProcessTrustedWithOptions, AXUIElementCopyElementAtPosition, AXUIElementRef,
+    kAXPopoverRole, kAXTrustedCheckOptionPrompt,
 };
 use core_foundation::{
     base::TCFType, boolean::CFBoolean, dictionary::CFDictionary, string::CFString,
@@ -159,5 +160,19 @@ pub fn check_accessibility_permissions() -> bool {
         let key = CFString::wrap_under_create_rule(kAXTrustedCheckOptionPrompt);
         let options = CFDictionary::from_CFType_pairs(&[(key, CFBoolean::true_value())]);
         AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef())
+    }
+}
+
+/// # Safety
+/// `base` must be a valid AXUIElement
+pub unsafe fn element_at_point(base: AXUIElementRef, x: f64, y: f64) -> Option<AXUIElement> {
+    let mut target: AXUIElementRef = std::ptr::null_mut();
+    unsafe {
+        AXUIElementCopyElementAtPosition(base, x as f32, y as f32, &mut target);
+        if target.is_null() {
+            return None;
+        }
+
+        Some(AXUIElement::wrap_under_create_rule(target))
     }
 }

@@ -8,11 +8,7 @@ use regex::Regex;
 use std::{borrow::Cow, cmp::Ordering};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-#[derive(Debug, Clone, PartialEq, Copy, Default)]
-pub struct Frame {
-    pub top_left: CGPoint,
-    pub bottom_right: CGPoint,
-}
+const MIN_HEIGHT_THRESHOLD: f64 = 10.0;
 
 pub fn estimate_frame_for_text(
     attr_string: &Retained<NSMutableAttributedString>,
@@ -28,6 +24,12 @@ pub fn estimate_frame_for_text(
     (OCGSize::new(width, height), range.length)
 }
 
+#[derive(Debug, Clone, PartialEq, Copy, Default)]
+pub struct Frame {
+    pub top_left: CGPoint,
+    pub bottom_right: CGPoint,
+}
+
 impl Eq for Frame {}
 
 impl PartialOrd for Frame {
@@ -35,8 +37,6 @@ impl PartialOrd for Frame {
         Some(self.cmp(other))
     }
 }
-
-const MIN_HEIGHT_THRESHOLD: f64 = 10.0;
 
 impl Ord for Frame {
     // Compare the bottom left point, y coordinate first, then x
@@ -131,6 +131,13 @@ impl Frame {
             && self.top_left.y <= other.top_left.y
             && self.bottom_right.x >= other.bottom_right.x
             && self.bottom_right.y >= other.bottom_right.y
+    }
+
+    pub fn contains_point(&self, x: f64, y: f64) -> bool {
+        self.top_left.x <= x
+            && x <= self.bottom_right.x
+            && self.top_left.y <= y
+            && y <= self.bottom_right.y
     }
 }
 

@@ -1,13 +1,17 @@
 use super::AppEngine;
 use crate::{
     AppSignal, Mode,
-    ax_element::{ElementOfInterest, ElementSignal, Target, ThreadSafeElement, traverse},
+    ax_element::{
+        ElementOfInterest, ElementSignal, GetAttribute, Target, ThreadSafeElement, traverse,
+    },
     config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
-    os_util::{AppWindowInfo, get_focused_window},
-    user_interface::{HintBox, hint_label_from_index, resolve_collisions},
+    os_util::{AppWindowInfo, element_at_point, get_focused_window},
+    user_interface::{HintBox, find_overlaps, hint_label_from_index, resolve_collisions},
     util::digits_by_length,
 };
 use accessibility::AXUIElementAttributes;
+use accessibility_sys::{AXUIElementCreateSystemWide, AXUIElementRef};
+use core_foundation::base::CFRelease;
 use log::Level;
 use objc2::rc::autoreleasepool;
 use objc2_quartz_core::CATransaction;
@@ -174,6 +178,93 @@ impl AppEngine {
         log::debug!("Finish traversing");
     }
 
+    const TEXT_VIS_CHECK_DEPTH: u8 = 2;
+
+    fn hint_visiblility_check(&self, idx: usize, system_wide: AXUIElementRef) -> bool {
+        let (x_i, y_i) = self.hint_boxes[idx].frame.center();
+        let ele_i = unsafe { element_at_point(system_wide, x_i, y_i) };
+        let Some(mut ele_i) = ele_i else {
+            return false;
+        };
+        let cached_ele_i = &self.element_cache.cache[idx];
+        cached_ele_i.equals_element(&ele_i)
+            // HACK: element at the center of a multi-line static text
+            // could be something else
+            || (cached_ele_i.role() == RoleOfInterest::StaticText
+                && cached_ele_i.element().is_some_and(|e| e.same_sub_tree(&ele_i, Self::TEXT_VIS_CHECK_DEPTH)))
+            || cached_ele_i.is_ancestor_of(&mut ele_i)
+    }
+
+    fn resolve_overlapping(&mut self) {
+        let system_wide = unsafe { AXUIElementCreateSystemWide() };
+        if system_wide.is_null() {
+            return;
+        }
+        let mut confirmed_visible = vec![false; self.hint_boxes.len()];
+
+        for (i, mut j, i_f) in find_overlaps(&self.hint_boxes, 3.0) {
+            // NOTE: visibility check by element at center point is not reliable
+            // for electron apps
+            if !self.last_app_window_info.is_electron
+                && !confirmed_visible[i]
+                && !self.hint_boxes[i].disabled
+            {
+                if self.hint_visiblility_check(i, system_wide) {
+                    confirmed_visible[i] = true;
+                } else {
+                    self.hint_boxes[i].fade_out(true);
+                    self.hint_boxes[i].disabled = true;
+                    continue;
+                }
+            }
+
+            if !self.last_app_window_info.is_electron
+                && !confirmed_visible[j]
+                && !self.hint_boxes[j].disabled
+            {
+                if self.hint_visiblility_check(j, system_wide) {
+                    confirmed_visible[j] = true;
+                } else {
+                    self.hint_boxes[j].fade_out(true);
+                    self.hint_boxes[j].disabled = true;
+                    continue;
+                }
+            }
+
+            if self.hint_boxes[i].disabled || self.hint_boxes[j].disabled {
+                continue;
+            }
+
+            // NOTE: One contains the other
+            if i_f == self.hint_boxes[i].frame || i_f == self.hint_boxes[j].frame {
+                continue;
+            }
+
+            // NOTE: Both are visible on their own, check the center of the overlap
+            let (x, y) = i_f.center();
+            let target_ele = unsafe { element_at_point(system_wide, x, y) };
+            let Some(mut target_ele) = target_ele else {
+                continue;
+            };
+
+            loop {
+                if self.element_cache.cache[i].equals_element(&target_ele) {
+                    break;
+                } else if self.element_cache.cache[j].equals_element(&target_ele) {
+                    j = i;
+                    break;
+                } else if let Ok(parent) = target_ele.parent() {
+                    target_ele = parent;
+                } else {
+                    break;
+                }
+            }
+
+            self.hint_boxes[j].fade_out(false);
+        }
+        unsafe { CFRelease(system_wide as *mut _) };
+    }
+
     fn handle_element_found(
         &mut self,
         ele: ElementOfInterest,
@@ -193,13 +284,11 @@ impl AppEngine {
             let color_num = self.config.theme.frame_colors.len();
 
             // Draw frames for large enough elements
-            let frame = if w.max(h) >= self.config.colored_frame_min_size as f64 {
+            let is_large = w.max(h) >= self.config.colored_frame_min_size as f64;
+            if is_large {
                 *color_idx += 1;
-                Some(eoi.frame)
-            } else {
-                None
             };
-            let color = (color_num > 0 && frame.is_some())
+            let color = (color_num > 0 && is_large)
                 .then(|| {
                     self.config
                         .theme
@@ -209,7 +298,8 @@ impl AppEngine {
                 })
                 .flatten();
 
-            let mut hb = HintBox::new(idx, hint_label_from_index(idx, None), x, y, frame, color);
+            let label = hint_label_from_index(idx, None);
+            let mut hb = HintBox::new(idx, label, x, y, eoi.frame, color);
 
             hb.draw(
                 &self.drawer.root,
@@ -237,9 +327,12 @@ impl AppEngine {
         let need_help_msg = target == Target::ChildElement && self.selected.is_none();
 
         if !self.hint_boxes.is_empty() {
+            if matches!(target, Target::Clickable | Target::Text) {
+                self.resolve_overlapping();
+            }
             resolve_collisions(&mut self.hint_boxes, self.hint_width, &self.config.theme);
             // Update layers to match final positions and labels without clearing (avoid flicker)
-            self.update_hints();
+            self.finalize_hints();
 
             if need_help_msg {
                 self.notify("Press Enter to act.", Level::Trace);
