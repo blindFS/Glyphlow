@@ -263,12 +263,18 @@ impl ElementOfInterest {
             return false;
         };
 
+        let zero_frame = Frame::default();
+
         loop {
-            if other == this {
-                return true;
-            }
             if let Ok(parent) = other.parent() {
                 *other = parent;
+                if other == this {
+                    return true;
+                }
+                // Early stop
+                if other.get_frame(zero_frame).contains(&self.frame) {
+                    return false;
+                }
             } else {
                 return false;
             }
@@ -458,6 +464,7 @@ pub trait GetAttribute {
     fn is_clickable(&self) -> bool;
     fn has_children(&self) -> bool;
     fn match_custom_target(&self, target: &CompiledTarget) -> bool;
+    fn same_sub_tree(&self, other: &AXUIElement, depth: u8) -> bool;
 }
 
 impl GetAttribute for AXUIElement {
@@ -658,6 +665,38 @@ impl GetAttribute for AXUIElement {
         }
 
         true
+    }
+
+    fn same_sub_tree(&self, other: &AXUIElement, depth: u8) -> bool {
+        if self == other {
+            return true;
+        }
+
+        let mut trace_self = vec![self.clone()];
+        let mut trace_other = vec![other.clone()];
+
+        for _ in 0..depth {
+            let mut has_new = false;
+            if let Some(p_this) = trace_self.last().and_then(|e| e.parent().ok()) {
+                if trace_other.contains(&p_this) {
+                    return true;
+                }
+                trace_self.push(p_this);
+                has_new = true;
+            }
+            if let Some(p_other) = trace_other.last().and_then(|e| e.parent().ok()) {
+                if trace_self.contains(&p_other) {
+                    return true;
+                }
+                trace_other.push(p_other);
+                has_new = true;
+            }
+
+            if !has_new {
+                break;
+            }
+        }
+        false
     }
 }
 
@@ -926,6 +965,29 @@ fn traverse_elements(
                     element.clone(),
                     None,
                     RoleOfInterest::Button,
+                    ele_fp.frame,
+                )));
+            }
+            _ => (),
+        },
+        "AXLink" => match target {
+            Target::Text if !element.has_children() => {
+                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                    element.clone(),
+                    element
+                        .title()
+                        .or_else(|_| element.description())
+                        .map(|cs| cs.to_string())
+                        .ok(),
+                    RoleOfInterest::StaticText,
+                    ele_fp.frame,
+                )));
+            }
+            Target::Clickable if element.is_clickable() => {
+                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                    element.clone(),
+                    None,
+                    RoleOfInterest::StaticText,
                     ele_fp.frame,
                 )));
             }

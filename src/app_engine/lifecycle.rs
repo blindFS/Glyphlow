@@ -1,7 +1,9 @@
 use super::AppEngine;
 use crate::{
     AppSignal, Mode,
-    ax_element::{ElementOfInterest, ElementSignal, Target, ThreadSafeElement, traverse},
+    ax_element::{
+        ElementOfInterest, ElementSignal, GetAttribute, Target, ThreadSafeElement, traverse,
+    },
     config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
     os_util::{AppWindowInfo, element_at_point, get_focused_window},
     user_interface::{HintBox, find_overlaps, hint_label_from_index, resolve_collisions},
@@ -185,11 +187,9 @@ impl AppEngine {
         let cached_ele_i = &self.element_cache.cache[idx];
         cached_ele_i.equals_element(&ele_i)
             // HACK: element at the center of a multi-line static text
-            // could be its parent
+            // could be something else
             || (cached_ele_i.role() == RoleOfInterest::StaticText
-                && ele_i
-                    .children()
-                    .is_ok_and(|children| children.iter().any(|c| cached_ele_i.equals_element(&c))))
+                && cached_ele_i.element().is_some_and(|e| e.same_sub_tree(&ele_i, 2)))
             || cached_ele_i.is_ancestor_of(&mut ele_i)
     }
 
