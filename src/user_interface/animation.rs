@@ -252,8 +252,13 @@ impl UIDrawer {
 
 impl HintBox {
     /// Fades the hint box out, then hides it.
-    pub fn fade_out(&self) {
-        for layer in std::iter::once(&self.box_layer).chain(self.frame_layer.iter()) {
+    pub fn fade_out(&self, hide_box: bool) {
+        let mut layers = self.frame_layer.iter().collect::<Vec<_>>();
+        if hide_box {
+            layers.push(&self.box_layer);
+        }
+
+        for layer in layers {
             // Set the model opacity to 0 before the animation so the layer
             // stays hidden after the animation is removed.
             layer.setOpacity(0.0);

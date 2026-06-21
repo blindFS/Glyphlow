@@ -6,6 +6,7 @@ use objc2_core_foundation::{CFRetained, CGSize};
 use objc2_core_graphics::{CGColor, CGMutablePath};
 use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer, kCAAlignmentCenter};
+use rstar::{AABB, RTree, RTreeObject};
 use std::collections::{HashMap, VecDeque};
 
 pub fn hint_label_from_index(i: usize, digits: Option<u32>) -> String {
@@ -42,7 +43,7 @@ pub struct HintBox {
     pub disabled: bool,
     /// Moved distance to avoid collision
     delta: (f64, f64),
-    frame: Option<Frame>,
+    frame: Frame,
     color: Option<CFRetained<CGColor>>,
     text_layer: Retained<CATextLayer>,
     pub(super) box_layer: Retained<CALayer>,
@@ -56,7 +57,7 @@ impl HintBox {
         label: String,
         x: f64,
         y: f64,
-        frame: Option<Frame>,
+        frame: Frame,
         color: Option<CFRetained<CGColor>>,
     ) -> Self {
         let bl = CALayer::new();
@@ -71,7 +72,7 @@ impl HintBox {
         let tri_layer = CAShapeLayer::new();
         bl.insertSublayer_atIndex(&tri_layer, 0);
 
-        let frame_layer = frame.map(|_| {
+        let frame_layer = color.as_ref().map(|_| {
             let fl = CALayer::new();
             fl.setBorderWidth(2.0);
             fl.setZPosition(-1.0);
@@ -167,12 +168,10 @@ impl HintBox {
         let bg_color = self.color.as_ref().unwrap_or(&theme.hint_bg_color);
 
         // Frame Layer
-        if let Some(fl) = &self.frame_layer
-            && let Some(frame) = &self.frame
-        {
-            let x = frame.top_left.x;
-            let y = frame.bottom_right.y;
-            let (w, h) = frame.size();
+        if let Some(fl) = &self.frame_layer {
+            let x = self.frame.top_left.x;
+            let y = self.frame.bottom_right.y;
+            let (w, h) = self.frame.size();
             fl.setFrame(NSRect::new(
                 calibrated_origin(x, y, overlay_frame),
                 NSSize::new(w, h),
@@ -320,18 +319,13 @@ pub fn hint_boxes_from_frames(
             let (w, h) = frame.size();
 
             // Draw frames for large enough elements
-            let frame = if w.max(h) >= colored_frame_min_size {
+            let is_large = w.max(h) >= colored_frame_min_size;
+            if is_large {
                 color_idx += 1;
-                Some(frame)
-            } else {
-                None
             };
-            let color = (color_num > 0)
-                .then(|| {
-                    frame
-                        .as_ref()
-                        .and_then(|_| theme.frame_colors.get(color_idx % color_num).cloned())
-                })
+
+            let color = (color_num > 0 && is_large)
+                .then(|| theme.frame_colors.get(color_idx % color_num).cloned())
                 .flatten();
 
             HintBox::new(
@@ -531,12 +525,82 @@ fn update_hint_text_with_attr(
     }
 }
 
+/// A wrapper to link a Frame reference to its original index in the slice
+struct IndexedFrame {
+    idx: usize,
+    frame: Frame,
+}
+
+impl RTreeObject for IndexedFrame {
+    type Envelope = AABB<[f64; 2]>;
+
+    fn envelope(&self) -> Self::Envelope {
+        AABB::from_corners(
+            [self.frame.top_left.x, self.frame.top_left.y],
+            [self.frame.bottom_right.x, self.frame.bottom_right.y],
+        )
+    }
+}
+
+fn find_overlaps_helper(boxes: Vec<IndexedFrame>, min_size: f64) -> Vec<(usize, usize, Frame)> {
+    let mut overlaps = Vec::new();
+    if boxes.is_empty() {
+        return overlaps;
+    }
+
+    // Bulk load the R*-Tree. This runs in O(N log N) and builds
+    // a structurally optimized tree with excellent cache locality.
+    let tree = RTree::bulk_load(boxes);
+
+    // Query the tree for intersections
+    for item in tree.iter() {
+        let query = tree.locate_in_envelope_intersecting(item.envelope());
+
+        for other in query {
+            // Deduplication
+            if item.idx < other.idx
+                && let Some(inter_frame) = item.frame.intersect(&other.frame)
+                // Exclude the cases where one contains the other
+                && inter_frame != item.frame
+                && inter_frame != other.frame
+                && {
+                    let (w, h) = inter_frame.size();
+                    w >= min_size && h >= min_size
+                }
+            {
+                overlaps.push((item.idx, other.idx, inter_frame));
+            }
+        }
+    }
+
+    overlaps
+}
+
+pub fn find_overlaps(hint_boxes: &[HintBox], min_size: f64) -> Vec<(usize, usize, Frame)> {
+    let frames = hint_boxes
+        .iter()
+        .enumerate()
+        .map(|(idx, b)| IndexedFrame {
+            idx,
+            frame: b.frame,
+        })
+        .collect();
+    find_overlaps_helper(frames, min_size)
+}
+
 #[cfg(test)]
 mod collision_tests {
     use super::*;
 
     fn mock_box(idx: usize, x: f64, y: f64) -> HintBox {
-        HintBox::new(idx, format!("Box{}", idx), x, y, None, None)
+        HintBox::new(
+            idx,
+            format!("Box{}", idx),
+            x,
+            y,
+            Frame::new(0.0, 0.0, 0.0, 0.0),
+            None,
+        )
     }
 
     #[test]
@@ -629,5 +693,141 @@ mod collision_tests {
 
         // This should hit the max_ops and exit gracefully
         resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 50);
+    }
+}
+
+#[cfg(test)]
+mod find_overlaps_tests {
+    use super::*;
+
+    /// Auxiliary helper to verify float equality within a tight epsilon
+    fn approx_eq(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-12
+    }
+
+    fn assert_frame_eq(
+        actual: &Frame,
+        expected_x1: f64,
+        expected_y1: f64,
+        expected_x2: f64,
+        expected_y2: f64,
+    ) {
+        assert!(
+            approx_eq(actual.top_left.x, expected_x1),
+            "Expected x1: {}, got: {}",
+            expected_x1,
+            actual.top_left.x
+        );
+        assert!(
+            approx_eq(actual.top_left.y, expected_y1),
+            "Expected y1: {}, got: {}",
+            expected_y1,
+            actual.top_left.y
+        );
+        assert!(
+            approx_eq(actual.bottom_right.x, expected_x2),
+            "Expected x2: {}, got: {}",
+            expected_x2,
+            actual.bottom_right.x
+        );
+        assert!(
+            approx_eq(actual.bottom_right.y, expected_y2),
+            "Expected y2: {}, got: {}",
+            expected_y2,
+            actual.bottom_right.y
+        );
+    }
+
+    fn to_indexed_frames(frames: &[Frame]) -> Vec<IndexedFrame> {
+        frames
+            .iter()
+            .enumerate()
+            .map(|(i, f)| IndexedFrame { idx: i, frame: *f })
+            .collect()
+    }
+
+    #[test]
+    fn test_zero_area_intersections() {
+        let boxes = vec![
+            Frame::new(0.0, 0.0, 10.0, 10.0),   // Box 0
+            Frame::new(10.0, 0.0, 20.0, 10.0), // Box 1: Shares a vertical edge segment with Box 0 at X = 10.0
+            Frame::new(10.0, 10.0, 20.0, 20.0), // Box 2: Shares exactly one corner vertex with Box 0 at (10.0, 10.0)
+        ];
+        let boxes = to_indexed_frames(&boxes);
+
+        let mut results = find_overlaps_helper(boxes, 0.0);
+        results.sort_by_key(|(u, v, _)| (*u, *v));
+
+        // Expected overlaps:
+        // - Box 0 & Box 1 (Line intersection at X=10 from Y=0 to 10)
+        // - Box 0 & Box 2 (Point intersection at X=10, Y=10)
+        // - Box 1 & Box 2 (Line intersection at Y=10 from X=10 to 20)
+        assert_eq!(results.len(), 3);
+
+        // 0 & 1
+        assert_eq!(results[0].0, 0);
+        assert_eq!(results[0].1, 1);
+        assert_frame_eq(&results[0].2, 10.0, 0.0, 10.0, 10.0);
+
+        // 0 & 2
+        assert_eq!(results[1].0, 0);
+        assert_eq!(results[1].1, 2);
+        assert_frame_eq(&results[1].2, 10.0, 10.0, 10.0, 10.0);
+
+        // 1 & 2
+        assert_eq!(results[2].0, 1);
+        assert_eq!(results[2].1, 2);
+        assert_frame_eq(&results[2].2, 10.0, 10.0, 20.0, 10.0);
+    }
+
+    #[test]
+    fn test_concentric_nested_boxes() {
+        let boxes = vec![
+            Frame::new(0.0, 0.0, 100.0, 100.0), // Box 0: Outer
+            Frame::new(20.0, 20.0, 80.0, 80.0), // Box 1: Middle
+            Frame::new(40.0, 40.0, 60.0, 60.0), // Box 2: Inner
+        ];
+        let boxes = to_indexed_frames(&boxes);
+
+        let mut results = find_overlaps_helper(boxes, 0.0);
+        results.sort_by_key(|(u, v, _)| (*u, *v));
+
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_thin_cross_intersection() {
+        let boxes = vec![
+            Frame::new(0.0, 45.0, 100.0, 55.0), // Box 0: Ultra-wide horizontal strip
+            Frame::new(45.0, 0.0, 55.0, 100.0), // Box 1: Ultra-tall vertical strip
+        ];
+        let boxes = to_indexed_frames(&boxes);
+
+        let results = find_overlaps_helper(boxes, 0.0);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, 0);
+        assert_eq!(results[0].1, 1);
+        // The intersection must be only the shared center square
+        assert_frame_eq(&results[0].2, 45.0, 45.0, 55.0, 55.0);
+    }
+
+    #[test]
+    fn test_floating_point_epsilon_near_miss() {
+        let epsilon = 1e-11;
+        let boxes = vec![
+            Frame::new(0.0, 0.0, 10.0, 10.0),
+            // Starts exactly an epsilon past the right boundary of Box 0
+            Frame::new(10.0 + epsilon, 0.0, 20.0, 10.0),
+        ];
+        let boxes = to_indexed_frames(&boxes);
+
+        let results = find_overlaps_helper(boxes, 0.0);
+
+        // Must be completely empty since they do not touch
+        assert!(
+            results.is_empty(),
+            "Found false positive intersection due to floating point drift."
+        );
     }
 }

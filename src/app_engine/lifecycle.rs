@@ -4,10 +4,14 @@ use crate::{
     ax_element::{ElementOfInterest, ElementSignal, Target, ThreadSafeElement, traverse},
     config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
     os_util::{AppWindowInfo, get_focused_window},
-    user_interface::{HintBox, hint_label_from_index, resolve_collisions},
+    user_interface::{HintBox, find_overlaps, hint_label_from_index, resolve_collisions},
     util::digits_by_length,
 };
-use accessibility::AXUIElementAttributes;
+use accessibility::{AXUIElement, AXUIElementAttributes};
+use accessibility_sys::{
+    AXUIElementCopyElementAtPosition, AXUIElementCreateSystemWide, AXUIElementRef,
+};
+use core_foundation::base::{CFRelease, TCFType};
 use log::Level;
 use objc2::rc::autoreleasepool;
 use objc2_quartz_core::CATransaction;
@@ -174,6 +178,49 @@ impl AppEngine {
         log::debug!("Finish traversing");
     }
 
+    fn resolve_overlapping(&mut self) {
+        unsafe {
+            let system_wide = AXUIElementCreateSystemWide();
+            if system_wide.is_null() {
+                return;
+            }
+
+            for (i, mut j, i_f) in find_overlaps(&self.hint_boxes, 3.0) {
+                let (x, y) = i_f.center();
+                let mut target: AXUIElementRef = std::ptr::null_mut();
+                AXUIElementCopyElementAtPosition(system_wide, x as f32, y as f32, &mut target);
+                if target.is_null() {
+                    continue;
+                }
+
+                let mut target_ele = AXUIElement::wrap_under_create_rule(target);
+
+                loop {
+                    if self.element_cache.cache[i].equals_element(&target_ele) {
+                        break;
+                    } else if self.element_cache.cache[j].equals_element(&target_ele) {
+                        j = i;
+                        break;
+                    } else if let Ok(parent) = target_ele.parent() {
+                        target_ele = parent;
+                    } else {
+                        break;
+                    }
+                }
+
+                let (x_j, y_j) = self.element_cache.cache[j].frame.center();
+                if i_f.contains_point(x_j, y_j) {
+                    self.hint_boxes[j].disabled = true;
+                    self.hint_boxes[j].fade_out(true);
+                } else {
+                    // Center out of box, hide frames only
+                    self.hint_boxes[j].fade_out(false);
+                }
+            }
+            CFRelease(system_wide as *mut _);
+        }
+    }
+
     fn handle_element_found(
         &mut self,
         ele: ElementOfInterest,
@@ -193,13 +240,11 @@ impl AppEngine {
             let color_num = self.config.theme.frame_colors.len();
 
             // Draw frames for large enough elements
-            let frame = if w.max(h) >= self.config.colored_frame_min_size as f64 {
+            let is_large = w.max(h) >= self.config.colored_frame_min_size as f64;
+            if is_large {
                 *color_idx += 1;
-                Some(eoi.frame)
-            } else {
-                None
             };
-            let color = (color_num > 0 && frame.is_some())
+            let color = (color_num > 0 && is_large)
                 .then(|| {
                     self.config
                         .theme
@@ -209,7 +254,14 @@ impl AppEngine {
                 })
                 .flatten();
 
-            let mut hb = HintBox::new(idx, hint_label_from_index(idx, None), x, y, frame, color);
+            let mut hb = HintBox::new(
+                idx,
+                hint_label_from_index(idx, None),
+                x,
+                y,
+                eoi.frame,
+                color,
+            );
 
             hb.draw(
                 &self.drawer.root,
@@ -237,6 +289,7 @@ impl AppEngine {
         let need_help_msg = target == Target::ChildElement && self.selected.is_none();
 
         if !self.hint_boxes.is_empty() {
+            self.resolve_overlapping();
             resolve_collisions(&mut self.hint_boxes, self.hint_width, &self.config.theme);
             // Update layers to match final positions and labels without clearing (avoid flicker)
             self.finalize_hints();

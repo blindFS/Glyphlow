@@ -254,6 +254,10 @@ impl ElementOfInterest {
         }
     }
 
+    pub fn equals_element(&self, other: &AXUIElement) -> bool {
+        self.element().is_some_and(|this| this == other)
+    }
+
     pub fn ascii_search_target(&self) -> String {
         let raw = self
             .context
