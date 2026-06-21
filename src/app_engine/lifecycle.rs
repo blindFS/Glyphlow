@@ -178,6 +178,8 @@ impl AppEngine {
         log::debug!("Finish traversing");
     }
 
+    const TEXT_VIS_CHECK_DEPTH: u8 = 2;
+
     fn hint_visiblility_check(&self, idx: usize, system_wide: AXUIElementRef) -> bool {
         let (x_i, y_i) = self.hint_boxes[idx].frame.center();
         let ele_i = unsafe { element_at_point(system_wide, x_i, y_i) };
@@ -189,7 +191,7 @@ impl AppEngine {
             // HACK: element at the center of a multi-line static text
             // could be something else
             || (cached_ele_i.role() == RoleOfInterest::StaticText
-                && cached_ele_i.element().is_some_and(|e| e.same_sub_tree(&ele_i, 2)))
+                && cached_ele_i.element().is_some_and(|e| e.same_sub_tree(&ele_i, Self::TEXT_VIS_CHECK_DEPTH)))
             || cached_ele_i.is_ancestor_of(&mut ele_i)
     }
 
@@ -198,10 +200,9 @@ impl AppEngine {
         if system_wide.is_null() {
             return;
         }
+        let mut confirmed_visible = vec![false; self.hint_boxes.len()];
 
         for (i, mut j, i_f) in find_overlaps(&self.hint_boxes, 3.0) {
-            let mut confirmed_visible = vec![false; self.hint_boxes.len()];
-
             if !confirmed_visible[i] && !self.hint_boxes[i].disabled {
                 if self.hint_visiblility_check(i, system_wide) {
                     confirmed_visible[i] = true;
