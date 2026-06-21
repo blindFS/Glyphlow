@@ -19,7 +19,7 @@ jobs:
       hash: ${{ steps.get_meta.outputs.hash }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
