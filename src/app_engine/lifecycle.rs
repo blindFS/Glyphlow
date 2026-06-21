@@ -203,7 +203,12 @@ impl AppEngine {
         let mut confirmed_visible = vec![false; self.hint_boxes.len()];
 
         for (i, mut j, i_f) in find_overlaps(&self.hint_boxes, 3.0) {
-            if !confirmed_visible[i] && !self.hint_boxes[i].disabled {
+            // NOTE: visibility check by element at center point is not reliable
+            // for electron apps
+            if !self.last_app_window_info.is_electron
+                && !confirmed_visible[i]
+                && !self.hint_boxes[i].disabled
+            {
                 if self.hint_visiblility_check(i, system_wide) {
                     confirmed_visible[i] = true;
                 } else {
@@ -213,7 +218,10 @@ impl AppEngine {
                 }
             }
 
-            if !confirmed_visible[j] && !self.hint_boxes[j].disabled {
+            if !self.last_app_window_info.is_electron
+                && !confirmed_visible[j]
+                && !self.hint_boxes[j].disabled
+            {
                 if self.hint_visiblility_check(j, system_wide) {
                     confirmed_visible[j] = true;
                 } else {
