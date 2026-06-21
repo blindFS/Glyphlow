@@ -23,6 +23,7 @@ const CURSOR_OFFSET_X: f64 = 9.0;
 const CURSOR_OFFSET_Y: f64 = 15.0;
 
 const HINT_FADE_OUT_DURATION: f64 = 0.5;
+const HINT_DIM_OPACITY: f32 = 0.25;
 
 impl UIDrawer {
     /// Triggers a ripple animation at the given (x, y) coordinates inside a parent CALayer.
@@ -254,7 +255,7 @@ impl HintBox {
     /// Fades the hint box out, then hides it.
     pub fn fade_out(&self, hide_box: bool) {
         let mut layers = self.frame_layer.iter().collect::<Vec<_>>();
-        let mut ending_opacity = 0.25;
+        let mut ending_opacity = HINT_DIM_OPACITY;
         if hide_box {
             layers.push(&self.box_layer);
             ending_opacity = 0.0;

@@ -194,58 +194,66 @@ impl AppEngine {
     }
 
     fn resolve_overlapping(&mut self) {
-        unsafe {
-            let system_wide = AXUIElementCreateSystemWide();
-            if system_wide.is_null() {
-                return;
-            }
-
-            for (i, mut j, i_f) in find_overlaps(&self.hint_boxes, 3.0) {
-                let mut confirmed_visible = vec![false; self.hint_boxes.len()];
-
-                if !confirmed_visible[i] && !self.hint_boxes[i].disabled {
-                    if self.hint_visiblility_check(i, system_wide) {
-                        confirmed_visible[i] = true;
-                    } else {
-                        self.hint_boxes[i].fade_out(true);
-                        self.hint_boxes[i].disabled = true;
-                        continue;
-                    }
-                }
-
-                if !confirmed_visible[j] && !self.hint_boxes[j].disabled {
-                    if self.hint_visiblility_check(j, system_wide) {
-                        confirmed_visible[j] = true;
-                    } else {
-                        self.hint_boxes[j].fade_out(true);
-                        self.hint_boxes[j].disabled = true;
-                        continue;
-                    }
-                }
-
-                // NOTE: Both are visible on their own, check the center of the overlap
-                let (x, y) = i_f.center();
-                let Some(mut target_ele) = element_at_point(system_wide, x, y) else {
-                    continue;
-                };
-
-                loop {
-                    if self.element_cache.cache[i].equals_element(&target_ele) {
-                        break;
-                    } else if self.element_cache.cache[j].equals_element(&target_ele) {
-                        j = i;
-                        break;
-                    } else if let Ok(parent) = target_ele.parent() {
-                        target_ele = parent;
-                    } else {
-                        break;
-                    }
-                }
-
-                self.hint_boxes[j].fade_out(false);
-            }
-            CFRelease(system_wide as *mut _);
+        let system_wide = unsafe { AXUIElementCreateSystemWide() };
+        if system_wide.is_null() {
+            return;
         }
+
+        for (i, mut j, i_f) in find_overlaps(&self.hint_boxes, 3.0) {
+            let mut confirmed_visible = vec![false; self.hint_boxes.len()];
+
+            if !confirmed_visible[i] && !self.hint_boxes[i].disabled {
+                if self.hint_visiblility_check(i, system_wide) {
+                    confirmed_visible[i] = true;
+                } else {
+                    self.hint_boxes[i].fade_out(true);
+                    self.hint_boxes[i].disabled = true;
+                    continue;
+                }
+            }
+
+            if !confirmed_visible[j] && !self.hint_boxes[j].disabled {
+                if self.hint_visiblility_check(j, system_wide) {
+                    confirmed_visible[j] = true;
+                } else {
+                    self.hint_boxes[j].fade_out(true);
+                    self.hint_boxes[j].disabled = true;
+                    continue;
+                }
+            }
+
+            if self.hint_boxes[i].disabled || self.hint_boxes[j].disabled {
+                continue;
+            }
+
+            // NOTE: One contains the other
+            if i_f == self.hint_boxes[i].frame || i_f == self.hint_boxes[j].frame {
+                continue;
+            }
+
+            // NOTE: Both are visible on their own, check the center of the overlap
+            let (x, y) = i_f.center();
+            let target_ele = unsafe { element_at_point(system_wide, x, y) };
+            let Some(mut target_ele) = target_ele else {
+                continue;
+            };
+
+            loop {
+                if self.element_cache.cache[i].equals_element(&target_ele) {
+                    break;
+                } else if self.element_cache.cache[j].equals_element(&target_ele) {
+                    j = i;
+                    break;
+                } else if let Ok(parent) = target_ele.parent() {
+                    target_ele = parent;
+                } else {
+                    break;
+                }
+            }
+
+            self.hint_boxes[j].fade_out(false);
+        }
+        unsafe { CFRelease(system_wide as *mut _) };
     }
 
     fn handle_element_found(
@@ -281,14 +289,8 @@ impl AppEngine {
                 })
                 .flatten();
 
-            let mut hb = HintBox::new(
-                idx,
-                hint_label_from_index(idx, None),
-                x,
-                y,
-                eoi.frame,
-                color,
-            );
+            let label = hint_label_from_index(idx, None);
+            let mut hb = HintBox::new(idx, label, x, y, eoi.frame, color);
 
             hb.draw(
                 &self.drawer.root,
