@@ -258,6 +258,23 @@ impl ElementOfInterest {
         self.element().is_some_and(|this| this == other)
     }
 
+    pub fn is_ancestor_of(&self, other: &mut AXUIElement) -> bool {
+        let Some(this) = self.element() else {
+            return false;
+        };
+
+        loop {
+            if other == this {
+                return true;
+            }
+            if let Ok(parent) = other.parent() {
+                *other = parent;
+            } else {
+                return false;
+            }
+        }
+    }
+
     pub fn ascii_search_target(&self) -> String {
         let raw = self
             .context
@@ -993,7 +1010,7 @@ fn traverse_elements(
                         result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
                             element.clone(),
                             Some(value),
-                            RoleOfInterest::StaticText,
+                            RoleOfInterest::CheckBox,
                             ele_fp.frame,
                         )));
                 }

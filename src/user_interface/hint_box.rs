@@ -43,7 +43,7 @@ pub struct HintBox {
     pub disabled: bool,
     /// Moved distance to avoid collision
     delta: (f64, f64),
-    frame: Frame,
+    pub frame: Frame,
     color: Option<CFRetained<CGColor>>,
     text_layer: Retained<CATextLayer>,
     pub(super) box_layer: Retained<CALayer>,
@@ -93,6 +93,10 @@ impl HintBox {
             tri_layer,
             frame_layer,
         }
+    }
+
+    pub fn is_colored(&self) -> bool {
+        self.color.is_some()
     }
 
     fn geometry(theme: &GlyphlowTheme) -> (f64, f64) {
@@ -561,8 +565,6 @@ fn find_overlaps_helper(boxes: Vec<IndexedFrame>, min_size: f64) -> Vec<(usize, 
             if item.idx < other.idx
                 && let Some(inter_frame) = item.frame.intersect(&other.frame)
                 // Exclude the cases where one contains the other
-                && inter_frame != item.frame
-                && inter_frame != other.frame
                 && {
                     let (w, h) = inter_frame.size();
                     w >= min_size && h >= min_size
@@ -792,7 +794,7 @@ mod find_overlaps_tests {
         let mut results = find_overlaps_helper(boxes, 0.0);
         results.sort_by_key(|(u, v, _)| (*u, *v));
 
-        assert!(results.is_empty());
+        assert_eq!(results.len(), 3);
     }
 
     #[test]

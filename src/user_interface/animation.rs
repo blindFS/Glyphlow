@@ -254,20 +254,22 @@ impl HintBox {
     /// Fades the hint box out, then hides it.
     pub fn fade_out(&self, hide_box: bool) {
         let mut layers = self.frame_layer.iter().collect::<Vec<_>>();
+        let mut ending_opacity = 0.25;
         if hide_box {
             layers.push(&self.box_layer);
+            ending_opacity = 0.0;
         }
 
         for layer in layers {
             // Set the model opacity to 0 before the animation so the layer
             // stays hidden after the animation is removed.
-            layer.setOpacity(0.0);
+            layer.setOpacity(ending_opacity);
 
             CATransaction::begin();
             unsafe {
                 let anim = CABasicAnimation::animationWithKeyPath(Some(ns_string!("opacity")));
-                anim.setFromValue(Some(&NSNumber::new_f64(1.0)));
-                anim.setToValue(Some(&NSNumber::new_f64(0.0)));
+                anim.setFromValue(Some(&NSNumber::new_f32(1.0)));
+                anim.setToValue(Some(&NSNumber::new_f32(ending_opacity)));
                 anim.setDuration(HINT_FADE_OUT_DURATION);
                 anim.setRemovedOnCompletion(true);
                 layer.addAnimation_forKey(&anim, Some(ns_string!("fade_out")));

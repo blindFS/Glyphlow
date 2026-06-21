@@ -3,15 +3,13 @@ use crate::{
     AppSignal, Mode,
     ax_element::{ElementOfInterest, ElementSignal, Target, ThreadSafeElement, traverse},
     config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
-    os_util::{AppWindowInfo, get_focused_window},
+    os_util::{AppWindowInfo, element_at_point, get_focused_window},
     user_interface::{HintBox, find_overlaps, hint_label_from_index, resolve_collisions},
     util::digits_by_length,
 };
-use accessibility::{AXUIElement, AXUIElementAttributes};
-use accessibility_sys::{
-    AXUIElementCopyElementAtPosition, AXUIElementCreateSystemWide, AXUIElementRef,
-};
-use core_foundation::base::{CFRelease, TCFType};
+use accessibility::AXUIElementAttributes;
+use accessibility_sys::{AXUIElementCreateSystemWide, AXUIElementRef};
+use core_foundation::base::CFRelease;
 use log::Level;
 use objc2::rc::autoreleasepool;
 use objc2_quartz_core::CATransaction;
@@ -178,6 +176,23 @@ impl AppEngine {
         log::debug!("Finish traversing");
     }
 
+    fn hint_visiblility_check(&self, idx: usize, system_wide: AXUIElementRef) -> bool {
+        let (x_i, y_i) = self.hint_boxes[idx].frame.center();
+        let ele_i = unsafe { element_at_point(system_wide, x_i, y_i) };
+        let Some(mut ele_i) = ele_i else {
+            return false;
+        };
+        let cached_ele_i = &self.element_cache.cache[idx];
+        cached_ele_i.equals_element(&ele_i)
+            // HACK: element at the center of a multi-line static text
+            // could be its parent
+            || (cached_ele_i.role() == RoleOfInterest::StaticText
+                && ele_i
+                    .children()
+                    .is_ok_and(|children| children.iter().any(|c| cached_ele_i.equals_element(&c))))
+            || cached_ele_i.is_ancestor_of(&mut ele_i)
+    }
+
     fn resolve_overlapping(&mut self) {
         unsafe {
             let system_wide = AXUIElementCreateSystemWide();
@@ -186,14 +201,33 @@ impl AppEngine {
             }
 
             for (i, mut j, i_f) in find_overlaps(&self.hint_boxes, 3.0) {
-                let (x, y) = i_f.center();
-                let mut target: AXUIElementRef = std::ptr::null_mut();
-                AXUIElementCopyElementAtPosition(system_wide, x as f32, y as f32, &mut target);
-                if target.is_null() {
-                    continue;
+                let mut confirmed_visible = vec![false; self.hint_boxes.len()];
+
+                if !confirmed_visible[i] && !self.hint_boxes[i].disabled {
+                    if self.hint_visiblility_check(i, system_wide) {
+                        confirmed_visible[i] = true;
+                    } else {
+                        self.hint_boxes[i].fade_out(true);
+                        self.hint_boxes[i].disabled = true;
+                        continue;
+                    }
                 }
 
-                let mut target_ele = AXUIElement::wrap_under_create_rule(target);
+                if !confirmed_visible[j] && !self.hint_boxes[j].disabled {
+                    if self.hint_visiblility_check(j, system_wide) {
+                        confirmed_visible[j] = true;
+                    } else {
+                        self.hint_boxes[j].fade_out(true);
+                        self.hint_boxes[j].disabled = true;
+                        continue;
+                    }
+                }
+
+                // NOTE: Both are visible on their own, check the center of the overlap
+                let (x, y) = i_f.center();
+                let Some(mut target_ele) = element_at_point(system_wide, x, y) else {
+                    continue;
+                };
 
                 loop {
                     if self.element_cache.cache[i].equals_element(&target_ele) {
@@ -208,14 +242,7 @@ impl AppEngine {
                     }
                 }
 
-                let (x_j, y_j) = self.element_cache.cache[j].frame.center();
-                if i_f.contains_point(x_j, y_j) {
-                    self.hint_boxes[j].disabled = true;
-                    self.hint_boxes[j].fade_out(true);
-                } else {
-                    // Center out of box, hide frames only
-                    self.hint_boxes[j].fade_out(false);
-                }
+                self.hint_boxes[j].fade_out(false);
             }
             CFRelease(system_wide as *mut _);
         }
@@ -289,7 +316,9 @@ impl AppEngine {
         let need_help_msg = target == Target::ChildElement && self.selected.is_none();
 
         if !self.hint_boxes.is_empty() {
-            self.resolve_overlapping();
+            if matches!(target, Target::Clickable | Target::Text) {
+                self.resolve_overlapping();
+            }
             resolve_collisions(&mut self.hint_boxes, self.hint_width, &self.config.theme);
             // Update layers to match final positions and labels without clearing (avoid flicker)
             self.finalize_hints();
