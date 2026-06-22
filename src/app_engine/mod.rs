@@ -1,5 +1,5 @@
 use crate::{
-    AppSignal, KeyState, Mode,
+    AppSignal, KeyState, Mode, ScrollAction,
     action::{OCRResult, WordPicker, screen_shot, text_from_clipboard},
     ax_element::{ElementCache, ElementOfInterest, Target},
     config::{GlyphlowConfig, RoleOfInterest, WorkFlowAction},
@@ -159,9 +159,27 @@ impl AppEngine {
                 self.execute_workflow(idx);
             }
             AppSignal::ScrollAction(sa) => {
-                self.perform_scroll_action(sa);
+                if self.check_mode(Mode::DictionaryScrolling) {
+                    match sa {
+                        ScrollAction::IncreaseDistance => {
+                            self.config.scroll_distance *= 1.5;
+                        }
+                        ScrollAction::DecreaseDistance => {
+                            self.config.scroll_distance /= 1.5;
+                        }
+                        _ => {
+                            self.drawer.scroll_menu(sa, self.config.scroll_distance);
+                        }
+                    }
+                } else {
+                    self.perform_scroll_action(sa);
+                }
             }
             AppSignal::TextAction(ta) => self.perform_text_action(ta),
+            AppSignal::BackToTextActionMenu => {
+                self.set_mode(Mode::TextActionMenu);
+                self.menu_refresh("", false);
+            }
             AppSignal::ToggleMultiSelection => match self.target {
                 Target::Text => {
                     self.toggle_multiselection();

@@ -74,6 +74,7 @@ pub enum AppSignal {
     StartSearch,
     FinishSearch(FilterMode),
     SearchDebounce(usize, FilterMode),
+    BackToTextActionMenu,
 }
 
 #[derive(Debug, PartialEq)]
@@ -174,6 +175,7 @@ pub enum Mode {
     Filtering,
     Idle,
     Scrolling,
+    DictionaryScrolling,
     TextActionMenu,
     ImageActionMenu,
     WordPicking,
@@ -307,7 +309,11 @@ impl KeyListener {
     ) -> bool {
         let key_char = key.to_char();
         if *key == Key::Backspace || *key == Key::Delete {
-            key_state.pop();
+            if *state == Mode::DictionaryScrolling && key_state.prefix.is_empty() {
+                self.send(AppSignal::BackToTextActionMenu);
+            } else {
+                key_state.pop();
+            }
         } else if key_state.prefix.chars().count() < self.menu_action_max_key_len[&menu_type] {
             key_state.push(key_char);
         }
@@ -324,7 +330,9 @@ impl KeyListener {
             self.send(AppSignal::DeActivate);
             key_state.clear_prefix();
         } else {
-            self.send(AppSignal::MenuRefresh(key_state.prefix.clone()));
+            if *state != Mode::DictionaryScrolling {
+                self.send(AppSignal::MenuRefresh(key_state.prefix.clone()));
+            }
         }
         true
     }
@@ -379,7 +387,9 @@ impl KeyListener {
             Mode::ImageActionMenu => {
                 self.menu_helper(&key, MenuType::ImageAction, state, key_state)
             }
-            Mode::Scrolling => self.menu_helper(&key, MenuType::Scroll, state, key_state),
+            Mode::Scrolling | Mode::DictionaryScrolling => {
+                self.menu_helper(&key, MenuType::Scroll, state, key_state)
+            }
             Mode::Searching(mode) => {
                 match key {
                     Key::Enter => self.send(AppSignal::FinishSearch(mode)),

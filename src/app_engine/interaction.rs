@@ -155,6 +155,11 @@ impl AppEngine {
                     &self.config.theme,
                 ) {
                     self.drawer.draw_attributed_string(attr_string, false);
+                    let menu_h = self.drawer.menu_height();
+                    let screen_h = self.drawer.current_screen_frame.size().1;
+                    if menu_h > screen_h {
+                        self.set_mode(Mode::DictionaryScrolling);
+                    }
                 } else {
                     self.notify("No definition found.", Level::Warn);
                 }
