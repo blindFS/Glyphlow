@@ -247,11 +247,14 @@ impl AppEngine {
                 continue;
             };
 
+            let mut match_one_side = false;
             loop {
                 if self.element_cache.cache[i].equals_element(&target_ele) {
+                    match_one_side = true;
                     break;
                 } else if self.element_cache.cache[j].equals_element(&target_ele) {
                     j = i;
+                    match_one_side = true;
                     break;
                 } else if let Ok(parent) = target_ele.parent() {
                     target_ele = parent;
@@ -260,7 +263,9 @@ impl AppEngine {
                 }
             }
 
-            self.hint_boxes[j].fade_out(false);
+            if match_one_side {
+                self.hint_boxes[j].fade_out(false);
+            }
         }
         unsafe { CFRelease(system_wide as *mut _) };
     }

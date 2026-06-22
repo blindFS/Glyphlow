@@ -281,6 +281,11 @@ impl HintBox {
     pub fn refresh(&self, prefix_len: usize, screen_frame: &Frame, theme: &GlyphlowTheme) {
         let has_resized = self.update_text(prefix_len, theme);
         self.update_position(has_resized, screen_frame, theme);
+        if prefix_len > 0
+            && let Some(frame_layer) = &self.frame_layer
+        {
+            frame_layer.setOpacity(1.0);
+        }
     }
 
     pub fn set_visible(&self, visible: bool) {

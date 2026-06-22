@@ -1,4 +1,5 @@
 use crate::{
+    ScrollAction,
     config::GlyphlowTheme,
     util::{Frame, estimate_frame_for_text, format_fixed_width},
 };
@@ -427,6 +428,54 @@ impl UIDrawer {
         self.selected_frame.setHidden(true);
         self.clear_notifications();
         CATransaction::commit();
+        CATransaction::flush();
+    }
+
+    pub fn menu_height(&self) -> f64 {
+        self.menu.container.frame().size.height
+    }
+
+    pub fn scroll_menu(&self, sa: ScrollAction, scroll_distance: f64) {
+        let frame = self.menu.container.frame();
+        let box_height = frame.size.height;
+        let screen_height = self.current_screen_frame.size().1;
+        if box_height <= screen_height {
+            return;
+        }
+
+        // Calculate screen top and bottom in Cocoa y
+        let screen_top_cocoa_y =
+            self.overlay_frame.bottom_right.y - self.current_screen_frame.top_left.y;
+        let screen_bottom_cocoa_y =
+            self.overlay_frame.bottom_right.y - self.current_screen_frame.bottom_right.y;
+
+        let initial_y = screen_top_cocoa_y - box_height;
+        let bottom_y = screen_bottom_cocoa_y;
+
+        let step = screen_height * scroll_distance;
+        let mut y = frame.origin.y;
+
+        match sa {
+            ScrollAction::DownRight => {
+                y += step;
+            }
+            ScrollAction::UpLeft => {
+                y -= step;
+            }
+            ScrollAction::Top => {
+                y = initial_y;
+            }
+            ScrollAction::Bottom => {
+                y = bottom_y;
+            }
+            _ => {}
+        }
+
+        let new_y = y.clamp(initial_y, bottom_y);
+        let mut new_frame = frame;
+        new_frame.origin.y = new_y;
+
+        self.menu.container.setFrame(new_frame);
         CATransaction::flush();
     }
 }
