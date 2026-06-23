@@ -288,6 +288,13 @@ impl HintBox {
         }
     }
 
+    pub fn set_opacity(&self, opacity: f32) {
+        self.box_layer.setOpacity(opacity);
+        if let Some(fl) = &self.frame_layer {
+            fl.setOpacity(opacity);
+        }
+    }
+
     pub fn set_visible(&self, visible: bool) {
         self.box_layer.setHidden(!visible);
         if let Some(fl) = &self.frame_layer {
