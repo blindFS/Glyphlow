@@ -289,9 +289,20 @@ impl AppEngine {
         if let Some(eoi) = self.selected.as_ref() {
             self.draw_element_menu(key_prefix, eoi.role(), set_mode);
         } else {
-            self.draw_dashboard(key_prefix);
-            // NOTE: for slow element.press() call
-            self.set_mode(Mode::DashBoard);
+            // Only fall back to DashBoard when there is no active content mode.
+            // Modes like Scrolling, TextActionMenu and ImageActionMenu already
+            // have their own drawing path via draw_element_menu; setting the
+            // mode to DashBoard here would corrupt their key-prefix state.
+            let is_dashboard_mode = self
+                .state
+                .try_lock()
+                .map(|g| matches!(*g, Mode::DashBoard | Mode::Idle))
+                .unwrap_or(false);
+            if is_dashboard_mode {
+                self.draw_dashboard(key_prefix);
+                // NOTE: for slow element.press() call
+                self.set_mode(Mode::DashBoard);
+            }
         }
     }
 

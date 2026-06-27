@@ -140,7 +140,7 @@ fn main() {
 
         println!("Running Scenario 6: Word Picking Mode & Searching inside Word Picking");
         run_test_scenario(vec![
-            TestEvent::SetClipboard("word1 word2 word3".to_string()),
+            TestEvent::SetClipboard("alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega one two three".to_string()),
             TestEvent::ExpectMode(Mode::Idle),
             TestEvent::PressKey(Key::AltLeft),
             TestEvent::PressKey(Key::KeyG),

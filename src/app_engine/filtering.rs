@@ -17,11 +17,11 @@ const DEBOUNCE_TIMEOUT: u64 = 150;
 impl AppEngine {
     fn ocr_res_filtering(&mut self) {
         if self.hint_boxes.is_empty() {
+            let Some(ocr_res) = self.ocr_cache.as_ref() else {
+                log::warn!("ocr_res_filtering called but OCR cache is not set.");
+                return;
+            };
             let (digits, ocr_hints) = {
-                let ocr_res = self
-                    .ocr_cache
-                    .as_ref()
-                    .expect("Internal Error: OCR cache not set.");
                 let len = ocr_res.len();
                 let iter = ocr_res.iter().map(|(_, rect)| Frame::from_cgrect(rect));
                 hint_boxes_from_frames(
@@ -44,10 +44,11 @@ impl AppEngine {
             {
                 if self.multi_selection.is_on {
                     if let Some((idx1, idx2)) = self.multi_selection.set_one_side(hb_idx) {
-                        let choices: Vec<(String, Frame, bool)> = self
-                            .ocr_cache
-                            .as_ref()
-                            .expect("Internal Error: OCR cache not set.")
+                        let Some(ocr_res) = self.ocr_cache.as_ref() else {
+                            log::warn!("ocr_res_filtering called but OCR cache is not set.");
+                            return;
+                        };
+                        let choices: Vec<(String, Frame, bool)> = ocr_res
                             .iter()
                             .map(|(s, rect)| (s.clone(), Frame::from_cgrect(rect), true))
                             .collect::<Vec<_>>();
@@ -62,10 +63,11 @@ impl AppEngine {
                         self.update_hints();
                     }
                 } else {
-                    let (selected_text, cg_rect) = self
-                        .ocr_cache
-                        .as_ref()
-                        .expect("Internal Error: OCR cache not set.")
+                    let Some(ocr_res) = self.ocr_cache.as_ref() else {
+                        log::warn!("ocr_res_filtering called but OCR cache is not set.");
+                        return;
+                    };
+                    let (selected_text, cg_rect) = ocr_res
                         .get(hb_idx)
                         .expect("Internal Error: wrong ocr hint indexing.");
                     let selected_text = selected_text.clone();
