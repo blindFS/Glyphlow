@@ -407,7 +407,6 @@ impl UIDrawer {
         self.menu.hide();
         self.search_bar.hide();
         self.clear_notifications();
-        CATransaction::flush();
     }
 
     pub fn clear_menus_instant(&mut self) {
