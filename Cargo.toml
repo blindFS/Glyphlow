@@ -31,3 +31,8 @@ simple_logger = "5.2.0"
 log = "0.4.32"
 any_ascii = "0.3.3"
 rstar = "0.13.0"
+
+[[test]]
+name = "lifecycle_tests"
+path = "tests/lifecycle_tests.rs"
+harness = false

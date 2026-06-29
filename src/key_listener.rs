@@ -58,6 +58,7 @@ pub enum AppSignal {
     HintFilter(char, FilterMode),
     SearchFilter(char, FilterMode),
     MenuRefresh(String),
+    DashboardRefresh(String),
     ActOnEnter,
     // Sub state signals
     FileUpdate(PathBuf),
@@ -372,7 +373,7 @@ impl KeyListener {
                         || k.right_alternative()
                             .is_some_and(|r| *k == r || key_state.pressed_keys.contains(&r))
                 }) {
-                    self.send(AppSignal::MenuRefresh("".into()));
+                    self.send(AppSignal::DashboardRefresh("".into()));
                     *state = Mode::DashBoard;
                     true
                 } else {

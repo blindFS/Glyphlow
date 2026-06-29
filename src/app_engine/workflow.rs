@@ -1,5 +1,6 @@
 use super::AppEngine;
 use crate::{
+    Mode,
     ax_element::{CompiledTarget, GetAttribute, SetAttribute, Target},
     config::{RoleOfInterest, WorkFlow, WorkFlowAction},
 };
@@ -35,7 +36,12 @@ impl AppEngine {
         // Actions don't need a selected element
         match act {
             WorkFlowAction::GlyphlowMenu => {
-                self.menu_refresh("", true);
+                if self.selected.is_some() {
+                    self.menu_refresh("", true);
+                } else {
+                    self.draw_dashboard("");
+                    self.set_mode(Mode::DashBoard);
+                }
                 // HACK: break the loop so the notification will be kept,
                 // basically `GlyphlowMenu` should be a terminal op
                 self.pending_workflow_actions.clear();
