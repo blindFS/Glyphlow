@@ -178,7 +178,7 @@ impl AppEngine {
         msg
     }
 
-    fn draw_dashboard(&mut self, key_prefix: &str) {
+    pub(super) fn draw_dashboard(&mut self, key_prefix: &str) {
         // NOTE: need `self.last_app_window_info` for `is_workflow_valid` check,
         // but shouldn't set `self.selected` yet
         if self.selected.is_none() {
@@ -288,21 +288,6 @@ impl AppEngine {
     pub(super) fn menu_refresh(&mut self, key_prefix: &str, set_mode: bool) {
         if let Some(eoi) = self.selected.as_ref() {
             self.draw_element_menu(key_prefix, eoi.role(), set_mode);
-        } else {
-            // Only fall back to DashBoard when there is no active content mode.
-            // Modes like Scrolling, TextActionMenu and ImageActionMenu already
-            // have their own drawing path via draw_element_menu; setting the
-            // mode to DashBoard here would corrupt their key-prefix state.
-            let is_dashboard_mode = self
-                .state
-                .try_lock()
-                .map(|g| matches!(*g, Mode::DashBoard | Mode::Idle))
-                .unwrap_or(false);
-            if is_dashboard_mode {
-                self.draw_dashboard(key_prefix);
-                // NOTE: for slow element.press() call
-                self.set_mode(Mode::DashBoard);
-            }
         }
     }
 

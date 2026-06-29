@@ -154,6 +154,10 @@ impl AppEngine {
             AppSignal::MenuRefresh(key_prefix) => {
                 self.menu_refresh(&key_prefix, false);
             }
+            AppSignal::DashboardRefresh(key_prefix) => {
+                self.draw_dashboard(&key_prefix);
+                self.set_mode(Mode::DashBoard);
+            }
             AppSignal::RunWorkFlow(idx) => {
                 self.drawer.clear_menus();
                 self.execute_workflow(idx);
@@ -229,8 +233,8 @@ impl AppEngine {
                 if self.target == Target::ChildElement {
                     // To act on selected parent node
                     self.clear_cache();
+                    self.draw_dashboard("");
                     self.set_mode(Mode::DashBoard);
-                    self.menu_refresh("", false);
                 }
             }
             AppSignal::ScreenShot => {
