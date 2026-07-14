@@ -185,6 +185,7 @@ A comprehensive configuration file is generated when you run this app at the fir
 | `workflows` | Sequences of primitive actions for specific UI roles | `[Default Workflows]` |
 | `scroll_distance` | Relative distance to scroll when using scroll actions | `0.05` |
 | `hide_scrolling_menu` | Whether to hide the menu when scrolling | `false` |
+| `hide_covered_elements` | Whether to hide invisible/covered elements when there's overlapping detected. (Press ⌫ to redraw false positives) | `true` |
 | `element_min_width` | Minimum width for UI elements to be considered | `15` |
 | `element_min_height` | Minimum height for UI elements to be considered | `15` |
 | `image_min_size` | Minimum size (width/height) for images | `20` |
