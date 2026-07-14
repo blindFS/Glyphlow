@@ -332,7 +332,9 @@ impl AppEngine {
         let need_help_msg = target == Target::ChildElement && self.selected.is_none();
 
         if !self.hint_boxes.is_empty() {
-            if matches!(target, Target::Clickable | Target::Text) {
+            if self.config.hide_covered_elements
+                && matches!(target, Target::Clickable | Target::Text)
+            {
                 self.resolve_overlapping();
             }
             resolve_collisions(&mut self.hint_boxes, self.hint_width, &self.config.theme);
