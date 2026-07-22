@@ -520,7 +520,7 @@ fn default_workflows() -> Vec<WorkFlow> {
                 WorkFlowAction::Sleep(150),
                 WorkFlowAction::SearchFor(CustomTarget {
                     role: "MenuItem".into(),
-                    title: Some("Copy Image".into()),
+                    title: Some("Copy Image$".into()),
                     ..Default::default()
                 }),
                 WorkFlowAction::Press,
