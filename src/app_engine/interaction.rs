@@ -1,6 +1,6 @@
 use super::AppEngine;
 use crate::{
-    Mode, ScrollAction, TextAction,
+    AppSignal, Mode, ScrollAction, TextAction,
     action::{WordPicker, get_dictionary_attributed_string, text_to_clipboard},
     ax_element::{ElementOfInterest, GetAttribute, SetAttribute},
     config::RoleOfInterest,
@@ -325,10 +325,12 @@ impl AppEngine {
             .args(args)
             .spawn()?;
 
+        let sender = self.signal_sender.clone();
         std::thread::spawn(move || {
             if let Err(e) = child.wait() {
                 log::error!("Editor failed to run: {e}");
             }
+            let _ = sender.blocking_send(AppSignal::DeActivate);
         });
         Ok(())
     }
