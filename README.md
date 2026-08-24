@@ -239,19 +239,34 @@ dictionaries = [
 display = "󰊭 Google Search"
 key = 'G'
 command = "nu"
-args = ["-c", "r#'{glyphlow_text}'# | url encode | ^open $'https://google.com/search?q=($in)'"]
+args = ["-c", """
+open "https://google.com/search?q=$(cat << 'EOF' | jq -sRr @uri
+{glyphlow_text}
+EOF
+)"
+"""]
 
 [[text_actions]]
 display = "󰖬 Wikipedia Search"
 key = 'W'
 command = "nu"
-args = ["-c", "r#'{glyphlow_text}'# | url encode | ^open $'https://en.wikipedia.org/wiki/Special:Search/($in)'"]
+args = ["-c", """
+open "https://en.wikipedia.org/wiki/Special:Search/$(cat << 'EOF' | jq -sRr @uri
+{glyphlow_text}
+EOF
+)"
+"""]
 
 [[text_actions]]
 display = "󰊿 Goolge Translate -> zh_cn"
 key = 'T'
 command = "nu"
-args = ["-c", "r#'{glyphlow_text}'# | url encode | ^open $'https://translate.google.com/?sl=auto&tl=zh_cn&text=($in)&op=translate'"]
+args = ["-c", """
+open "https://translate.google.com/?sl=auto&tl=zh_cn&text=$(cat << 'EOF' | jq -sRr @uri
+{glyphlow_text}
+EOF
+)&op=translate"
+"""]
 
 [editor]
 display = " Editor"
