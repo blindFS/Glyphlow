@@ -143,7 +143,7 @@
             };
 
             # On macOS, home-manager can also manage launchd agents if using the macos module
-            launchd.agents.glyphlow = lib.mkIf pkgs.stdenv.isDarwin {
+            launchd.agents.glyphlow = lib.mkIf pkgs.stdenv.hostPlatform.isDarwin {
               enable = true;
               config = {
                 ProgramArguments = [ "${cfg.package}/bin/glyphlow" ];
