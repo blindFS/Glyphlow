@@ -238,7 +238,7 @@ dictionaries = [
 [[text_actions]]
 display = "󰊭 Google Search"
 key = 'G'
-command = "nu"
+command = "bash"
 args = ["-c", """
 open "https://google.com/search?q=$(cat << 'EOF' | jq -sRr @uri
 {glyphlow_text}
@@ -249,7 +249,7 @@ EOF
 [[text_actions]]
 display = "󰖬 Wikipedia Search"
 key = 'W'
-command = "nu"
+command = "bash"
 args = ["-c", """
 open "https://en.wikipedia.org/wiki/Special:Search/$(cat << 'EOF' | jq -sRr @uri
 {glyphlow_text}
@@ -260,7 +260,7 @@ EOF
 [[text_actions]]
 display = "󰊿 Goolge Translate -> zh_cn"
 key = 'T'
-command = "nu"
+command = "bash"
 args = ["-c", """
 open "https://translate.google.com/?sl=auto&tl=zh_cn&text=$(cat << 'EOF' | jq -sRr @uri
 {glyphlow_text}
