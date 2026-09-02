@@ -201,7 +201,6 @@ impl Menu {
 }
 
 pub struct UIDrawer {
-    pub(super) theme: GlyphlowTheme,
     pub root: Retained<CALayer>,
     pub current_screen_frame: Frame,
     /// Large enough frame to cover all screen frames
@@ -252,7 +251,6 @@ impl UIDrawer {
         root.addSublayer(&search_bar.container);
 
         Self {
-            theme: theme.clone(),
             root,
             current_screen_frame,
             overlay_frame,
@@ -280,16 +278,11 @@ impl UIDrawer {
             .setBorderColor(Some(&new_theme.hint_bg_color));
         self.menu.load_theme(new_theme);
         self.search_bar.load_theme(new_theme);
-        self.theme = new_theme.clone();
     }
 
-    pub fn draw_menu(&self, msg: &str) {
-        self.menu.draw(
-            msg,
-            &self.current_screen_frame,
-            &self.overlay_frame,
-            &self.theme,
-        );
+    pub fn draw_menu(&self, msg: &str, theme: &GlyphlowTheme) {
+        self.menu
+            .draw(msg, &self.current_screen_frame, &self.overlay_frame, theme);
     }
 
     pub fn hide_search_bar(&self) {
@@ -344,6 +337,7 @@ impl UIDrawer {
     /// Shrink font size on large estimated frame size if `auto_resize` is true
     pub fn draw_attributed_string(
         &self,
+        theme: &GlyphlowTheme,
         attr_string: Retained<NSMutableAttributedString>,
         auto_resize: bool,
     ) {
@@ -351,7 +345,7 @@ impl UIDrawer {
             attr_string,
             &self.current_screen_frame,
             &self.overlay_frame,
-            &self.theme,
+            theme,
             auto_resize,
         );
     }
@@ -373,17 +367,12 @@ impl UIDrawer {
         CATransaction::commit();
     }
 
-    pub fn notify(&mut self, msg: &str) -> usize {
+    pub fn notify(&mut self, theme: &GlyphlowTheme, msg: &str) -> usize {
         let id = self.next_notification_id;
         self.next_notification_id += 1;
-        let nl = Menu::new(&self.theme);
+        let nl = Menu::new(theme);
         self.root.addSublayer(&nl.container);
-        nl.draw(
-            msg,
-            &self.current_screen_frame,
-            &self.overlay_frame,
-            &self.theme,
-        );
+        nl.draw(msg, &self.current_screen_frame, &self.overlay_frame, theme);
         self.notifications.push((id, nl));
         id
     }

@@ -20,8 +20,13 @@ impl AppEngine {
         let mouse_loc = objc2_app_kit::NSEvent::mouseLocation();
 
         if self.config.theme.enable_animation {
-            self.drawer
-                .draw_trail(mouse_loc.x, mouse_loc.y, end_x, end_y);
+            self.drawer.draw_trail(
+                mouse_loc.x,
+                mouse_loc.y,
+                end_x,
+                end_y,
+                &self.config.theme.hint_bg_color,
+            );
         }
         if let Err(e) = monio::mouse_move(end_x, end_y) {
             log::error!("Failed to move mouse to ({end_x}, {end_y}): {e}");
@@ -137,24 +142,23 @@ impl AppEngine {
             panic!("Internal Error: No selected text in Mode::TextActionMenu.");
         };
 
-        let text = text.clone();
-
         // TODO:
         // 1. URL handling
         let keep_drawing = match ta {
             TextAction::Copy => {
-                text_to_clipboard(&text);
+                text_to_clipboard(text);
                 self.notify_then_deactivate("Copied to clipboard.", Level::Info);
                 true
             }
             TextAction::Dictionary => {
                 log::trace!("Looking up `{text}` in Apple Dictionary.");
                 if let Some(attr_string) = get_dictionary_attributed_string(
-                    &text,
+                    text,
                     &self.config.dictionaries,
                     &self.config.theme,
                 ) {
-                    self.drawer.draw_attributed_string(attr_string, false);
+                    self.drawer
+                        .draw_attributed_string(&self.config.theme, attr_string, false);
                     let menu_h = self.drawer.menu_height();
                     let screen_h = self.drawer.current_screen_frame.size().1;
                     if menu_h > screen_h {
@@ -166,19 +170,20 @@ impl AppEngine {
                 true
             }
             TextAction::Split => {
+                let text = text.to_string();
                 self.set_mode(Mode::WordPicking);
                 self.clear_cache();
                 let (w, h) = self.drawer.current_screen_frame.size();
                 let screen_ratio = w / (h + 0.01);
                 let word_picker =
-                    WordPicker::new(text, screen_ratio, self.config.theme.clone(), &self.drawer);
+                    WordPicker::new(text, screen_ratio, &self.config.theme, &self.drawer);
                 self.hint_width = word_picker.digits;
 
                 self.word_picker = Some(word_picker);
                 true
             }
             TextAction::Editor => {
-                if let Err(e) = self.open_editor(&text) {
+                if let Err(e) = self.open_editor(text) {
                     self.notify_then_deactivate(
                         &format!("Failed to open editor: {e}"),
                         Level::Error,
@@ -189,7 +194,7 @@ impl AppEngine {
                 }
             }
             TextAction::UserDefined(idx) => {
-                self.take_external_action(idx, &text);
+                self.take_external_action(idx, &text.to_string());
                 true
             }
         };
@@ -303,7 +308,7 @@ impl AppEngine {
         }
     }
 
-    pub(super) fn open_editor(&mut self, text: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub(super) fn open_editor(&self, text: &str) -> Result<(), Box<dyn std::error::Error>> {
         let editor = self
             .config
             .editor

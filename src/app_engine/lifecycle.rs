@@ -75,7 +75,7 @@ impl AppEngine {
             _ => LONG_TIMEOUT,
         } * 1000;
         log::log!(log_level, "{msg}");
-        let id = self.drawer.notify(msg);
+        let id = self.drawer.notify(&self.config.theme, msg);
         let sender = self.signal_sender.clone();
         tokio::spawn(
             async move { delay(sender, AppSignal::ClearNotification(id), timeout_secs).await },
@@ -142,7 +142,14 @@ impl AppEngine {
                 self.overlay_frame
             };
             let _ = std::thread::spawn(move || {
-                traverse(safe_root, frame, window_frame, target, vis_level, result_tx);
+                traverse(
+                    safe_root,
+                    frame,
+                    window_frame,
+                    target,
+                    vis_level,
+                    &result_tx,
+                );
             });
         }
 
