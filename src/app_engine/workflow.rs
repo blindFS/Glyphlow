@@ -161,7 +161,7 @@ impl AppEngine {
             }
             WorkFlowAction::SelectAll => {
                 let len = context
-                    .clone()
+                    .as_ref()
                     .map(|txt| txt.encode_utf16().count())
                     .unwrap_or(0) as isize;
                 element.set_selected_range(0, len);
@@ -185,11 +185,10 @@ impl AppEngine {
             .config
             .workflows
             .get(idx)
-            .cloned()
             .expect("Internal Error: text workflow index out of bounds.");
 
-        if self.is_workflow_valid(&workflow) {
-            self.pending_workflow_actions = workflow.actions.into();
+        if self.is_workflow_valid(workflow) {
+            self.pending_workflow_actions = workflow.actions.clone().into();
             self.execute_pending_workflow_actions();
         } else {
             self.drawer
