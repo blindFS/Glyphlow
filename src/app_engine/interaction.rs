@@ -303,7 +303,7 @@ impl AppEngine {
         }
     }
 
-    pub(super) fn open_editor(&mut self, text: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub(super) fn open_editor(&self, text: &str) -> Result<(), Box<dyn std::error::Error>> {
         let editor = self
             .config
             .editor

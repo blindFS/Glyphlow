@@ -56,7 +56,7 @@ impl AppEngine {
                             .expect("Internal Error: wrong ocr hint indexing.");
                         self.select(ElementOfInterest::pseudo(None, frame));
                         self.clear_hints();
-                        self.update_selected_text_and_show_menu(text.clone());
+                        self.update_selected_text_and_show_menu(text);
                     } else {
                         self.hint_prefix.clear();
                         self.search_prefix.clear();
@@ -204,8 +204,8 @@ impl AppEngine {
                     self.editing = Some(eoi.clone());
                     // Focused before editing to increase the success rate
                     self.focus_on_element(element);
-                    let text = context.clone().unwrap_or_default();
-                    match self.open_editor(&text) {
+                    let text = context.as_deref().unwrap_or_default();
+                    match self.open_editor(text) {
                         Ok(_) => {
                             self.set_mode(Mode::Idle);
                             self.selected = None;
@@ -383,7 +383,7 @@ impl AppEngine {
                         .expect("Internal Error: no word picker set yet.")
                         .select_range(idx1, idx2)
                         .expect("Internal Error: wrong word picker indexing.");
-                    self.update_selected_text_and_show_menu(text.clone())
+                    self.update_selected_text_and_show_menu(text)
                 } else {
                     // Reset for another side
                     self.hint_prefix.clear();
