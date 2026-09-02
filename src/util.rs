@@ -155,7 +155,7 @@ fn estimate_font_height(s: &str, frame: &Frame) -> f64 {
 /// given 2 frames as the start and end
 // TODO: languages that read from right to left
 pub fn select_range_helper(
-    choices: &[(String, Frame, bool)],
+    choices: &[(&str, Frame, bool)],
     idx1: usize,
     idx2: usize,
 ) -> Option<(String, Frame)> {
@@ -515,8 +515,8 @@ mod select_range_tests {
         w: f64,
         h: f64,
         visible: bool,
-    ) -> (String, Frame, bool) {
-        (text.to_string(), Frame::new(x, y, x + w, y + h), visible)
+    ) -> (&str, Frame, bool) {
+        (text, Frame::new(x, y, x + w, y + h), visible)
     }
 
     #[test]

@@ -35,8 +35,9 @@ async fn main() {
 
     let config_path = get_config_path();
     let config = match config_path
-        .clone()
-        .and_then(|cp| GlyphlowConfig::load_config(&cp))
+        .as_ref()
+        .map_err(|e| e.to_string())
+        .and_then(GlyphlowConfig::load_config)
     {
         Ok(config) => config,
         Err(msg) => {

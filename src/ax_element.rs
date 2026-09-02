@@ -427,12 +427,16 @@ impl ElementCache {
         idx2: usize,
         ref_role: Option<&RoleOfInterest>,
     ) -> Option<(String, Frame)> {
-        let choices: Vec<(String, Frame, bool)> = self
+        let choices: Vec<(&str, Frame, bool)> = self
             .cache
             .iter()
             .map(|eoi| {
                 let is_valid = ref_role.is_none_or(|ref_role| *ref_role == eoi.role());
-                (eoi.context.clone().unwrap_or_default(), eoi.frame, is_valid)
+                (
+                    eoi.context.as_deref().unwrap_or_default(),
+                    eoi.frame,
+                    is_valid,
+                )
             })
             .collect();
         select_range_helper(&choices, idx1, idx2)

@@ -48,9 +48,9 @@ impl AppEngine {
                             log::warn!("ocr_res_filtering called but OCR cache is not set.");
                             return;
                         };
-                        let choices: Vec<(String, Frame, bool)> = ocr_res
+                        let choices: Vec<(&str, Frame, bool)> = ocr_res
                             .iter()
-                            .map(|(s, rect)| (s.clone(), Frame::from_cgrect(rect), true))
+                            .map(|(s, rect)| (s.as_str(), Frame::from_cgrect(rect), true))
                             .collect::<Vec<_>>();
                         let (text, frame) = select_range_helper(&choices, idx1, idx2)
                             .expect("Internal Error: wrong ocr hint indexing.");
