@@ -173,10 +173,10 @@ impl WordPicker {
         (buffer, matched)
     }
 
-    pub fn matched_words(&self) -> Vec<(usize, String)> {
+    pub fn matched_words(&self) -> Vec<(usize, &str)> {
         self.matched
             .iter()
-            .filter_map(|idx| self.words.get(*idx).map(|w| (*idx, w.text.clone())))
+            .filter_map(|idx| self.words.get(*idx).map(|w| (*idx, w.text.as_str())))
             .collect()
     }
 

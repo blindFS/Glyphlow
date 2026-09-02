@@ -356,6 +356,10 @@ impl AppEngine {
 
     /// If only 1 word is matched, then update the selected text and show the menu
     pub(super) fn check_word_picker(&mut self) {
+        if !self.ready_for_unique() {
+            return;
+        }
+
         let Some(wp) = self.word_picker.as_mut() else {
             return;
         };
@@ -371,10 +375,9 @@ impl AppEngine {
                     .len()
                     == 1);
 
-        if self.ready_for_unique()
-            && unique_matching
-            && let Some((idx, text)) = matched_words.first()
-        {
+        let mut new_text = None;
+
+        if unique_matching && let Some((idx, text)) = matched_words.first() {
             if self.multi_selection.is_on {
                 if let Some((idx1, idx2)) = self.multi_selection.set_one_side(*idx) {
                     let text = self
@@ -383,7 +386,7 @@ impl AppEngine {
                         .expect("Internal Error: no word picker set yet.")
                         .select_range(idx1, idx2)
                         .expect("Internal Error: wrong word picker indexing.");
-                    self.update_selected_text_and_show_menu(text)
+                    new_text = Some(text)
                 } else {
                     // Reset for another side
                     self.hint_prefix.clear();
@@ -391,8 +394,11 @@ impl AppEngine {
                     self.draw_word_picker();
                 }
             } else {
-                self.update_selected_text_and_show_menu(text.clone())
+                new_text = Some(text.to_string())
             }
+        };
+        if let Some(nt) = new_text {
+            self.update_selected_text_and_show_menu(nt);
         }
     }
 
