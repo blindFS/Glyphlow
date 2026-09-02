@@ -282,12 +282,11 @@ impl ElementOfInterest {
     }
 
     pub fn ascii_search_target(&self) -> String {
-        let raw = self
-            .context
-            .clone()
-            .or_else(|| self.element().map(|e| e.search_target()))
-            .unwrap_or_default();
-        lower_ascii(&raw)
+        self.context
+            .as_ref()
+            .map(|t| lower_ascii(t))
+            .or_else(|| self.element().map(|e| lower_ascii(&e.search_target())))
+            .unwrap_or_default()
     }
 }
 
