@@ -142,20 +142,18 @@ impl AppEngine {
             panic!("Internal Error: No selected text in Mode::TextActionMenu.");
         };
 
-        let text = text.clone();
-
         // TODO:
         // 1. URL handling
         let keep_drawing = match ta {
             TextAction::Copy => {
-                text_to_clipboard(&text);
+                text_to_clipboard(text);
                 self.notify_then_deactivate("Copied to clipboard.", Level::Info);
                 true
             }
             TextAction::Dictionary => {
                 log::trace!("Looking up `{text}` in Apple Dictionary.");
                 if let Some(attr_string) = get_dictionary_attributed_string(
-                    &text,
+                    text,
                     &self.config.dictionaries,
                     &self.config.theme,
                 ) {
@@ -172,6 +170,7 @@ impl AppEngine {
                 true
             }
             TextAction::Split => {
+                let text = text.to_string();
                 self.set_mode(Mode::WordPicking);
                 self.clear_cache();
                 let (w, h) = self.drawer.current_screen_frame.size();
@@ -184,7 +183,7 @@ impl AppEngine {
                 true
             }
             TextAction::Editor => {
-                if let Err(e) = self.open_editor(&text) {
+                if let Err(e) = self.open_editor(text) {
                     self.notify_then_deactivate(
                         &format!("Failed to open editor: {e}"),
                         Level::Error,
@@ -195,7 +194,7 @@ impl AppEngine {
                 }
             }
             TextAction::UserDefined(idx) => {
-                self.take_external_action(idx, &text);
+                self.take_external_action(idx, &text.to_string());
                 true
             }
         };
