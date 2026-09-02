@@ -287,7 +287,7 @@ fn multilingual_split(input: &str) -> (Vec<String>, Vec<usize>) {
 
     // Level 2: Split by punctuation (only if we have a single block)
     let base_offset = offsets[0];
-    let w = result[0].clone();
+    let w = &result[0];
     let mut l2_res = Vec::new();
     let mut l2_off = Vec::new();
 
@@ -306,7 +306,7 @@ fn multilingual_split(input: &str) -> (Vec<String>, Vec<usize>) {
 
     // Level 3: Split ASCII/Non-ASCII (only if Level 2 still returned one block)
     let base_offset = l2_off[0];
-    let w = l2_res[0].clone();
+    let w = &l2_res[0];
     let mut l3_res = Vec::new();
     let mut l3_off = Vec::new();
 
