@@ -142,7 +142,14 @@ impl AppEngine {
                 self.overlay_frame
             };
             let _ = std::thread::spawn(move || {
-                traverse(safe_root, frame, window_frame, target, vis_level, result_tx);
+                traverse(
+                    safe_root,
+                    frame,
+                    window_frame,
+                    target,
+                    vis_level,
+                    &result_tx,
+                );
             });
         }
 

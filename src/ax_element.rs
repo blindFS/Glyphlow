@@ -224,12 +224,12 @@ impl ElementOfInterest {
     }
 
     pub fn try_new(
-        element: AXUIElement,
+        element: &AXUIElement,
         context: Option<String>,
         role: RoleOfInterest,
         frame: Option<Frame>,
     ) -> Option<Self> {
-        frame.map(|f| Self::new(element, context, role, f))
+        frame.map(|f| Self::new(element.clone(), context, role, f))
     }
 
     pub fn pseudo(context: Option<String>, frame: Frame) -> Self {
@@ -773,7 +773,7 @@ fn traverse_elements(
     window_frame: &Frame,
     target: &Target,
     vis_level: VisibilityCheckingLevel,
-    result_tx: Sender<ElementSignal>,
+    result_tx: &Sender<ElementSignal>,
     depth: u8,
 ) {
     if depth > MAX_DEPTH {
@@ -830,7 +830,7 @@ fn traverse_elements(
                         window_frame,
                         target,
                         vis_level,
-                        result_tx.clone(),
+                        result_tx,
                         depth + 1,
                     );
                 } else {
@@ -843,7 +843,7 @@ fn traverse_elements(
                     };
                     let _ =
                         result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                            child.to_owned(),
+                            &child,
                             context,
                             roi,
                             child_fp.frame.and_then(|f| f.intersect(window_frame)),
@@ -887,7 +887,7 @@ fn traverse_elements(
         && element.match_custom_target(ct)
     {
         let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-            element.clone(),
+            element,
             None,
             RoleOfInterest::CustomTarget,
             ele_fp.frame,
@@ -902,7 +902,7 @@ fn traverse_elements(
         kAXPopUpButtonRole | kAXButtonRole | "AXRadioButton" => match target {
             Target::Clickable => {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element.clone(),
+                    element,
                     None,
                     RoleOfInterest::Button,
                     ele_fp.frame,
@@ -917,7 +917,7 @@ fn traverse_elements(
                 {
                     let _ =
                         result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                            element.clone(),
+                            element,
                             Some(ctx),
                             RoleOfInterest::Button,
                             ele_fp.frame,
@@ -929,7 +929,7 @@ fn traverse_elements(
         kAXCellRole => {
             if *target == Target::Clickable {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element.clone(),
+                    element,
                     None,
                     RoleOfInterest::Cell,
                     ele_fp.frame,
@@ -947,7 +947,7 @@ fn traverse_elements(
                 })
             {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element.clone(),
+                    element,
                     None,
                     RoleOfInterest::Cell,
                     ele_fp.frame,
@@ -957,7 +957,7 @@ fn traverse_elements(
         kAXImageRole => match target {
             Target::Image | Target::ImageOCR => {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element.clone(),
+                    element,
                     None,
                     RoleOfInterest::Image,
                     ele_fp.frame,
@@ -965,7 +965,7 @@ fn traverse_elements(
             }
             Target::Clickable if element.is_clickable() => {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element.clone(),
+                    element,
                     None,
                     RoleOfInterest::Button,
                     ele_fp.frame,
@@ -976,7 +976,7 @@ fn traverse_elements(
         "AXLink" => match target {
             Target::Text if !element.has_children() => {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element.clone(),
+                    element,
                     element
                         .title()
                         .or_else(|_| element.description())
@@ -988,7 +988,7 @@ fn traverse_elements(
             }
             Target::Clickable if element.is_clickable() => {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element.clone(),
+                    element,
                     None,
                     RoleOfInterest::StaticText,
                     ele_fp.frame,
@@ -999,7 +999,7 @@ fn traverse_elements(
         kAXStaticTextRole => match target {
             Target::Clickable if element.is_clickable() => {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element.clone(),
+                    element,
                     None,
                     RoleOfInterest::Button,
                     ele_fp.frame,
@@ -1009,7 +1009,7 @@ fn traverse_elements(
                 if let Some(value) = element.get_string_value_or_description() {
                     let _ =
                         result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                            element.clone(),
+                            element,
                             Some(value),
                             RoleOfInterest::StaticText,
                             ele_fp.frame,
@@ -1030,7 +1030,7 @@ fn traverse_elements(
         kAXComboBoxRole | kAXTextFieldRole | kAXTextAreaRole => match target {
             Target::Editable => {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element.clone(),
+                    element,
                     element.get_string_value_or_description(),
                     RoleOfInterest::TextField,
                     ele_fp.frame,
@@ -1042,7 +1042,7 @@ fn traverse_elements(
                 {
                     let _ =
                         result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                            element.clone(),
+                            element,
                             Some(value),
                             RoleOfInterest::TextField,
                             ele_fp.frame,
@@ -1052,7 +1052,7 @@ fn traverse_elements(
             // NOTE: Even if not clickable, still could be focused on click
             Target::Clickable => {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element.clone(),
+                    element,
                     None,
                     RoleOfInterest::TextField,
                     ele_fp.frame,
@@ -1063,7 +1063,7 @@ fn traverse_elements(
         kAXCheckBoxRole => match target {
             Target::Clickable => {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element.clone(),
+                    element,
                     None,
                     RoleOfInterest::CheckBox,
                     ele_fp.frame,
@@ -1073,7 +1073,7 @@ fn traverse_elements(
                 if let Ok(value) = element.description().map(|v| v.to_string()) {
                     let _ =
                         result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                            element.clone(),
+                            element,
                             Some(value),
                             RoleOfInterest::CheckBox,
                             ele_fp.frame,
@@ -1090,7 +1090,7 @@ fn traverse_elements(
                     .map(|v| v.to_string())
             {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element.clone(),
+                    element,
                     Some(value),
                     RoleOfInterest::StaticText,
                     ele_fp.frame,
@@ -1100,7 +1100,7 @@ fn traverse_elements(
         kAXGroupRole => match target {
             Target::Clickable if element.is_clickable() => {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element.clone(),
+                    element,
                     None,
                     RoleOfInterest::Button,
                     ele_fp.frame,
@@ -1109,7 +1109,7 @@ fn traverse_elements(
             // NOTE: Potential texts in leaf AXGroup
             Target::ImageOCR if !element.has_children() => {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element.clone(),
+                    element,
                     None,
                     RoleOfInterest::Image,
                     ele_fp.frame,
@@ -1122,7 +1122,7 @@ fn traverse_elements(
                 if let Some(title) = element.get_attribute_string(kAXTitleAttribute) {
                     let _ =
                         result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                            element.clone(),
+                            element,
                             Some(title),
                             RoleOfInterest::MenuItem,
                             ele_fp.frame,
@@ -1131,7 +1131,7 @@ fn traverse_elements(
             }
             Target::Clickable => {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element.clone(),
+                    element,
                     None,
                     RoleOfInterest::MenuItem,
                     ele_fp.frame,
@@ -1142,7 +1142,7 @@ fn traverse_elements(
         kAXScrollBarRole => {
             if *target == Target::Scrollable {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element.clone(),
+                    element,
                     None,
                     RoleOfInterest::ScrollBar,
                     ele_fp.frame,
@@ -1152,7 +1152,7 @@ fn traverse_elements(
         _ => match target {
             Target::Clickable if element.is_clickable() => {
                 let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element.clone(),
+                    element,
                     None,
                     RoleOfInterest::Button,
                     ele_fp.frame,
@@ -1169,7 +1169,6 @@ fn traverse_elements(
                 continue;
             }
             let safe_child = ThreadSafeElement(child.to_owned());
-            let tx_clone = result_tx.clone();
 
             traverse_elements(
                 safe_child,
@@ -1177,7 +1176,7 @@ fn traverse_elements(
                 &window_frame,
                 target,
                 vis_level,
-                tx_clone,
+                result_tx,
                 depth + 1,
             );
         }
@@ -1190,18 +1189,16 @@ pub fn traverse(
     window_frame: Frame,
     target: Target,
     vis_level: VisibilityCheckingLevel,
-    result_tx: Sender<ElementSignal>,
+    result_tx: &Sender<ElementSignal>,
 ) {
     autoreleasepool(|_| {
-        let target_c = target.clone();
-        let tx_c = result_tx.clone();
         traverse_elements(
             root,
             &parent_frame,
             &window_frame,
-            &target_c,
+            &target,
             vis_level,
-            tx_c,
+            result_tx,
             0,
         );
         let _ = result_tx.send(ElementSignal::TraversalFinished(target));
