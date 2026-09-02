@@ -191,8 +191,7 @@ impl AppEngine {
             self.pending_workflow_actions = workflow.actions.clone().into();
             self.execute_pending_workflow_actions();
         } else {
-            self.drawer
-                .draw_menu("Wrong key sequence\nPress 󰁮 to go back");
+            self.draw_menu("Wrong key sequence\nPress 󰁮 to go back");
         }
     }
 }

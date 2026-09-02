@@ -178,6 +178,10 @@ impl AppEngine {
         msg
     }
 
+    pub(super) fn draw_menu(&self, msg: &str) {
+        self.drawer.draw_menu(msg, &self.config.theme);
+    }
+
     pub(super) fn draw_dashboard(&mut self, key_prefix: &str) {
         // NOTE: need `self.last_app_window_info` for `is_workflow_valid` check,
         // but shouldn't set `self.selected` yet
@@ -194,7 +198,7 @@ impl AppEngine {
             key_prefix,
         );
 
-        self.drawer.draw_menu(&msg);
+        self.draw_menu(&msg);
     }
 
     fn draw_image_action_menu(&self, key_prefix: &str) {
@@ -207,7 +211,7 @@ impl AppEngine {
             key_prefix,
         );
 
-        self.drawer.draw_menu(&msg);
+        self.draw_menu(&msg);
     }
 
     fn draw_text_action_menu(&self, text: &str, key_prefix: &str) {
@@ -227,7 +231,7 @@ impl AppEngine {
             key_prefix,
         );
 
-        self.drawer.draw_menu(&msg);
+        self.draw_menu(&msg);
     }
 
     fn draw_scrolling_menu(&self, key_prefix: &str) {
@@ -240,7 +244,7 @@ impl AppEngine {
                 false,
                 key_prefix,
             );
-            self.drawer.draw_menu(&msg);
+            self.draw_menu(&msg);
         }
     }
 
@@ -298,6 +302,7 @@ impl AppEngine {
             .expect("Internal Error: No word picker set.");
 
         word_picker.update_text_layer(
+            &self.config.theme,
             &self.drawer,
             self.multi_selection.one_side_idx,
             &self.hint_prefix,

@@ -36,13 +36,12 @@ pub struct WordPicker {
     words: Vec<Word>,
     offsets: Vec<usize>,
     screen_ratio: f64,
-    theme: GlyphlowTheme,
     pub digits: u32,
     matched: Vec<usize>,
 }
 
 impl WordPicker {
-    pub fn new(text: String, screen_ratio: f64, theme: GlyphlowTheme, drawer: &UIDrawer) -> Self {
+    pub fn new(text: String, screen_ratio: f64, theme: &GlyphlowTheme, drawer: &UIDrawer) -> Self {
         let (word_strings, offsets) = multilingual_split(&text);
         let digits = digits_by_length(word_strings.len());
         let mut words = Vec::new();
@@ -58,13 +57,12 @@ impl WordPicker {
             offsets,
             digits,
             screen_ratio,
-            theme,
             matched: Vec::new(),
         };
 
         autoreleasepool(|_| {
-            if let Some((attr_string, _)) = word_picker.get_attributed_string(None, "", "") {
-                drawer.draw_attributed_string(attr_string, true);
+            if let Some((attr_string, _)) = word_picker.get_attributed_string(theme, None, "", "") {
+                drawer.draw_attributed_string(theme, attr_string, true);
             }
         });
 
@@ -73,6 +71,7 @@ impl WordPicker {
 
     pub fn update_text_layer(
         &mut self,
+        theme: &GlyphlowTheme,
         drawer: &UIDrawer,
         multi_selection_idx: Option<usize>,
         label_prefix: &str,
@@ -80,10 +79,10 @@ impl WordPicker {
     ) {
         autoreleasepool(|_| {
             if let Some((attr_string, matched)) =
-                self.get_attributed_string(multi_selection_idx, label_prefix, text_prefix)
+                self.get_attributed_string(theme, multi_selection_idx, label_prefix, text_prefix)
             {
                 self.matched = matched;
-                drawer.draw_attributed_string(attr_string, true);
+                drawer.draw_attributed_string(theme, attr_string, true);
             };
         })
     }
@@ -194,6 +193,7 @@ impl WordPicker {
 
     fn get_attributed_string(
         &self,
+        theme: &GlyphlowTheme,
         multi_selection_idx: Option<usize>,
         label_prefix: &str,
         text_prefix: &str,
@@ -208,13 +208,13 @@ impl WordPicker {
         // CSS colors
         let attr_string = html_to_attributed_string(
             &html_str,
-            Some(&replace_color_in_css(WORD_PICKER_STYLE, &self.theme, 3)),
+            Some(&replace_color_in_css(WORD_PICKER_STYLE, theme, 3)),
         )?;
 
         unsafe {
             attr_string.addAttribute_value_range(
                 NSFontAttributeName,
-                &self.theme.menu_font,
+                &theme.menu_font,
                 NSRange::new(0, attr_string.length()),
             );
         }

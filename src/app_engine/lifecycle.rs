@@ -75,7 +75,7 @@ impl AppEngine {
             _ => LONG_TIMEOUT,
         } * 1000;
         log::log!(log_level, "{msg}");
-        let id = self.drawer.notify(msg);
+        let id = self.drawer.notify(&self.config.theme, msg);
         let sender = self.signal_sender.clone();
         tokio::spawn(
             async move { delay(sender, AppSignal::ClearNotification(id), timeout_secs).await },
