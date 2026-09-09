@@ -788,8 +788,11 @@ fn traverse_elements(
     if ele_fp.frame.is_some_and(|f| {
         let (w, h) = f.size();
         (h == 0.0 && f.bottom_right.y == window_frame.bottom_right.y)
-            // NOTE: keep full width elements, e.g. Brave google search
-            || (h == 1.0 && f.top_left.y == window_frame.top_left.y && w != window_frame.size().0)
+            || (h == 1.0 && f.top_left.y == window_frame.top_left.y
+            // NOTE: 1. Keep full width elements, e.g. Brave google search
+            && w != window_frame.size().0
+            // NOTE: 2. Keep application dialog, e.g. GitHub issue dialog
+            && element.subrole().ok().is_none_or(|subrole| subrole != "AXApplicationDialog"))
         // NOTE: should avoid false negatives of ancestors for some menu items,
         // e.g. (Discord right click menu)
     }) && vis_level != VisibilityCheckingLevel::Loosest
