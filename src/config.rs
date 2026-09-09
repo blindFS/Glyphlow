@@ -331,6 +331,7 @@ impl AlphabeticKey for Key {
             Key::ControlLeft | Key::ControlRight => "CTRL".to_string(),
             Key::MetaLeft | Key::MetaRight => "META".to_string(),
             Key::ShiftLeft | Key::ShiftRight => "SHIFT".to_string(),
+            Key::Space => "SPACE".to_string(),
             _ => self.to_char().to_string(),
         }
     }
@@ -367,6 +368,7 @@ impl AlphabeticKey for Key {
             "CTRL" => Some(Key::ControlLeft),
             "SHIFT" => Some(Key::ShiftLeft),
             "META" => Some(Key::MetaLeft),
+            "SPACE" => Some(Key::Space),
             _ => None,
         }
     }
@@ -407,6 +409,7 @@ pub struct GlyphlowConfig {
     #[serde(default = "default_global_keybinding")]
     pub global_trigger_key: KeyBinding,
     pub editor: Option<CommandAction>,
+    #[serde(default = "default_theme")]
     pub theme: GlyphlowTheme,
     #[serde(default = "default_text_actions")]
     pub text_actions: Vec<CommandAction>,
@@ -482,6 +485,9 @@ impl GlyphlowConfig {
     }
 }
 
+fn default_theme() -> GlyphlowTheme {
+    GlyphlowTheme::default()
+}
 fn default_global_keybinding() -> KeyBinding {
     KeyBinding {
         keys: vec![Key::AltLeft, Key::KeyG],
@@ -884,6 +890,21 @@ mod tests {
         assert!(config.theme.enable_animation);
         assert_eq!(config.scroll_distance, 0.05);
         assert_eq!(config.ocr_languages, vec!["en-US".to_string()]);
+    }
+
+    #[test]
+    fn test_config_global_key_with_space() {
+        let toml_input = r#"
+            [global_trigger_key]
+            keys = "META + SPACE"
+        "#;
+
+        let config: GlyphlowConfig = toml::from_str(toml_input).unwrap();
+
+        assert_eq!(
+            config.global_trigger_key.keys,
+            vec![Key::MetaLeft, Key::Space]
+        );
     }
 
     #[test]
