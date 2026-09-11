@@ -6,6 +6,7 @@ use std::{
 };
 
 use monio::Key;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
 
 use crate::{
@@ -13,7 +14,7 @@ use crate::{
     config::{AlphabeticKey, GlyphlowConfig, KeyBinding},
 };
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum TextAction {
     Copy,
     Dictionary,
@@ -23,7 +24,7 @@ pub enum TextAction {
     UserDefined(usize),
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum ScrollAction {
     UpLeft,
     DownRight,
@@ -33,7 +34,7 @@ pub enum ScrollAction {
     Bottom,
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub enum FilterMode {
     WordPicking,
     Generic,
@@ -50,7 +51,7 @@ impl FilterMode {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum AppSignal {
     // State signals
     Activate(Target),

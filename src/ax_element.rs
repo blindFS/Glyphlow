@@ -21,6 +21,7 @@ use core_foundation::{
 use objc2::rc::autoreleasepool;
 use objc2_core_foundation::{CGPoint, CGSize};
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::mpsc::Sender};
 
 const BASIC_ATTRIBUTES: [&str; 4] = [
@@ -140,13 +141,17 @@ impl ElementBasicAttributes {
 
 /// A [`CustomTarget`] with string fields pre-compiled into [`Regex`] objects.
 /// Build once per workflow search action; reuse across the entire element traversal.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompiledTarget {
     pub role: String,
     pub subrole: Option<String>,
+    #[serde(with = "serde_regex")]
     pub label: Option<Regex>,
+    #[serde(with = "serde_regex")]
     pub value: Option<Regex>,
+    #[serde(with = "serde_regex")]
     pub title: Option<Regex>,
+    #[serde(with = "serde_regex")]
     pub description: Option<Regex>,
     pub size: Option<(f64, f64)>,
     pub action: Option<String>,
@@ -751,7 +756,7 @@ fn rust_type_to_cftype<T>(value: T, value_type: u32) -> Option<CFType> {
     }
 }
 
-#[derive(Debug, Default, PartialEq, Clone)]
+#[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Target {
     #[default]
     Clickable,

@@ -16,7 +16,11 @@ use std::{
     sync::{Arc, Mutex},
     thread,
 };
-use tokio::sync::mpsc;
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    net::UnixListener,
+    sync::mpsc,
+};
 
 #[tokio::main]
 async fn main() {
@@ -58,7 +62,7 @@ async fn main() {
     let key_state = Arc::new(Mutex::new(KeyState::default()));
 
     // Listen to temp file updates
-    let cache_file = create_cache_file().expect("Failed to create temp file.");
+    let cache_file = cache_file_path("tempfile.md", true).expect("Failed to create temp file.");
     let (ftx, mut frx) = mpsc::channel::<PathBuf>(100);
     // NOTE: listen to file updates with FsEvent
     let Ok(mut debouncer) = new_debouncer(
@@ -128,8 +132,21 @@ async fn main() {
         });
     });
 
+    // Socket file for IPC
+    let socket_file =
+        cache_file_path("glyphlow.socket", false).expect("Failed to create socket file.");
+    let listener = UnixListener::bind(socket_file).expect("Failed to bind socket.");
+
     loop {
         tokio::select! {
+            Ok((stream, _)) = listener.accept() => {
+                let mut socket_reader = BufReader::new(stream);
+                let mut line = String::new();
+                if let Ok(size) = socket_reader.read_line(&mut line).await && size > 0 &&
+                    let Ok(signal) = serde_json::from_str::<AppSignal>(&line) {
+                    app_engine.handle_signal(signal).await;
+                };
+            }
             Some(signal) = rx.recv() => app_engine.handle_signal(signal).await,
             Some(pb) = frx.recv() => app_engine.handle_signal(AppSignal::FileUpdate(pb)).await,
             _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
@@ -142,7 +159,7 @@ async fn main() {
     }
 }
 
-fn create_cache_file() -> Option<PathBuf> {
+fn cache_file_path(fname: &str, create: bool) -> Option<PathBuf> {
     let cache_dir = std::env::var("XDG_CACHE_HOME")
         .ok()
         .map(|dir| PathBuf::from(dir).join("glyphlow"))
@@ -154,10 +171,12 @@ fn create_cache_file() -> Option<PathBuf> {
     if !cache_dir.exists() {
         std::fs::create_dir_all(&cache_dir).ok()?;
     }
-    let cache_file = cache_dir.join("tempfile.md");
-    if !cache_file.exists() {
+    let cache_file = cache_dir.join(fname);
+    if create {
         log::info!("Creating tempfile: {cache_file:?}");
         std::fs::File::create(&cache_file).ok()?;
+    } else {
+        let _ = std::fs::remove_file(&cache_file);
     }
     Some(cache_file)
 }

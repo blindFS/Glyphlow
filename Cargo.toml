@@ -25,12 +25,14 @@ notify = "8.2.0"
 notify-debouncer-mini = "0.7.0"
 block2 = "0.6.2"
 regex = "1.13.1"
-tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.53.1", features = ["net", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
 unicode-width = "0.2.2"
 simple_logger = "5.2.0"
 log = "0.4.34"
 any_ascii = "0.3.3"
 rstar = "0.13.0"
+serde_json = "1.0.151"
+serde_regex = "1.2.0"
 
 [[test]]
 name = "lifecycle_tests"
