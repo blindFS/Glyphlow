@@ -70,6 +70,9 @@ pub enum AppSignal {
     ScrollAction(ScrollAction),
     // Generic Actions
     RunWorkFlow(usize),
+    /// Run a workflow addressed by (a fragment of) its display name,
+    /// resolved against the server side config. Used by the CLI.
+    RunWorkFlowByName(String),
     ReadClipboard,
     ScreenShot,
     FrameOCR,
@@ -449,5 +452,40 @@ impl KeyState {
 
     pub fn pop(&mut self) {
         self.prefix.pop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The CLI and the server talk JSON over a Unix socket, so the encoding of
+    /// every signal the CLI can emit is part of the protocol. Pin it down so a
+    /// future rename cannot silently break the client.
+    #[test]
+    fn test_cli_signal_wire_format() {
+        let cases = [
+            (
+                AppSignal::Activate(Target::Clickable),
+                r#"{"Activate":"Clickable"}"#,
+            ),
+            (AppSignal::Activate(Target::Text), r#"{"Activate":"Text"}"#),
+            (
+                AppSignal::Activate(Target::Image),
+                r#"{"Activate":"Image"}"#,
+            ),
+            (
+                AppSignal::RunWorkFlowByName("ProofRead".into()),
+                r#"{"RunWorkFlowByName":"ProofRead"}"#,
+            ),
+        ];
+
+        for (signal, expected) in cases {
+            let encoded = serde_json::to_string(&signal).expect("signal should serialize");
+            assert_eq!(encoded, expected);
+            let decoded: AppSignal =
+                serde_json::from_str(&encoded).expect("signal should deserialize");
+            assert_eq!(decoded, signal);
+        }
     }
 }

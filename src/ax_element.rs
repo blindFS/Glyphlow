@@ -37,7 +37,7 @@ pub enum ElementSignal {
     TraversalFinished(Target),
 }
 
-fn match_helper(pattern: &str, value: &impl ToString) -> bool {
+pub(crate) fn match_helper(pattern: &str, value: &impl ToString) -> bool {
     let value = value.to_string().to_lowercase();
     pattern
         .to_lowercase()

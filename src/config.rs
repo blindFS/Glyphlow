@@ -805,6 +805,20 @@ impl Default for GlyphlowConfig {
 }
 
 impl GlyphlowConfig {
+    /// Index of the first workflow whose display name contains `pattern`
+    /// (case-insensitive, surrounding whitespace ignored).
+    ///
+    /// Returns `None` for an empty pattern or when nothing matches.
+    pub fn find_workflow(&self, pattern: &str) -> Option<usize> {
+        let pattern = pattern.trim().to_lowercase();
+        if pattern.is_empty() {
+            return None;
+        }
+        self.workflows
+            .iter()
+            .position(|wf| wf.display.to_lowercase().contains(&pattern))
+    }
+
     pub fn load_config(path: &PathBuf) -> Result<Self, String> {
         if let Ok(content) = fs::read_to_string(path) {
             log::info!("Loading config from {path:?}");
@@ -1401,5 +1415,39 @@ mod tests {
                 .hint_keys,
             config.hint_keys
         );
+    }
+
+    fn workflow_with_display(display: &str) -> WorkFlow {
+        WorkFlow {
+            display: display.into(),
+            key: "X".into(),
+            valid_app_ids: None,
+            starting_role: RoleOfInterest::Generic,
+            actions: vec![],
+        }
+    }
+
+    #[test]
+    fn test_find_workflow_substring_case_insensitive() {
+        let config = GlyphlowConfig {
+            workflows: vec![
+                workflow_with_display(" ProofRead"),
+                workflow_with_display("⮺ Copy Link"),
+            ],
+            ..GlyphlowConfig::default()
+        };
+
+        // Substring match, ignoring case and surrounding whitespace
+        assert_eq!(config.find_workflow("proofread"), Some(0));
+        assert_eq!(config.find_workflow("  PROOF  "), Some(0));
+        assert_eq!(config.find_workflow("Copy"), Some(1));
+
+        // First match wins when several workflows contain the pattern
+        assert_eq!(config.find_workflow("o"), Some(0));
+
+        // No match / empty pattern
+        assert_eq!(config.find_workflow("missing"), None);
+        assert_eq!(config.find_workflow(""), None);
+        assert_eq!(config.find_workflow("   "), None);
     }
 }

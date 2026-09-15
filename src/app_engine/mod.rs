@@ -162,6 +162,10 @@ impl AppEngine {
                 self.drawer.clear_menus();
                 self.execute_workflow(idx);
             }
+            AppSignal::RunWorkFlowByName(name) => {
+                self.drawer.clear_menus();
+                self.run_workflow_by_name(&name);
+            }
             AppSignal::ScrollAction(sa) => {
                 if self.check_mode(Mode::DictionaryScrolling) {
                     match sa {

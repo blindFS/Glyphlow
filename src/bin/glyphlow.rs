@@ -5,6 +5,7 @@ use core_foundation::{
 use glyphlow::{
     AppEngine, AppSignal, KeyListener, KeyState, Mode,
     config::{GlyphlowConfig, get_config_path},
+    ipc,
     os_util::check_accessibility_permissions,
 };
 use monio::{EventType, grab};
@@ -134,7 +135,7 @@ async fn main() {
 
     // Socket file for IPC
     let socket_file =
-        cache_file_path("glyphlow.socket", false).expect("Failed to create socket file.");
+        cache_file_path(ipc::SOCKET_FILE_NAME, false).expect("Failed to create socket file.");
     let listener = UnixListener::bind(socket_file).expect("Failed to bind socket.");
 
     loop {
@@ -144,6 +145,14 @@ async fn main() {
                 let mut line = String::new();
                 if let Ok(size) = socket_reader.read_line(&mut line).await && size > 0 &&
                     let Ok(signal) = serde_json::from_str::<AppSignal>(&line) {
+                    // CLI requests carry no interactive selection, so default to
+                    // the focused window as the element of interest. Only do so
+                    // when the window was actually resolved, otherwise the info
+                    // is the sentinel default (the system-wide element) and a
+                    // generic workflow would act on the middle of the screen.
+                    if app_engine.get_app_window_info() {
+                        app_engine.select_focused_window();
+                    }
                     app_engine.handle_signal(signal).await;
                 };
             }
@@ -160,18 +169,7 @@ async fn main() {
 }
 
 fn cache_file_path(fname: &str, create: bool) -> Option<PathBuf> {
-    let cache_dir = std::env::var("XDG_CACHE_HOME")
-        .ok()
-        .map(|dir| PathBuf::from(dir).join("glyphlow"))
-        .or_else(|| {
-            std::env::var("HOME")
-                .ok()
-                .map(|dir| PathBuf::from(dir).join(".cache/glyphlow"))
-        })?;
-    if !cache_dir.exists() {
-        std::fs::create_dir_all(&cache_dir).ok()?;
-    }
-    let cache_file = cache_dir.join(fname);
+    let cache_file = ipc::cache_dir()?.join(fname);
     if create {
         log::info!("Creating tempfile: {cache_file:?}");
         std::fs::File::create(&cache_file).ok()?;

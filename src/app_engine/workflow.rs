@@ -2,7 +2,7 @@ use super::AppEngine;
 use crate::{
     Mode,
     ax_element::{CompiledTarget, GetAttribute, SetAttribute, Target},
-    config::{RoleOfInterest, WorkFlow, WorkFlowAction},
+    config::{CustomTarget, RoleOfInterest, WorkFlow, WorkFlowAction},
 };
 use log::Level;
 use monio::Button;
@@ -11,12 +11,20 @@ use std::time::Duration;
 impl AppEngine {
     /// Check if a workflow is valid given currently selected element and app bundle id
     pub(super) fn is_workflow_valid(&self, wf: &WorkFlow) -> bool {
-        if wf.valid_app_ids.as_ref().is_some_and(|ids| {
+        self.workflow_invalid_reason(wf).is_none()
+    }
+
+    /// Whether the workflow's `valid_app_ids` restriction (if any) admits the
+    /// currently focused app.
+    fn app_id_allows(&self, wf: &WorkFlow) -> bool {
+        !wf.valid_app_ids.as_ref().is_some_and(|ids| {
             ids.iter()
                 .all(|id| *id != self.last_app_window_info.bundle_id)
-        }) {
-            return false;
-        }
+        })
+    }
+
+    /// Whether the current selection satisfies the workflow's `starting_role`.
+    fn role_satisfied(&self, wf: &WorkFlow) -> bool {
         match wf.starting_role {
             RoleOfInterest::Any => true,
             RoleOfInterest::Some => self.selected.is_some(),
@@ -29,6 +37,33 @@ impl AppEngine {
                 .as_ref()
                 .is_some_and(|s| s.element().is_some() && s.role() == wf.starting_role),
         }
+    }
+
+    /// Why `wf` cannot run against the current selection, if it cannot.
+    ///
+    /// Keeping the explanation in one place lets keyboard driven flows stay
+    /// terse (`execute_workflow` just draws a menu) while flows driven by the
+    /// CLI, which have no menu to look at, can report something actionable.
+    fn workflow_invalid_reason(&self, wf: &WorkFlow) -> Option<String> {
+        let name = wf.display.trim();
+        if !self.app_id_allows(wf) {
+            return Some(format!(
+                "Workflow `{name}` does not apply to `{}`",
+                self.last_app_window_info.bundle_id
+            ));
+        }
+        if self.role_satisfied(wf) {
+            return None;
+        }
+        let current = self
+            .selected
+            .as_ref()
+            .map(|s| format!("{:?}", s.role()))
+            .unwrap_or_else(|| "nothing".to_string());
+        Some(format!(
+            "Workflow `{name}` needs a {:?} selection, current selection is {current}",
+            wf.starting_role
+        ))
     }
 
     /// Returns true if there're pending actions to finish
@@ -193,5 +228,150 @@ impl AppEngine {
         } else {
             self.draw_menu("Wrong key sequence\nPress 󰁮 to go back");
         }
+    }
+
+    /// Run a workflow addressed by (a fragment of) its display name.
+    ///
+    /// Matching is delegated to [`crate::config::GlyphlowConfig::find_workflow`].
+    /// Unlike the keyboard driven path, failures are reported as notifications
+    /// instead of a menu, because there is no menu on screen to look at.
+    ///
+    /// When the workflow is only blocked by its `starting_role`, the elements
+    /// matching that role are offered for picking and the workflow runs on
+    /// whichever one gets picked. This reuses the very same machinery as the
+    /// `SearchFor` action: a custom target plus queued workflow actions.
+    pub(super) fn run_workflow_by_name(&mut self, name: &str) {
+        let Some(idx) = self.config.find_workflow(name) else {
+            let available = self
+                .config
+                .workflows
+                .iter()
+                .map(|wf| wf.display.trim())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let msg = if available.is_empty() {
+                format!("No workflow matches `{name}`. No workflows are configured.")
+            } else {
+                format!("No workflow matches `{name}`. Available: {available}")
+            };
+            self.notify_then_deactivate(&msg, Level::Error);
+            return;
+        };
+
+        if self.is_workflow_valid(&self.config.workflows[idx]) {
+            self.pending_workflow_actions = self.config.workflows[idx].actions.clone().into();
+            self.execute_pending_workflow_actions();
+            return;
+        }
+
+        // An app restriction is a hard no; only a role mismatch is recoverable
+        // by letting the user pick an element.
+        let recoverable = self.app_id_allows(&self.config.workflows[idx]);
+        let role_target = custom_target_for_role(self.config.workflows[idx].starting_role);
+
+        if recoverable
+            && let Some(ct) = role_target
+            && let Ok(compiled) = CompiledTarget::new(&ct)
+        {
+            self.pending_workflow_actions = self.config.workflows[idx].actions.clone().into();
+            self.activate(Target::Custom(Box::new(compiled)));
+            // Unambiguous pick: skip the hints and run straight away.
+            if self.element_cache.cache.len() == 1 {
+                self.clear_hints();
+                self.select(self.element_cache.cache[0].clone());
+                self.execute_pending_workflow_actions();
+            }
+            return;
+        }
+
+        if let Some(reason) = self.workflow_invalid_reason(&self.config.workflows[idx]) {
+            self.notify_then_deactivate(&reason, Level::Error);
+        }
+    }
+}
+
+/// A [`CustomTarget`] matching the accessibility roles behind a workflow's
+/// `starting_role`, used to offer the right elements for picking.
+///
+/// Roles are matched case-insensitively as substrings (see `match_helper`), and
+/// `|` separates alternatives. Returns `None` when the role needs no traversal:
+/// `Any`/`Some`/`Generic` are already satisfied by the focused window, and
+/// `PseudoText`/`CustomTarget` have no accessibility role of their own.
+fn custom_target_for_role(role: RoleOfInterest) -> Option<CustomTarget> {
+    let role = match role {
+        RoleOfInterest::Button => "button",
+        RoleOfInterest::CheckBox => "checkbox",
+        RoleOfInterest::Image => "image",
+        RoleOfInterest::MenuItem => "menuitem",
+        RoleOfInterest::ScrollBar => "scrollbar",
+        RoleOfInterest::StaticText => "statictext|heading",
+        RoleOfInterest::TextField => "textfield|textarea|combobox",
+        RoleOfInterest::Cell => "cell",
+        RoleOfInterest::Any
+        | RoleOfInterest::Some
+        | RoleOfInterest::Generic
+        | RoleOfInterest::PseudoText
+        | RoleOfInterest::CustomTarget => return None,
+    };
+    Some(CustomTarget {
+        role: role.to_string(),
+        ..Default::default()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ax_element::match_helper;
+
+    #[test]
+    fn test_custom_target_for_role_covers_expected_roles() {
+        let role_of = |role: RoleOfInterest| custom_target_for_role(role).map(|ct| ct.role);
+
+        assert_eq!(
+            role_of(RoleOfInterest::TextField).as_deref(),
+            Some("textfield|textarea|combobox")
+        );
+        assert_eq!(role_of(RoleOfInterest::Image).as_deref(), Some("image"));
+        assert_eq!(
+            role_of(RoleOfInterest::ScrollBar).as_deref(),
+            Some("scrollbar")
+        );
+        assert_eq!(role_of(RoleOfInterest::Button).as_deref(), Some("button"));
+        assert_eq!(
+            role_of(RoleOfInterest::MenuItem).as_deref(),
+            Some("menuitem")
+        );
+        assert_eq!(
+            role_of(RoleOfInterest::StaticText).as_deref(),
+            Some("statictext|heading")
+        );
+
+        // Roles already satisfied by the focused window need no traversal
+        assert_eq!(role_of(RoleOfInterest::Any), None);
+        assert_eq!(role_of(RoleOfInterest::Some), None);
+        assert_eq!(role_of(RoleOfInterest::Generic), None);
+
+        // The patterns must actually match the accessibility role strings
+        assert!(match_helper(
+            &custom_target_for_role(RoleOfInterest::TextField)
+                .unwrap()
+                .role,
+            &"AXTextField"
+        ));
+        assert!(match_helper(
+            &custom_target_for_role(RoleOfInterest::TextField)
+                .unwrap()
+                .role,
+            &"AXTextArea"
+        ));
+        assert!(match_helper(
+            &custom_target_for_role(RoleOfInterest::Image).unwrap().role,
+            &"AXImage"
+        ));
+        assert!(!match_helper(
+            &custom_target_for_role(RoleOfInterest::Image).unwrap().role,
+            &"AXButton"
+        ));
     }
 }

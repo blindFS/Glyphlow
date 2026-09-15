@@ -1,6 +1,7 @@
 use glyphlow::{
     AppEngine, AppSignal, FilterMode, KeyListener, KeyState, Mode, ScrollAction, TextAction,
-    action::text_to_clipboard, config::GlyphlowConfig,
+    action::text_to_clipboard,
+    config::{GlyphlowConfig, RoleOfInterest, WorkFlow},
 };
 use monio::Key;
 use objc2::MainThreadMarker;
@@ -27,6 +28,8 @@ enum TestEvent {
     ClearSignals,
     // Sets the clipboard text
     SetClipboard(String),
+    // Sends a raw signal, the way the CLI would over its socket
+    SendSignal(AppSignal),
 }
 
 fn main() {
@@ -210,21 +213,53 @@ fn main() {
             TestEvent::ReleaseKey(Key::KeyA),
         ])
         .await;
+
+        println!("Running Scenario 11: CLI driven workflow by name");
+        // These bypass the server's focused-window pre-selection (the harness
+        // has no accessibility tree), so only paths that do not depend on the
+        // current selection are asserted here. The role-based "offer elements
+        // for picking" path needs a live accessibility tree and is not covered.
+        let mut cli_config = GlyphlowConfig::default();
+        cli_config.workflows.push(WorkFlow {
+            display: "Other App Only".into(),
+            key: "Z".into(),
+            valid_app_ids: Some(vec!["com.example.not-the-focused-app".into()]),
+            starting_role: RoleOfInterest::Any,
+            actions: vec![],
+        });
+        run_test_scenario_with_config(
+            vec![
+                TestEvent::SetMode(Mode::Idle),
+                TestEvent::ClearSignals,
+                // An unknown name must be reported, not silently ignored
+                TestEvent::SendSignal(AppSignal::RunWorkFlowByName("no such workflow".into())),
+                TestEvent::ExpectMode(Mode::WaitAndDeactivate),
+                TestEvent::SetMode(Mode::Idle),
+                TestEvent::ClearSignals,
+                // Restricted to another app: refused even though `Any` would
+                // otherwise be satisfiable, because the app check is a hard no.
+                TestEvent::SendSignal(AppSignal::RunWorkFlowByName("Other App Only".into())),
+                TestEvent::ExpectMode(Mode::WaitAndDeactivate),
+            ],
+            cli_config,
+        )
+        .await;
     });
 
     println!("All lifecycle integration tests passed!");
 }
 
 async fn run_test_scenario(events: Vec<TestEvent>) {
+    run_test_scenario_with_config(events, GlyphlowConfig::default()).await;
+}
+
+async fn run_test_scenario_with_config(events: Vec<TestEvent>, config: GlyphlowConfig) {
     // Setup shared state
     let state = Arc::new(Mutex::new(Mode::Idle));
     let key_state = Arc::new(Mutex::new(KeyState::default()));
     let (tx, mut rx) = mpsc::channel::<AppSignal>(100);
     let done = Arc::new(AtomicBool::new(false));
     let processed_signals = Arc::new(Mutex::new(Vec::new()));
-
-    // Load default config
-    let config = GlyphlowConfig::default();
 
     // Create a temporary cache file
     let temp_dir = std::env::temp_dir();
@@ -247,6 +282,7 @@ async fn run_test_scenario(events: Vec<TestEvent>) {
     let sim_key_state = key_state.clone();
     let sim_processed_signals = processed_signals.clone();
     let sim_done = done.clone();
+    let sim_tx = tx.clone();
 
     let sim_thread = std::thread::spawn(move || {
         let wait_timeout = Duration::from_millis(1500);
@@ -311,6 +347,12 @@ async fn run_test_scenario(events: Vec<TestEvent>) {
                 TestEvent::SetClipboard(text) => {
                     text_to_clipboard(&text);
                     println!("[Sim] Clipboard set to {:?}", text);
+                }
+                TestEvent::SendSignal(signal) => {
+                    println!("[Sim] Sending signal {:?}", signal);
+                    sim_tx
+                        .blocking_send(signal)
+                        .expect("Failed to send signal to the engine");
                 }
             }
             // Add a small delay between events to ensure orderly processing
