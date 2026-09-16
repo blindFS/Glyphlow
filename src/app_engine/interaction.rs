@@ -175,8 +175,13 @@ impl AppEngine {
                 self.clear_cache();
                 let (w, h) = self.drawer.current_screen_frame.size();
                 let screen_ratio = w / (h + 0.01);
-                let word_picker =
-                    WordPicker::new(text, screen_ratio, &self.config.theme, &self.drawer);
+                let word_picker = WordPicker::new(
+                    text,
+                    screen_ratio,
+                    &self.config.theme,
+                    &self.config.hint_keys,
+                    &self.drawer,
+                );
                 self.hint_width = word_picker.digits;
 
                 self.word_picker = Some(word_picker);

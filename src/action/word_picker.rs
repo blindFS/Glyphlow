@@ -1,8 +1,8 @@
 use crate::{
     action::html_to_attributed_string,
-    config::{GlyphlowTheme, cgcolor_to_rgba},
-    user_interface::{UIDrawer, hint_label_from_index},
-    util::{digits_by_length, lower_ascii, search_regex},
+    config::{GlyphlowTheme, HintKeys, cgcolor_to_rgba},
+    user_interface::UIDrawer,
+    util::{lower_ascii, search_regex},
 };
 use objc2::rc::{Retained, autoreleasepool};
 use objc2_app_kit::NSFontAttributeName;
@@ -41,12 +41,18 @@ pub struct WordPicker {
 }
 
 impl WordPicker {
-    pub fn new(text: String, screen_ratio: f64, theme: &GlyphlowTheme, drawer: &UIDrawer) -> Self {
+    pub fn new(
+        text: String,
+        screen_ratio: f64,
+        theme: &GlyphlowTheme,
+        hint_keys: &HintKeys,
+        drawer: &UIDrawer,
+    ) -> Self {
         let (word_strings, offsets) = multilingual_split(&text);
-        let digits = digits_by_length(word_strings.len());
+        let digits = hint_keys.digits_for_len(word_strings.len());
         let mut words = Vec::new();
         for (i, text) in word_strings.into_iter().enumerate() {
-            let label = hint_label_from_index(i, Some(digits));
+            let label = hint_keys.label_for_index(i, Some(digits));
             let ascii = lower_ascii(&text);
             words.push(Word { text, label, ascii });
         }

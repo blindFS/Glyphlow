@@ -194,6 +194,7 @@ A comprehensive configuration file is generated when you run this app at the fir
 | `dictionaries` | Dictionary names for the built-in dictionary lookup | `["New Oxford American Dictionary"]` |
 | `visibility_checking_level` | Rigor level for checking if an element is visible (`Loosest`, `Loose`, `Medium`, `Strict`) | `Loose` |
 | `electron_initial_wait_ms` | Delay for Electron-based apps to bootstrap | `100` |
+| `hint_keys` | Keys used to label hints, in assignment order | `ABCDEFGHIJKLMNOPQRSTUVWXYZ` |
 
 ### Theme Options
 

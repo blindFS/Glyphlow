@@ -29,6 +29,7 @@ impl AppEngine {
                     iter,
                     &self.overlay_frame,
                     &self.config.theme,
+                    &self.config.hint_keys,
                     self.config.colored_frame_min_size as f64,
                 )
             };
@@ -224,7 +225,7 @@ impl AppEngine {
 
     pub(super) async fn quick_follow(&mut self) {
         if self.element_cache.cache.len() == 1 {
-            self.hint_prefix.push('A');
+            self.hint_prefix.push(self.config.hint_keys.first());
             self.filter_by_key().await;
         }
     }
