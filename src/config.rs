@@ -384,6 +384,174 @@ impl AlphabeticKey for Key {
     }
 }
 
+/// Characters that can actually reach the hint filter as a plain keystroke.
+///
+/// Mirrors the non-modifier branches of `Key::to_char()`, which is what hint
+/// filtering compares typed keys against. Every character here is ASCII, so a
+/// hint label always has one byte per character.
+///
+/// `/` is deliberately absent: `KeyListener::filter_helper` intercepts
+/// `Key::Slash` to start a text search before ever calling `to_char()`, so a
+/// hint labelled with it could never be typed.
+const TYPABLE_HINT_CHARS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789`-=[]\\;',.";
+
+/// Bit for `c` in a 128-bit bitmap indexed by ASCII code point.
+///
+/// Returns `0` for non-ASCII characters, which can never be hint keys. That
+/// also means a non-ASCII entry accidentally added to [`TYPABLE_HINT_CHARS`]
+/// is ignored rather than silently corrupting the byte-indexed alphabet.
+const fn ascii_bit(c: char) -> u128 {
+    if c.is_ascii() { 1u128 << (c as u8) } else { 0 }
+}
+
+/// [`TYPABLE_HINT_CHARS`] as a bitmap, so membership is a single `and`.
+const TYPABLE_HINT_MASK: u128 = {
+    let bytes = TYPABLE_HINT_CHARS.as_bytes();
+    let mut mask = 0u128;
+    let mut i = 0;
+    while i < bytes.len() {
+        mask |= ascii_bit(bytes[i] as char);
+        i += 1;
+    }
+    mask
+};
+
+/// The ordered set of keys used to label hints.
+///
+/// Values are normalized on construction: upper-cased (typed keys are reported
+/// upper-cased for letters), de-duplicated, and restricted to
+/// [`TYPABLE_HINT_CHARS`]. An input that leaves fewer than two usable keys is
+/// rejected in favor of [`HintKeys::DEFAULT_ALPHABET`], because a single key
+/// cannot tell hints apart.
+///
+/// Only ASCII can end up in here, which is what lets the label builders treat
+/// the alphabet as bytes and keep labels one byte per character.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub struct HintKeys(String);
+
+impl HintKeys {
+    /// The historical alphabet, i.e. plain uppercase ASCII letters.
+    pub const DEFAULT_ALPHABET: &'static str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+    /// Below this many distinct keys hints cannot be addressed unambiguously.
+    const MIN_LEN: usize = 2;
+
+    pub fn new(raw: &str) -> Self {
+        // `seen` replaces a scan of the alphabet for every input character, and
+        // `ignored` stays allocation-free unless something actually is dropped.
+        let mut seen = 0u128;
+        let mut ignored = String::new();
+        let mut sanitized = String::with_capacity(raw.len());
+
+        for c in raw.chars() {
+            let c = c.to_ascii_uppercase();
+            let bit = ascii_bit(c) & TYPABLE_HINT_MASK;
+
+            if bit == 0 {
+                if !ignored.contains(c) {
+                    ignored.push(c);
+                }
+            } else if seen & bit == 0 {
+                seen |= bit;
+                sanitized.push(c);
+            }
+        }
+
+        if !ignored.is_empty() {
+            log::warn!(
+                "Ignoring {ignored:?} in `hint_keys` = {raw:?}: not usable as a single \
+                 keystroke hint key."
+            );
+        }
+
+        if sanitized.len() < Self::MIN_LEN {
+            log::warn!(
+                "`hint_keys` = {raw:?} does not provide at least {} distinct usable keys, \
+                 falling back to {:?}.",
+                Self::MIN_LEN,
+                Self::DEFAULT_ALPHABET
+            );
+            return Self::default();
+        }
+
+        Self(sanitized)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Radix of the hint labels, i.e. how many distinct keys are available.
+    pub fn base(&self) -> usize {
+        self.0.len()
+    }
+
+    /// The key every padded label starts with, also the first key to press.
+    pub fn first(&self) -> char {
+        // Non-empty by construction.
+        self.0.as_bytes().first().copied().unwrap_or(b'A') as char
+    }
+
+    /// Label of the `i`-th hint.
+    ///
+    /// Without `digits` the label is as short as possible; with `digits` it is
+    /// zero-padded to a fixed width so that no label is a prefix of another.
+    pub fn label_for_index(&self, i: usize, digits: Option<u32>) -> String {
+        // The alphabet is ASCII, so byte indexing matches character indexing and
+        // the label can be built in place without an intermediate buffer.
+        let keys = self.0.as_bytes();
+        let base = keys.len();
+
+        if i == 0 && digits.is_none() {
+            return (keys[0] as char).to_string();
+        }
+
+        // Width of the unpadded representation; `i == 0` needs no digits.
+        let natural = if i == 0 { 0 } else { i.ilog(base) as usize + 1 };
+        let width = natural.max(digits.unwrap_or(0) as usize);
+
+        let mut label = String::with_capacity(width);
+        let mut n = i;
+        while n > 0 {
+            label.push(keys[n % base] as char);
+            n /= base;
+        }
+        while label.len() < width {
+            label.push(keys[0] as char);
+        }
+
+        label
+    }
+
+    /// Shortest label width that can address `len` distinct hints.
+    pub fn digits_for_len(&self, len: usize) -> u32 {
+        if len <= 1 {
+            1
+        } else {
+            (len - 1).ilog(self.base()) + 1
+        }
+    }
+}
+
+impl Default for HintKeys {
+    fn default() -> Self {
+        Self(Self::DEFAULT_ALPHABET.to_string())
+    }
+}
+
+impl From<String> for HintKeys {
+    fn from(raw: String) -> Self {
+        Self::new(&raw)
+    }
+}
+
+impl From<HintKeys> for String {
+    fn from(keys: HintKeys) -> Self {
+        keys.0
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct KeyBinding {
     #[serde(with = "key_combo_format")]
@@ -437,6 +605,8 @@ pub struct GlyphlowConfig {
     pub visibility_checking_level: VisibilityCheckingLevel,
     #[serde(default = "default_wait_ms")]
     pub electron_initial_wait_ms: u64,
+    #[serde(default = "default_hint_keys")]
+    pub hint_keys: HintKeys,
 }
 
 impl GlyphlowConfig {
@@ -606,6 +776,9 @@ fn default_vis_level() -> VisibilityCheckingLevel {
 fn default_wait_ms() -> u64 {
     100
 }
+fn default_hint_keys() -> HintKeys {
+    HintKeys::default()
+}
 
 impl Default for GlyphlowConfig {
     fn default() -> Self {
@@ -626,6 +799,7 @@ impl Default for GlyphlowConfig {
             dictionaries: default_dictionaries(),
             visibility_checking_level: default_vis_level(),
             electron_initial_wait_ms: default_wait_ms(),
+            hint_keys: default_hint_keys(),
         }
     }
 }
@@ -805,6 +979,7 @@ mod vec_cgcolor_format {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
     fn test_key_combo_formatting() {
@@ -984,5 +1159,247 @@ mod tests {
             "New text action should be incompatible"
         );
         assert_eq!(old_config.text_actions.len(), 1);
+    }
+
+    #[test]
+    fn test_hint_keys_sanitization() {
+        // Case is normalized: typed letters are reported upper-cased.
+        assert_eq!(HintKeys::new("asdfjkl;").as_str(), "ASDFJKL;");
+        // Duplicates are dropped, keeping the first occurrence.
+        assert_eq!(HintKeys::new("aabcc").as_str(), "ABC");
+        // Characters the key listener cannot report are dropped.
+        assert_eq!(HintKeys::new("a!b c\tdé").as_str(), "ABCD");
+        // Digits and most punctuation are valid hint keys.
+        assert_eq!(HintKeys::new("123;',.").as_str(), "123;',.");
+    }
+
+    /// `/` starts a text search in filtering mode, so it never reaches the hint
+    /// filter and must not be accepted as a hint key.
+    #[test]
+    fn test_hint_keys_rejects_slash() {
+        let keys = HintKeys::new("asdfjkl/;");
+        assert_eq!(keys.as_str(), "ASDFJKL;");
+        assert!(!keys.as_str().contains('/'));
+
+        // A slash-only alphabet leaves nothing usable, so the default is kept.
+        assert_eq!(HintKeys::new("//").as_str(), HintKeys::DEFAULT_ALPHABET);
+    }
+
+    /// The bitmap must stay in sync with the readable list, and everything that
+    /// can enter an alphabet must be ASCII — `label_for_index` indexes the
+    /// alphabet as bytes, so a non-ASCII key would corrupt every label.
+    #[test]
+    fn test_typable_hint_chars_match_mask_and_are_ascii() {
+        assert!(TYPABLE_HINT_CHARS.is_ascii());
+        assert!(HintKeys::DEFAULT_ALPHABET.is_ascii());
+
+        for c in TYPABLE_HINT_CHARS.chars() {
+            assert_ne!(
+                ascii_bit(c) & TYPABLE_HINT_MASK,
+                0,
+                "{c:?} is listed as typable but is missing from the mask"
+            );
+            // The leading 'A' guarantees the input is long enough to keep.
+            assert!(
+                HintKeys::new(&format!("A{c}")).as_str().contains(c),
+                "{c:?} is listed as typable but was dropped by sanitizing"
+            );
+        }
+
+        // Non-ASCII never makes it into an alphabet, so byte indexing is sound.
+        for raw in ["é", "aé", "日本", "a\u{301}"] {
+            assert!(
+                HintKeys::new(raw).as_str().is_ascii(),
+                "{raw:?} produced a non-ASCII alphabet"
+            );
+        }
+
+        // The default must be a valid alphabet, not merely a string.
+        assert_eq!(
+            HintKeys::new(HintKeys::DEFAULT_ALPHABET),
+            HintKeys::default()
+        );
+        assert!(HintKeys::default().base() >= HintKeys::MIN_LEN);
+    }
+
+    #[test]
+    fn test_hint_keys_falls_back_when_unusable() {
+        // A single key cannot tell hints apart, so the default is kept instead.
+        for raw in ["", "a", "aa", "a!!a", "  "] {
+            assert_eq!(
+                HintKeys::new(raw),
+                HintKeys::default(),
+                "{raw:?} should fall back to the default alphabet"
+            );
+        }
+        assert_eq!(HintKeys::default().as_str(), "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    }
+
+    #[test]
+    fn test_hint_keys_default_labels_are_unchanged() {
+        let keys = HintKeys::default();
+
+        // Unpadded labels, as used while elements are still being traversed.
+        assert_eq!(keys.label_for_index(0, None), "A");
+        assert_eq!(keys.label_for_index(1, None), "B");
+        assert_eq!(keys.label_for_index(25, None), "Z");
+        assert_eq!(keys.label_for_index(26, None), "AB");
+
+        // Padded labels, as used once the hint width is known.
+        assert_eq!(keys.label_for_index(0, Some(1)), "A");
+        assert_eq!(keys.label_for_index(25, Some(1)), "Z");
+        assert_eq!(keys.label_for_index(0, Some(2)), "AA");
+        assert_eq!(keys.label_for_index(25, Some(2)), "ZA");
+        assert_eq!(keys.label_for_index(26, Some(2)), "AB");
+    }
+
+    #[test]
+    fn test_hint_keys_custom_alphabet_labels() {
+        let keys = HintKeys::new("asdfjkl;");
+        assert_eq!(keys.base(), 8);
+
+        // 8 keys address up to 8 hints with a single keystroke.
+        assert_eq!(keys.digits_for_len(8), 1);
+        assert_eq!(keys.label_for_index(0, Some(1)), "A");
+        assert_eq!(keys.label_for_index(7, Some(1)), ";");
+
+        // The 9th hint needs two keystrokes.
+        assert_eq!(keys.digits_for_len(9), 2);
+        assert_eq!(keys.label_for_index(0, Some(2)), "AA");
+        assert_eq!(keys.label_for_index(8, Some(2)), "AS");
+        assert_eq!(keys.label_for_index(63, Some(2)), ";;");
+    }
+
+    #[test]
+    fn test_hint_keys_digits_for_len() {
+        let letters = HintKeys::default();
+        assert_eq!(letters.digits_for_len(0), 1);
+        assert_eq!(letters.digits_for_len(1), 1);
+        assert_eq!(letters.digits_for_len(26), 1);
+        assert_eq!(letters.digits_for_len(27), 2);
+        assert_eq!(letters.digits_for_len(676), 2);
+        assert_eq!(letters.digits_for_len(677), 3);
+
+        let home_row = HintKeys::new("asdfjkl;");
+        assert_eq!(home_row.digits_for_len(1), 1);
+        assert_eq!(home_row.digits_for_len(9), 2);
+        assert_eq!(home_row.digits_for_len(64), 2);
+        assert_eq!(home_row.digits_for_len(65), 3);
+
+        let binary = HintKeys::new("jk");
+        assert_eq!(binary.digits_for_len(2), 1);
+        assert_eq!(binary.digits_for_len(3), 2);
+        assert_eq!(binary.digits_for_len(4), 2);
+        assert_eq!(binary.digits_for_len(5), 3);
+    }
+
+    /// `label_for_index` is written for speed (no intermediate buffer, exact
+    /// capacity, O(1) alphabet lookup). It must still agree exactly with the
+    /// straightforward reference implementation it replaced.
+    #[test]
+    fn test_label_for_index_matches_reference() {
+        fn reference(keys: &[char], i: usize, digits: Option<u32>) -> String {
+            if i == 0 && digits.is_none() {
+                return keys[0].to_string();
+            }
+            let mut n = i;
+            let mut result = Vec::new();
+            while n > 0 {
+                result.push(keys[n % keys.len()]);
+                n /= keys.len();
+            }
+            if let Some(digits) = digits {
+                while result.len() < digits as usize {
+                    result.push(keys[0]);
+                }
+            }
+            result.into_iter().collect()
+        }
+
+        for raw in [
+            "asdfjkl;",
+            "jk",
+            "a;",
+            "0123456789",
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        ] {
+            let keys = HintKeys::new(raw);
+            let chars = keys.as_str().chars().collect::<Vec<_>>();
+            assert_eq!(chars.len(), keys.base());
+
+            for digits in [None, Some(1), Some(2), Some(3), Some(5)] {
+                for i in 0..256 {
+                    assert_eq!(
+                        keys.label_for_index(i, digits),
+                        reference(&chars, i, digits),
+                        "mismatch for {raw:?} at i = {i}, digits = {digits:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Every hint must be reachable by a distinct keystroke sequence, and all    /// labels of one batch must be the same width so that none is a prefix of
+    /// another (which would make filtering ambiguous).
+    #[test]
+    fn test_hint_keys_labels_are_unique_and_fixed_width() {
+        for raw in ["asdfjkl;", "jk", "0123456789", "ABCDEFGHIJKLMNOPQRSTUVWXYZ"] {
+            let keys = HintKeys::new(raw);
+            let alphabet = keys.as_str();
+
+            for len in 1..=(keys.base() * keys.base() + 1) {
+                let digits = keys.digits_for_len(len);
+                let labels = (0..len)
+                    .map(|i| keys.label_for_index(i, Some(digits)))
+                    .collect::<HashSet<_>>();
+
+                assert_eq!(
+                    labels.len(),
+                    len,
+                    "labels for {len} hints over {alphabet:?} are not unique: {labels:?}"
+                );
+                for label in &labels {
+                    assert_eq!(
+                        label.chars().count(),
+                        digits as usize,
+                        "label {label:?} is not {digits} characters wide"
+                    );
+                    assert!(
+                        label.chars().all(|c| alphabet.contains(c)),
+                        "label {label:?} uses a key outside of {alphabet:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_hint_keys_toml() {
+        let config: GlyphlowConfig = toml::from_str(r#"hint_keys = "asdfjkl;""#).unwrap();
+        assert_eq!(config.hint_keys.as_str(), "ASDFJKL;");
+        assert_eq!(config.hint_keys.base(), 8);
+        assert_eq!(config.hint_keys.first(), 'A');
+
+        // Unusable values are normalized instead of failing the whole config.
+        let config: GlyphlowConfig = toml::from_str(r#"hint_keys = "aaaa""#).unwrap();
+        assert_eq!(config.hint_keys, HintKeys::default());
+
+        // Missing field keeps the default alphabet.
+        let config: GlyphlowConfig = toml::from_str("").unwrap();
+        assert_eq!(config.hint_keys, HintKeys::default());
+
+        // Round trip preserves the normalized value.
+        let config = GlyphlowConfig {
+            hint_keys: HintKeys::new("asdfjkl;"),
+            ..Default::default()
+        };
+        let toml_str = toml::to_string(&config).unwrap();
+        assert!(toml_str.contains("hint_keys = \"ASDFJKL;\""));
+        assert_eq!(
+            toml::from_str::<GlyphlowConfig>(&toml_str)
+                .unwrap()
+                .hint_keys,
+            config.hint_keys
+        );
     }
 }

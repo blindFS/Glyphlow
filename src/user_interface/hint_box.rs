@@ -1,6 +1,6 @@
-use crate::config::GlyphlowTheme;
+use crate::config::{GlyphlowTheme, HintKeys};
 use crate::user_interface::calibrated_origin;
-use crate::util::{Frame, digits_by_length, estimate_frame_for_text};
+use crate::util::{Frame, estimate_frame_for_text};
 use objc2::{AnyThread, rc::Retained};
 use objc2_core_foundation::{CFRetained, CGSize};
 use objc2_core_graphics::{CGColor, CGMutablePath};
@@ -8,31 +8,6 @@ use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSi
 use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer, kCAAlignmentCenter};
 use rstar::{AABB, RTree, RTreeObject};
 use std::collections::{HashMap, VecDeque};
-
-pub fn hint_label_from_index(i: usize, digits: Option<u32>) -> String {
-    if i == 0 && digits.is_none() {
-        return "A".to_string();
-    }
-
-    let mut n = i;
-    let mut result = Vec::new();
-
-    while n > 0 {
-        let remainder = (n % 26) as u8;
-        let char = (b'A' + remainder) as char;
-        result.push(char);
-        n /= 26;
-    }
-
-    let Some(digits) = digits else {
-        return result.iter().collect();
-    };
-    // pad to fixed length
-    while result.len() < digits as usize {
-        result.push('A');
-    }
-    result.iter().collect()
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HintBox {
@@ -317,12 +292,13 @@ pub fn hint_boxes_from_frames(
     frames: impl Iterator<Item = Frame>,
     screen_frame: &Frame,
     theme: &GlyphlowTheme,
+    hint_keys: &HintKeys,
     colored_frame_min_size: f64,
 ) -> (u32, Vec<HintBox>) {
     if len == 0 {
         return (0, Vec::new());
     }
-    let digits = digits_by_length(len);
+    let digits = hint_keys.digits_for_len(len);
     let color_num = theme.frame_colors.len();
     let mut color_idx = 0;
 
@@ -346,7 +322,7 @@ pub fn hint_boxes_from_frames(
 
             HintBox::new(
                 idx,
-                hint_label_from_index(idx, Some(digits)),
+                hint_keys.label_for_index(idx, Some(digits)),
                 x,
                 y,
                 frame,
@@ -707,6 +683,87 @@ mod collision_tests {
 
         // This should hit the max_ops and exit gracefully
         resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 50);
+    }
+}
+
+#[cfg(test)]
+mod hint_label_tests {
+    use super::*;
+    use crate::config::HintKeys;
+
+    fn screen() -> Frame {
+        Frame::new(0.0, 0.0, 1000.0, 1000.0)
+    }
+
+    /// Well separated 20x20 frames, so collision resolution never kicks in.
+    fn frames(len: usize) -> impl Iterator<Item = Frame> {
+        (0..len).map(|i| {
+            let x = (i % 10) as f64 * 40.0;
+            let y = (i / 10) as f64 * 40.0;
+            Frame::new(x, y, x + 20.0, y + 20.0)
+        })
+    }
+
+    #[test]
+    fn test_hint_boxes_use_configured_keys() {
+        let (digits, boxes) = hint_boxes_from_frames(
+            4,
+            frames(4),
+            &screen(),
+            &GlyphlowTheme::default(),
+            &HintKeys::new("asdfjkl;"),
+            200.0,
+        );
+
+        assert_eq!(digits, 1);
+        assert_eq!(
+            boxes.iter().map(|b| b.label.as_str()).collect::<Vec<_>>(),
+            vec!["A", "S", "D", "F"]
+        );
+    }
+
+    #[test]
+    fn test_hint_boxes_widen_with_configured_base() {
+        let theme = GlyphlowTheme::default();
+
+        // The full alphabet addresses 10 hints with a single keystroke ...
+        let (digits, boxes) = hint_boxes_from_frames(
+            10,
+            frames(10),
+            &screen(),
+            &theme,
+            &HintKeys::default(),
+            200.0,
+        );
+        assert_eq!(digits, 1);
+        assert_eq!(boxes[9].label, "J");
+
+        // ... whereas a home-row alphabet needs two.
+        let (digits, boxes) = hint_boxes_from_frames(
+            10,
+            frames(10),
+            &screen(),
+            &theme,
+            &HintKeys::new("asdfjkl;"),
+            200.0,
+        );
+        assert_eq!(digits, 2);
+        assert_eq!(boxes[8].label, "AS");
+        assert_eq!(boxes[9].label, "SS");
+    }
+
+    #[test]
+    fn test_hint_boxes_empty_input() {
+        let (digits, boxes) = hint_boxes_from_frames(
+            0,
+            frames(0),
+            &screen(),
+            &GlyphlowTheme::default(),
+            &HintKeys::default(),
+            200.0,
+        );
+        assert_eq!(digits, 0);
+        assert!(boxes.is_empty());
     }
 }
 

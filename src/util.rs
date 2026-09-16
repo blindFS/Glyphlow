@@ -272,10 +272,6 @@ pub fn select_range_helper(
     Some((text, Frame::new(x_min, y_min, x_max, y_max)))
 }
 
-pub fn digits_by_length(len: usize) -> u32 {
-    if len <= 1 { 1 } else { (len - 1).ilog(26) + 1 }
-}
-
 pub fn search_regex(text: &str) -> Option<Regex> {
     (!text.is_empty())
         .then_some({

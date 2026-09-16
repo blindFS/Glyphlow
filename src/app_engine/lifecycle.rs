@@ -6,8 +6,7 @@ use crate::{
     },
     config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
     os_util::{AppWindowInfo, element_at_point, get_focused_window},
-    user_interface::{HintBox, find_overlaps, hint_label_from_index, resolve_collisions},
-    util::digits_by_length,
+    user_interface::{HintBox, find_overlaps, resolve_collisions},
 };
 use accessibility::AXUIElementAttributes;
 use accessibility_sys::{AXUIElementCreateSystemWide, AXUIElementRef};
@@ -310,7 +309,7 @@ impl AppEngine {
                 })
                 .flatten();
 
-            let label = hint_label_from_index(idx, None);
+            let label = self.config.hint_keys.label_for_index(idx, None);
             let mut hb = HintBox::new(idx, label, x, y, eoi.frame, color);
 
             hb.draw(
@@ -324,11 +323,11 @@ impl AppEngine {
             }
 
             self.hint_boxes.push(hb);
-            let digits = digits_by_length(self.hint_boxes.len());
+            let digits = self.config.hint_keys.digits_for_len(self.hint_boxes.len());
 
             if digits > self.hint_width {
                 for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
-                    hb.label = hint_label_from_index(i, Some(digits));
+                    hb.label = self.config.hint_keys.label_for_index(i, Some(digits));
                 }
             }
             self.hint_width = digits;
