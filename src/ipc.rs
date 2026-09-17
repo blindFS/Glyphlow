@@ -38,15 +38,15 @@ pub fn socket_path() -> Option<PathBuf> {
 }
 
 fn cache_dir_path() -> Option<PathBuf> {
-    let base = std::env::var("XDG_CACHE_HOME")
+    std::env::var("XDG_CACHE_HOME")
         .ok()
         .map(PathBuf::from)
         .or_else(|| {
             std::env::var("HOME")
                 .ok()
                 .map(|dir| PathBuf::from(dir).join(".cache"))
-        })?;
-    Some(base.join("glyphlow"))
+        })
+        .map(|base| base.join("glyphlow"))
 }
 
 /// Errors that can occur while talking to the server.

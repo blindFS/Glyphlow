@@ -3,6 +3,8 @@
 //! Parses its arguments with `clap`, translates them into an [`AppSignal`] and
 //! hands that to the running `glyphlow` server over its Unix socket.
 
+use std::process::ExitCode;
+
 use clap::{Parser, Subcommand, ValueEnum};
 use glyphlow::{AppSignal, ax_element::Target, ipc};
 
@@ -72,7 +74,7 @@ impl std::fmt::Display for ActivationKind {
 }
 
 #[tokio::main]
-async fn main() -> std::process::ExitCode {
+async fn main() -> ExitCode {
     let cli = Cli::parse();
 
     let (signal, confirmation) = match cli.command {
@@ -89,11 +91,11 @@ async fn main() -> std::process::ExitCode {
     match ipc::send_signal(&signal).await {
         Ok(()) => {
             println!("{confirmation}");
-            std::process::ExitCode::SUCCESS
+            ExitCode::SUCCESS
         }
         Err(e) => {
             eprintln!("glyphlow-cli: {e}");
-            std::process::ExitCode::FAILURE
+            ExitCode::FAILURE
         }
     }
 }
