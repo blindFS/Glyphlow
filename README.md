@@ -148,6 +148,8 @@ programs.glyphlow = {
   settings = {
     # ...
   };
+  # Optional: also install glyphlow-cli, the command line client
+  cli.enable = true;
 };
 ```
 
@@ -159,14 +161,50 @@ written in [dendritic pattern](https://github.com/mightyiam/dendritic).
 
 </details>
 
+## Command Line Interface
+
+`glyphlow-cli` drives a running server, so Glyphlow can also be triggered
+without touching the keyboard. It is packaged **separately** from the server, so
+you can install it only where you want it:
+
+- **Nix**: set `programs.glyphlow.cli.enable = true` (see the Nix section above),
+  or install the `glyphlow-cli` flake package directly.
+- **Release archive**: `glyphlow-cli.tar.gz` from the
+  [releases page](https://github.com/blindFS/Glyphlow/releases).
+
+```bash
+# Activate elements of a kind, then pick one from the overlay hints
+glyphlow-cli activate clickable   # buttons, menu items, ...
+glyphlow-cli activate text        # static text
+glyphlow-cli activate image       # images
+
+# Run a configured workflow
+glyphlow-cli workflow ProofRead
+```
+
+Notes:
+
+- `workflow` matches the workflow `display` name case-insensitively on any
+  substring and runs the first match.
+- A CLI request carries no interactive selection, so the server starts from the
+  focused window. If the workflow's `starting_role` is not satisfied by that
+  window, you are first asked to pick an element.
+- Requests are fire-and-forget: the exit status only reports that the request
+  reached the server, not that the action succeeded. Failures such as an unknown
+  workflow name are shown as an on-screen notification.
+
 ## Purging
 
-This app is designed to be lean and clean, it only generates 2 files:
+This app is designed to be lean and clean, it only generates 3 files:
 
 1. A configuration file `$XDG_CONFIG_HOME/glyphlow/config.toml` or
 `~/.config/glyphlow/config.toml` if the env-var is not set.
 2. A cache file for temporary editing: `$XDG_CACHE_HOME/glyphlow/tempfile.md`
 or `~/.cache/glyphlow/tempfile.md`.
+3. A Unix socket used by `glyphlow-cli`:
+`$XDG_CACHE_HOME/glyphlow/glyphlow.socket` or
+`~/.cache/glyphlow/glyphlow.socket`. It is recreated every time the server
+starts.
 
 ## Configuration
 

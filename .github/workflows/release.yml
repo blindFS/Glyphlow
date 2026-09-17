@@ -17,6 +17,7 @@ jobs:
     outputs:
       version: ${{ steps.get_meta.outputs.version }}
       hash: ${{ steps.get_meta.outputs.hash }}
+      cli_hash: ${{ steps.get_meta.outputs.cli_hash }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -26,30 +27,71 @@ jobs:
         with:
           targets: aarch64-apple-darwin
 
-      - name: Build for Release
-        run: cargo build --release --target=aarch64-apple-darwin
+      - name: Sync Version From Tag
+        run: |
+          TAG_NAME=${{ github.event.inputs.tag_name || github.ref_name }}
+          VERSION=${TAG_NAME#v}
+          # `glyphlow-cli --version` reports CARGO_PKG_VERSION, which is baked in
+          # from Cargo.toml at compile time. Without this the released binary
+          # would keep reporting whatever is committed there instead of the tag
+          # being released. Only a line-anchored `version = ` is rewritten, so
+          # the inline dependency versions in the same file are left alone.
+          # (Cargo.lock is not tracked, so cargo regenerates it with the new
+          # version during the build.)
+          /usr/bin/sed -i '' "s|^version = \".*\"|version = \"$VERSION\"|" Cargo.toml
+          grep -qx "version = \"$VERSION\"" Cargo.toml || {
+            echo "::error::failed to set Cargo.toml version to '$VERSION'"
+            exit 1
+          }
+          grep -n '^version = ' Cargo.toml
 
-      - name: Package Binary
+      - name: Build for Release
+        # --bins builds both `glyphlow` and `glyphlow-cli` (src/bin/*.rs)
+        run: cargo build --release --target=aarch64-apple-darwin --bins
+
+      - name: Package Binaries
         run: |
           cd target/aarch64-apple-darwin/release
-          chmod +x glyphlow
+          # One archive per package, each holding a single binary, so the server
+          # can be installed without the client. flake.nix expects exactly this
+          # layout: a `glyphlow.tar.gz` containing `glyphlow` and a
+          # `glyphlow-cli.tar.gz` containing `glyphlow-cli`.
+          chmod +x glyphlow glyphlow-cli
           tar -czf glyphlow.tar.gz glyphlow
+          tar -czf glyphlow-cli.tar.gz glyphlow-cli
+
+      - name: Verify Packaged Archives
+        run: |
+          rm -rf "$RUNNER_TEMP/glyphlow-verify"
+          mkdir -p "$RUNNER_TEMP/glyphlow-verify"
+          for archive in glyphlow glyphlow-cli; do
+            tar -xzf "target/aarch64-apple-darwin/release/$archive.tar.gz" \
+              -C "$RUNNER_TEMP/glyphlow-verify"
+          done
+          ls -l "$RUNNER_TEMP/glyphlow-verify"
+          # Exercise the extracted archives rather than the build tree: this
+          # catches a dropped binary or a lost executable bit. Only the client is
+          # run -- the server needs Accessibility permissions and bails out.
+          test -x "$RUNNER_TEMP/glyphlow-verify/glyphlow"
+          "$RUNNER_TEMP/glyphlow-verify/glyphlow-cli" --version
 
       - name: Calculate Metadata
         id: get_meta
         run: |
           TAG_NAME=${{ github.event.inputs.tag_name || github.ref_name }}
           VERSION=${TAG_NAME#v}
-          HASH=$(shasum -a 256 target/aarch64-apple-darwin/release/glyphlow.tar.gz | cut -d ' ' -f 1 | xxd -r -p | base64)
-          SRI_HASH="sha256-$HASH"
+          sri () { shasum -a 256 "$1" | cut -d ' ' -f 1 | xxd -r -p | base64; }
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "hash=$SRI_HASH" >> $GITHUB_OUTPUT
+          echo "hash=sha256-$(sri target/aarch64-apple-darwin/release/glyphlow.tar.gz)" >> $GITHUB_OUTPUT
+          echo "cli_hash=sha256-$(sri target/aarch64-apple-darwin/release/glyphlow-cli.tar.gz)" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
-          files: target/aarch64-apple-darwin/release/glyphlow.tar.gz
+          files: |
+            target/aarch64-apple-darwin/release/glyphlow.tar.gz
+            target/aarch64-apple-darwin/release/glyphlow-cli.tar.gz
           generate_release_notes: true
 
   call-update-nix:
@@ -58,5 +100,6 @@ jobs:
     with:
       version: ${{ needs.build-and-release.outputs.version }}
       hash: ${{ needs.build-and-release.outputs.hash }}
+      cli_hash: ${{ needs.build-and-release.outputs.cli_hash }}
     secrets: inherit
 
