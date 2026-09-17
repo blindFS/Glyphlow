@@ -161,7 +161,7 @@ written in [dendritic pattern](https://github.com/mightyiam/dendritic).
 
 </details>
 
-## Command Line Interface
+### Command Line Interface
 
 `glyphlow-cli` drives a running server, so Glyphlow can also be triggered
 without touching the keyboard. It is packaged **separately** from the server, so
@@ -179,16 +179,13 @@ glyphlow-cli activate text        # static text
 glyphlow-cli activate image       # images
 
 # Run a configured workflow
-glyphlow-cli workflow ProofRead
+glyphlow-cli workflow proofread
 ```
 
 Notes:
 
 - `workflow` matches the workflow `display` name case-insensitively on any
   substring and runs the first match.
-- A CLI request carries no interactive selection, so the server starts from the
-  focused window. If the workflow's `starting_role` is not satisfied by that
-  window, you are first asked to pick an element.
 - Requests are fire-and-forget: the exit status only reports that the request
   reached the server, not that the action succeeded. Failures such as an unknown
   workflow name are shown as an on-screen notification.
