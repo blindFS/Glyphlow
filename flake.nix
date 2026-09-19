@@ -46,10 +46,14 @@
 
             sourceRoot = ".";
 
-            installPhase = ''
-              install -Dm755 ${pname} $out/bin/${pname}
-            '';
-
+            # The completion scripts must be installed from *inside*
+            # `installPhase`, not from `postInstall`. Overriding `installPhase`
+            # with a plain string replaces stdenv's `installPhase` *function*
+            # (`eval "${!curPhase:-$curPhase}"` in stdenv's setup), and only
+            # that function runs `runHook postInstall`. A `postInstall` on such
+            # a derivation is dead code: the build succeeds and silently ships
+            # no completions at all.
+            #
             # The scripts are emitted by the freshly installed binary itself, so
             # they can never drift from its argument parser. They land in the
             # standard share/{bash-completion,zsh,fish} locations, which
@@ -59,14 +63,24 @@
             # just-built binary: under cross compilation it cannot run, the
             # substitutions would yield zero-byte files, and
             # installShellCompletion treats that as a build failure.
-            postInstall = pkgs.lib.optionalString (
-              completions && pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform
-            ) ''
-              installShellCompletion --cmd ${pname} \
-                --bash <($out/bin/${pname} complete bash) \
-                --zsh <($out/bin/${pname} complete zsh) \
-                --fish <($out/bin/${pname} complete fish)
-            '';
+            #
+            # `completions` is only ever set for the client: the server takes no
+            # arguments and has no `complete` subcommand. Because the scripts
+            # live in the `glyphlow-cli` package itself, they are installed
+            # exactly when that package is -- i.e. only when the modules add it
+            # under `cli.enable`. Nothing else in the flake installs completions.
+            installPhase =
+              ''
+                install -Dm755 ${pname} $out/bin/${pname}
+              ''
+              + pkgs.lib.optionalString (
+                completions && pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform
+              ) ''
+                installShellCompletion --cmd ${pname} \
+                  --bash <($out/bin/${pname} complete bash) \
+                  --zsh <($out/bin/${pname} complete zsh) \
+                  --fish <($out/bin/${pname} complete fish)
+              '';
 
             meta = {
               inherit description longDescription;
@@ -95,6 +109,11 @@
         # Client only. Useless on its own -- it talks to a running server.
         # The hash below is a placeholder until the first release that ships
         # this archive; update-nix.yml fills it in from the release artifact.
+        #
+        # `completions = true` is what ships the bash/zsh/fish scripts. They
+        # ride along in this package's own `share/`, so they are installed
+        # exactly when this package is: the modules only add it under
+        # `cli.enable`, and nothing else in the flake installs completions.
         glyphlow-cli = mkBinary {
           pname = "glyphlow-cli";
           description = "Command line client for the Glyphlow server";
@@ -142,11 +161,16 @@
               description = "The glyphlow server package to use.";
             };
             cli = {
-              enable = lib.mkEnableOption "installing glyphlow-cli alongside the Glyphlow server";
+              enable = lib.mkEnableOption "installing glyphlow-cli and its shell completion scripts";
               package = lib.mkOption {
                 type = lib.types.package;
                 default = self.packages.${pkgs.stdenv.hostPlatform.system}.glyphlow-cli;
-                description = "The glyphlow-cli package to use.";
+                description = ''
+                  The glyphlow-cli package to use.
+
+                  Its `share/` holds the bash/zsh/fish completion scripts, so
+                  they are installed only while `cli.enable` is set.
+                '';
               };
             };
             settings = lib.mkOption {
@@ -198,11 +222,16 @@
               description = "The glyphlow server package to use.";
             };
             cli = {
-              enable = lib.mkEnableOption "installing glyphlow-cli alongside the Glyphlow server";
+              enable = lib.mkEnableOption "installing glyphlow-cli and its shell completion scripts";
               package = lib.mkOption {
                 type = lib.types.package;
                 default = self.packages.${pkgs.stdenv.hostPlatform.system}.glyphlow-cli;
-                description = "The glyphlow-cli package to use.";
+                description = ''
+                  The glyphlow-cli package to use.
+
+                  Its `share/` holds the bash/zsh/fish completion scripts, so
+                  they are installed only while `cli.enable` is set.
+                '';
               };
             };
             settings = lib.mkOption {
