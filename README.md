@@ -161,33 +161,6 @@ written in [dendritic pattern](https://github.com/mightyiam/dendritic).
 
 </details>
 
-### Command Line Interface
-
-`glyphlow-cli` drives a running server, so Glyphlow can also be triggered
-in alternative ways. It is packaged **separately** from the server, so
-you can install it only when you want it:
-
-- **Nix**: set `programs.glyphlow.cli.enable = true` (see the Nix section above),
-  or install the `glyphlow-cli` flake package directly.
-- **Release archive**: `glyphlow-cli.tar.gz` from the
-  [releases page](https://github.com/blindFS/Glyphlow/releases).
-
-```bash
-# Activate elements of a kind, then pick one from the overlay hints
-glyphlow-cli activate clickable   # buttons, menu items, ...
-glyphlow-cli activate text        # static text
-glyphlow-cli activate image       # images
-
-# Inspect the configured workflows
-glyphlow-cli workflow list
-
-# Run one, matched by (a fragment of) its display name
-glyphlow-cli workflow run proofread
-
-# Emit a completion script for your shell
-glyphlow-cli complete zsh
-```
-
 ## Purging
 
 This app is designed to be lean and clean, it only generates 3 files:
@@ -316,6 +289,33 @@ menu_font = "IosevkaTerm Nerd Font Mono:26"
 ```
 
 </details>
+
+## Command Line Interface
+
+`glyphlow-cli` drives a running server, so Glyphlow can also be triggered
+in alternative ways. It is packaged **separately** from the server, so
+you can install it only when you want it:
+
+- **Nix**: set `programs.glyphlow.cli.enable = true` (see the Nix section above),
+  or install the `glyphlow-cli` flake package directly.
+- **Release archive**: `glyphlow-cli.tar.gz` from the
+  [releases page](https://github.com/blindFS/Glyphlow/releases).
+
+```bash
+# Activate elements of a kind, then pick one from the overlay hints
+glyphlow-cli activate clickable   # buttons, menu items, ...
+glyphlow-cli activate text        # static text
+glyphlow-cli activate image       # images
+
+# Inspect the configured workflows
+glyphlow-cli workflow list
+
+# Run one, matched by (a fragment of) its display name
+glyphlow-cli workflow run proofread
+
+# Emit a completion script for your shell
+glyphlow-cli complete zsh
+```
 
 ## Roadmap
 
