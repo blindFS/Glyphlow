@@ -164,8 +164,8 @@ written in [dendritic pattern](https://github.com/mightyiam/dendritic).
 ### Command Line Interface
 
 `glyphlow-cli` drives a running server, so Glyphlow can also be triggered
-without touching the keyboard. It is packaged **separately** from the server, so
-you can install it only where you want it:
+in alternative ways. It is packaged **separately** from the server, so
+you can install it only when you want it:
 
 - **Nix**: set `programs.glyphlow.cli.enable = true` (see the Nix section above),
   or install the `glyphlow-cli` flake package directly.
