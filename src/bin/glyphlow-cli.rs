@@ -112,12 +112,10 @@ enum WorkflowCommand {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum ActivationKind {
-    /// Clickable elements, such as buttons and menu items
     Clickable,
-    /// Static text
     Text,
-    /// Images
     Image,
+    Ocr,
 }
 
 impl ActivationKind {
@@ -126,6 +124,7 @@ impl ActivationKind {
             ActivationKind::Clickable => Target::Clickable,
             ActivationKind::Text => Target::Text,
             ActivationKind::Image => Target::Image,
+            ActivationKind::Ocr => Target::ImageOCR,
         }
     }
 }
@@ -136,6 +135,7 @@ impl std::fmt::Display for ActivationKind {
             ActivationKind::Clickable => "clickable",
             ActivationKind::Text => "text",
             ActivationKind::Image => "image",
+            ActivationKind::Ocr => "ocr",
         })
     }
 }
