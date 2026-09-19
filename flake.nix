@@ -37,14 +37,35 @@
             description,
             longDescription,
             src,
+            completions ? false,
           }:
           pkgs.stdenv.mkDerivation {
             inherit pname version src;
+
+            nativeBuildInputs = pkgs.lib.optionals completions [ pkgs.installShellFiles ];
 
             sourceRoot = ".";
 
             installPhase = ''
               install -Dm755 ${pname} $out/bin/${pname}
+            '';
+
+            # The scripts are emitted by the freshly installed binary itself, so
+            # they can never drift from its argument parser. They land in the
+            # standard share/{bash-completion,zsh,fish} locations, which
+            # home-manager and nix-darwin wire up for anything on PATH.
+            #
+            # Guarded on canExecute because the scripts come from running the
+            # just-built binary: under cross compilation it cannot run, the
+            # substitutions would yield zero-byte files, and
+            # installShellCompletion treats that as a build failure.
+            postInstall = pkgs.lib.optionalString (
+              completions && pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform
+            ) ''
+              installShellCompletion --cmd ${pname} \
+                --bash <($out/bin/${pname} complete bash) \
+                --zsh <($out/bin/${pname} complete zsh) \
+                --fish <($out/bin/${pname} complete fish)
             '';
 
             meta = {
@@ -81,6 +102,7 @@
             A client that hands activation and workflow requests to a running
             Glyphlow server over a Unix socket.
           '';
+          completions = true;
           src = pkgs.fetchurl {
             url = "https://github.com/blindFS/Glyphlow/releases/download/v${version}/glyphlow-cli.tar.gz";
             hash = pkgs.lib.fakeHash;

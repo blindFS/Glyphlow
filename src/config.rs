@@ -7,6 +7,7 @@ use objc2_foundation::{NSString, ns_string};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use tabled::Tabled;
 
 #[derive(Debug, Default, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub enum RoleOfInterest {
@@ -58,14 +59,49 @@ pub enum WorkFlowAction {
     Sleep(u64),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+/// A pre-defined workflow: a key, the apps it applies to and the actions it runs.
+///
+/// The [`Tabled`] derive is what lets `glyphlow-cli workflow list` print these
+/// structs as a table directly, one column per field. Three fields need a
+/// `display` function: `starting_role` has no `Display`, and the stored shape of
+/// `valid_app_ids` and `actions` is not the shape worth showing. `order` is only
+/// needed because the struct keeps `valid_app_ids` beside `key`, where it reads
+/// best in the config file, while the table shows it after the role.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Tabled)]
 pub struct WorkFlow {
+    #[tabled(rename = "NAME", order = 0)]
     pub display: String,
+    #[tabled(rename = "KEY", order = 1)]
     pub key: String,
-    pub valid_app_ids: Option<Vec<String>>,
+    #[tabled(rename = "ROLE", order = 2, display = "role_label")]
     #[serde(default = "default_starting_role")]
     pub starting_role: RoleOfInterest,
+    #[tabled(rename = "APPS", order = 3, display = "apps_label")]
+    pub valid_app_ids: Option<Vec<String>>,
+    #[tabled(rename = "STEPS", order = 4, display = "step_count")]
     pub actions: Vec<WorkFlowAction>,
+}
+
+/// Table cell for [`WorkFlow::starting_role`].
+fn role_label(role: &RoleOfInterest) -> String {
+    format!("{role:?}")
+}
+
+/// Table cell for [`WorkFlow::valid_app_ids`]: the apps a workflow is limited
+/// to, or `any` when it applies everywhere.
+fn apps_label(ids: &Option<Vec<String>>) -> String {
+    match ids {
+        Some(ids) if !ids.is_empty() => ids.join(", "),
+        _ => "any".to_owned(),
+    }
+}
+
+/// Table cell for [`WorkFlow::actions`]: how many steps the workflow runs.
+///
+/// A slice rather than a `&Vec`, so it does not trip `clippy::ptr_arg`; the
+/// derive's `&self.actions` coerces.
+fn step_count(actions: &[WorkFlowAction]) -> String {
+    actions.len().to_string()
 }
 
 fn default_starting_role() -> RoleOfInterest {
@@ -838,6 +874,19 @@ impl GlyphlowConfig {
         }
     }
 
+    /// Load the config without the "write a default file when it is missing"
+    /// side effect of [`Self::load_config`]. For read-only callers such as the
+    /// CLI's `workflow list`, which should not create a config file just by
+    /// being run. A missing file is not an error: it yields the defaults.
+    pub fn load_config_readonly(path: &PathBuf) -> Result<Self, String> {
+        match fs::read_to_string(path) {
+            Ok(content) => toml::from_str::<Self>(&content)
+                .map_err(|e| format!("Failed to parse config file {path:?}: {e}")),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(e) => Err(format!("Failed to read config file {path:?}: {e}")),
+        }
+    }
+
     fn save_config(&self, path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
         let content = toml::to_string_pretty(self)?;
         fs::write(path, content)?;
@@ -1449,5 +1498,48 @@ mod tests {
         assert_eq!(config.find_workflow("missing"), None);
         assert_eq!(config.find_workflow(""), None);
         assert_eq!(config.find_workflow("   "), None);
+    }
+
+    /// The three table cells the [`Tabled`] derive cannot infer. They live here
+    /// rather than in the CLI because `#[tabled(display = "…")]` names them by
+    /// path in this module.
+    #[test]
+    fn test_workflow_table_cells() {
+        assert_eq!(role_label(&RoleOfInterest::StaticText), "StaticText");
+        assert_eq!(step_count(&[]), "0");
+        assert_eq!(
+            step_count(&[WorkFlowAction::Click, WorkFlowAction::Press]),
+            "2"
+        );
+
+        assert_eq!(apps_label(&None), "any");
+        assert_eq!(apps_label(&Some(vec![])), "any");
+        assert_eq!(
+            apps_label(&Some(vec!["com.apple.Safari".into(), "Notes".into()])),
+            "com.apple.Safari, Notes"
+        );
+    }
+
+    /// The column order and headings the CLI prints come from the derive, so
+    /// assert them here rather than only through the rendered table.
+    #[test]
+    fn test_workflow_table_headers_and_order() {
+        let headers: Vec<String> = WorkFlow::headers()
+            .into_iter()
+            .map(|h| h.into_owned())
+            .collect();
+        assert_eq!(headers, ["NAME", "KEY", "ROLE", "APPS", "STEPS"]);
+
+        let wf = WorkFlow {
+            display: "ProofRead".into(),
+            key: "p".into(),
+            valid_app_ids: Some(vec!["Notes".into()]),
+            starting_role: RoleOfInterest::TextField,
+            actions: vec![WorkFlowAction::Click],
+        };
+        let fields: Vec<String> = wf.fields().into_iter().map(|f| f.into_owned()).collect();
+        assert_eq!(fields, ["ProofRead", "p", "TextField", "Notes", "1"]);
+        assert_eq!(WorkFlow::LENGTH, headers.len());
+        assert_eq!(fields.len(), headers.len());
     }
 }

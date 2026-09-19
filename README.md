@@ -178,17 +178,23 @@ glyphlow-cli activate clickable   # buttons, menu items, ...
 glyphlow-cli activate text        # static text
 glyphlow-cli activate image       # images
 
-# Run a configured workflow
-glyphlow-cli workflow proofread
+# Inspect the configured workflows
+glyphlow-cli workflow list
+
+# Run one, matched by (a fragment of) its display name
+glyphlow-cli workflow run proofread
+
+# Emit a completion script for your shell
+glyphlow-cli complete zsh
 ```
 
 Notes:
 
-- `workflow` matches the workflow `display` name case-insensitively on any
-  substring and runs the first match.
 - Requests are fire-and-forget: the exit status only reports that the request
   reached the server, not that the action succeeded. Failures such as an unknown
   workflow name are shown as an on-screen notification.
+- The CLI talks to the currently focused window unless the server says
+  otherwise, so run it while the target window has focus.
 
 ## Purging
 
