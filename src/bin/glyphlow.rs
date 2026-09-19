@@ -5,6 +5,7 @@ use core_foundation::{
 use glyphlow::{
     AppEngine, AppSignal, KeyListener, KeyState, Mode,
     config::{GlyphlowConfig, get_config_path},
+    ipc,
     os_util::check_accessibility_permissions,
 };
 use monio::{EventType, grab};
@@ -15,8 +16,13 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
     thread,
+    time::Duration,
 };
-use tokio::sync::mpsc;
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    net::UnixListener,
+    sync::mpsc,
+};
 
 #[tokio::main]
 async fn main() {
@@ -58,11 +64,11 @@ async fn main() {
     let key_state = Arc::new(Mutex::new(KeyState::default()));
 
     // Listen to temp file updates
-    let cache_file = create_cache_file().expect("Failed to create temp file.");
+    let cache_file = cache_file_path("tempfile.md", true).expect("Failed to create temp file.");
     let (ftx, mut frx) = mpsc::channel::<PathBuf>(100);
     // NOTE: listen to file updates with FsEvent
     let Ok(mut debouncer) = new_debouncer(
-        std::time::Duration::from_millis(200),
+        Duration::from_millis(200),
         move |res: DebounceEventResult| match res {
             Ok(events) => {
                 let mut pbs: HashSet<PathBuf> = HashSet::new();
@@ -128,11 +134,50 @@ async fn main() {
         });
     });
 
+    // Socket file for IPC
+    let socket_file =
+        cache_file_path(ipc::SOCKET_FILE_NAME, false).expect("Failed to create socket file.");
+    let listener = UnixListener::bind(socket_file).expect("Failed to bind socket.");
+    // CLI requests are parsed on a spawned task so that a slow (or silent)
+    // client can never stall the event loop; key handling and redraws must
+    // keep running. The parsed signal is handed back over this channel so the
+    // default selection and the signal handling itself stay on the main thread.
+    let (cli_tx, mut cli_rx) = mpsc::channel::<AppSignal>(100);
+
     loop {
         tokio::select! {
+            Ok((stream, _)) = listener.accept() => {
+                let cli_tx = cli_tx.clone();
+                tokio::spawn(async move {
+                    let mut socket_reader = BufReader::new(stream);
+                    let mut line = String::new();
+                    // NOTE: bound the read so a client that connects but never
+                    // sends a newline-terminated request is eventually dropped.
+                    let read = tokio::time::timeout(
+                        Duration::from_secs(2),
+                        socket_reader.read_line(&mut line),
+                    )
+                    .await;
+                    if let Ok(Ok(size)) = read && size > 0 &&
+                        let Ok(signal) = serde_json::from_str::<AppSignal>(&line) {
+                        let _ = cli_tx.send(signal).await;
+                    }
+                });
+            }
+            Some(signal) = cli_rx.recv() => {
+                // CLI requests carry no interactive selection, so default to
+                // the focused window as the element of interest. Only do so
+                // when the window was actually resolved, otherwise the info
+                // is the sentinel default (the system-wide element) and a
+                // generic workflow would act on the middle of the screen.
+                if app_engine.get_app_window_info() {
+                    app_engine.select_focused_window();
+                }
+                app_engine.handle_signal(signal).await;
+            }
             Some(signal) = rx.recv() => app_engine.handle_signal(signal).await,
             Some(pb) = frx.recv() => app_engine.handle_signal(AppSignal::FileUpdate(pb)).await,
-            _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
+            _ = tokio::time::sleep(Duration::from_millis(50)) => {
                 // NOTE: necessary for up-to-date get_focused_pid and UI drawing
                 unsafe {
                     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, Boolean::from(false));
@@ -142,22 +187,13 @@ async fn main() {
     }
 }
 
-fn create_cache_file() -> Option<PathBuf> {
-    let cache_dir = std::env::var("XDG_CACHE_HOME")
-        .ok()
-        .map(|dir| PathBuf::from(dir).join("glyphlow"))
-        .or_else(|| {
-            std::env::var("HOME")
-                .ok()
-                .map(|dir| PathBuf::from(dir).join(".cache/glyphlow"))
-        })?;
-    if !cache_dir.exists() {
-        std::fs::create_dir_all(&cache_dir).ok()?;
-    }
-    let cache_file = cache_dir.join("tempfile.md");
-    if !cache_file.exists() {
+fn cache_file_path(fname: &str, create: bool) -> Option<PathBuf> {
+    let cache_file = ipc::cache_dir()?.join(fname);
+    if create {
         log::info!("Creating tempfile: {cache_file:?}");
         std::fs::File::create(&cache_file).ok()?;
+    } else {
+        let _ = std::fs::remove_file(&cache_file);
     }
     Some(cache_file)
 }

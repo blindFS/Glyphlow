@@ -7,7 +7,10 @@ on:
         description: 'Version (e.g., 0.1.1)'
         required: true
       hash:
-        description: 'SRI Hash (e.g., sha256-...)'
+        description: 'SRI hash of glyphlow.tar.gz (sha256-...)'
+        required: true
+      cli_hash:
+        description: 'SRI hash of glyphlow-cli.tar.gz (sha256-...)'
         required: true
   workflow_call:
     inputs:
@@ -15,6 +18,9 @@ on:
         type: string
         required: true
       hash:
+        type: string
+        required: true
+      cli_hash:
         type: string
         required: true
 
@@ -32,9 +38,22 @@ jobs:
 
       - name: Update flake.nix
         run: |
-          sed -i '' "s|version = \".*\";|version = \"${{ inputs.version }}\";|" flake.nix
-          sed -i '' "s|hash = \"sha256-.*\";|hash = \"${{ inputs.hash }}\";|" flake.nix
-          
+          # One shared version, plus one hash per release archive.
+          # Line-anchored so a comment mentioning `version = ` can never match.
+          /usr/bin/sed -i '' "s|^\([[:space:]]*\)version = \".*\";|\1version = \"${{ inputs.version }}\";|" flake.nix
+          # Each hash is located via the archive name on the line directly above
+          # it, so the two rewrites are independent of each other and of order.
+          /usr/bin/sed -i '' "/glyphlow\.tar\.gz/{n;s|hash = .*;|hash = \"${{ inputs.hash }}\";|;}" flake.nix
+          /usr/bin/sed -i '' "/glyphlow-cli\.tar\.gz/{n;s|hash = .*;|hash = \"${{ inputs.cli_hash }}\";|;}" flake.nix
+
+          # Fail loudly rather than silently committing an unchanged file.
+          grep -qF "version = \"${{ inputs.version }}\";" flake.nix \
+            || { echo "::error::flake.nix was not updated with the new version"; exit 1; }
+          grep -qF "hash = \"${{ inputs.hash }}\";" flake.nix \
+            || { echo "::error::flake.nix was not updated with the server hash"; exit 1; }
+          grep -qF "hash = \"${{ inputs.cli_hash }}\";" flake.nix \
+            || { echo "::error::flake.nix was not updated with the client hash"; exit 1; }
+
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add flake.nix

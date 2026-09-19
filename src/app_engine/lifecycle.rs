@@ -81,18 +81,45 @@ impl AppEngine {
         );
     }
 
-    pub(super) fn get_app_window_info(&mut self) {
+    /// Refresh the focused window information.
+    ///
+    /// Returns `false` when the focused window could not be determined, in
+    /// which case `last_app_window_info` is left untouched (it may still be the
+    /// sentinel default, whose window is the *system-wide* element). Callers
+    /// that derive a selection from it must check this.
+    pub fn get_app_window_info(&mut self) -> bool {
         let Some(app_win_info) = get_focused_window(
             self.overlay_frame,
             &self.last_app_window_info,
             self.config.electron_initial_wait_ms,
         ) else {
-            return;
+            return false;
         };
 
         self.drawer.select_screen_frame(&app_win_info.frame);
         self.drawer.draw_frame_instant(&app_win_info.frame);
         self.last_app_window_info = app_win_info;
+        true
+    }
+
+    /// Select the currently focused window as the default element of interest.
+    ///
+    /// Requests coming from the CLI have no interactive selection yet, so we
+    /// fall back to the focused window. This gives element-relative workflows
+    /// (e.g. press, menu) something to act on.
+    ///
+    /// Callers must call [`Self::get_app_window_info`] first **and only call
+    /// this when it returned `true`**: otherwise the window info is the
+    /// sentinel default (the system-wide element spanning every screen), and a
+    /// generic workflow would act on the middle of the screen.
+    pub fn select_focused_window(&mut self) {
+        let AppWindowInfo { window, frame, .. } = &self.last_app_window_info;
+        self.selected = Some(ElementOfInterest::new(
+            window.clone(),
+            None,
+            RoleOfInterest::Generic,
+            *frame,
+        ));
     }
 
     pub(super) fn ui_element_traverse_on_activation(

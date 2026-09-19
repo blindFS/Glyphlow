@@ -25,12 +25,24 @@ notify = "8.2.0"
 notify-debouncer-mini = "0.7.0"
 block2 = "0.6.2"
 regex = "1.13.1"
-tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.53.1", features = ["net", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
 unicode-width = "0.2.2"
 simple_logger = "5.2.0"
 log = "0.4.34"
 any_ascii = "0.3.3"
 rstar = "0.13.0"
+serde_json = "1.0.151"
+serde_regex = "1.2.0"
+clap = { version = "4.6.7", features = ["derive"] }
+clap_complete = "4.6.11"
+# Already in the tree behind clap's `color` feature, which is default-on.
+# Declared directly because our own output goes through the very same
+# auto-detecting stream clap writes its help text to.
+anstream = "1.0.0"
+tabled = { version = "0.22.0", default-features = false, features = ["ansi", "derive"] }
+
+[dev-dependencies]
+ansi-str = "0.9.0"
 
 [[test]]
 name = "lifecycle_tests"
