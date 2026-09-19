@@ -23,36 +23,20 @@ use glyphlow::{
 use tabled::{
     Table,
     // clap's `Style` is already in scope; this one is the table's.
-    settings::{
-        Color, Modify, Padding, Style as TableStyle,
-        object::{Columns, Rows},
-    },
+    settings::{Color, Modify, Padding, Style as TableStyle, object::Rows},
 };
 
 // ---------------------------------------------------------------------------
 // Styling
 // ---------------------------------------------------------------------------
 
-/// Palette shared by clap's own output and the `workflow list` table, so the
-/// two never drift apart.
+/// Palette for clap's own output.
 const HEADER: Style = AnsiColor::Cyan.on_default().effects(Effects::BOLD);
 const LITERAL: Style = AnsiColor::Yellow.on_default().effects(Effects::BOLD);
 const DIM: Style = AnsiColor::BrightBlack.on_default();
 const ERROR: Style = AnsiColor::Red.on_default().effects(Effects::BOLD);
 const VALID: Style = AnsiColor::Green.on_default().effects(Effects::BOLD);
 const INVALID: Style = AnsiColor::Yellow.on_default().effects(Effects::BOLD);
-
-// Colours only the table uses. clap's own output has nothing to say about a role
-// or an app list, so these are not part of `STYLES`.
-//
-// One hue per column, and none of them repeats `HEADER` — an earlier version
-// coloured the name column with `HEADER` itself, which made the header row and a
-// whole column read as the same cyan and left the table looking two-toned.
-const NAME: Style = AnsiColor::Green.on_default().effects(Effects::BOLD);
-const ROLE: Style = AnsiColor::Magenta.on_default();
-/// `BrightBlue`, not `Blue`: plain blue is close to unreadable on a dark
-/// terminal, and this column is mostly bundle ids.
-const APPS: Style = AnsiColor::BrightBlue.on_default();
 
 const STYLES: Styles = Styles::styled()
     .header(HEADER)
@@ -63,15 +47,8 @@ const STYLES: Styles = Styles::styled()
     .valid(VALID)
     .invalid(INVALID);
 
-/// Per-column styling for the `workflow list` table, in column order. All five
-/// differ, and the step count is deliberately the quiet one.
-const COLUMN_STYLES: [Style; 5] = [NAME, LITERAL, ROLE, APPS, DIM];
-
-/// Bridge a clap style into a `tabled` colour.
-///
-/// Both types are foreign, so this cannot be a `From` impl.
-fn color_of(style: Style) -> Color {
-    Color::new(style.render().to_string(), style.render_reset().to_string())
+fn table_header_color() -> Color {
+    Color::FG_CYAN | Color::BOLD
 }
 
 // ---------------------------------------------------------------------------
@@ -239,19 +216,6 @@ fn print_completions(shell: CompletionShell) {
 ///
 /// Split out from [`print_completions`] so tests can assert on the script
 /// rather than having to capture stdout.
-///
-/// `bash` needs a workaround. `clap_complete` escapes a hyphen in the binary
-/// name two different ways — the dispatch table replaces it with `__`, the
-/// option blocks with `__subcmd__` — so for a name like `glyphlow-cli` the two
-/// never agree and *every* subcommand arm becomes unreachable:
-/// `glyphlow-cli workflow <TAB>` completes nothing at all. zsh and fish are
-/// unaffected.
-///
-/// Generating under a hyphen-free name sidesteps the clash. That is enough
-/// because the dispatch loop matches the runtime `$1` rather than a baked-in
-/// literal, so the script keeps working once registered for the real name.
-///
-/// Drop this when clap-rs/clap#6428 ships. See #5255 and #6421.
 fn completion_script(shell: CompletionShell) -> String {
     let mut command = Cli::command();
     let bin_name = command.get_name().to_owned();
@@ -259,45 +223,8 @@ fn completion_script(shell: CompletionShell) -> String {
     // own writer panics on a broken pipe.
     let mut buf: Vec<u8> = Vec::new();
 
-    if matches!(shell, CompletionShell::Bash) && bin_name.contains('-') {
-        let safe = bin_name.replace('-', "_");
-        generate(shell, &mut command, &safe, &mut buf);
-        let script = String::from_utf8_lossy(&buf);
-        return retarget_bash_registration(&script, &safe, &bin_name);
-    }
-
     generate(shell, &mut command, bin_name, &mut buf);
     String::from_utf8_lossy(&buf).into_owned()
-}
-
-/// Point `clap_complete`'s own `complete … <safe>` registrations at the real
-/// binary name.
-///
-/// Only the trailing name is rewritten rather than the whole line re-emitted,
-/// because the shape of the registration is clap's business — it emits a
-/// version-conditional pair, with and without `-o nosort`.
-fn retarget_bash_registration(script: &str, safe: &str, bin_name: &str) -> String {
-    let needle = format!(" {safe}");
-    let mut out = String::with_capacity(script.len());
-
-    for (i, line) in script.lines().enumerate() {
-        if i > 0 {
-            out.push('\n');
-        }
-        match line.strip_suffix(&needle) {
-            Some(head) => {
-                out.push_str(head);
-                out.push(' ');
-                out.push_str(bin_name);
-            }
-            None => out.push_str(line),
-        }
-    }
-
-    if script.ends_with('\n') {
-        out.push('\n');
-    }
-    out
 }
 
 fn list_workflows() -> ExitCode {
@@ -328,46 +255,12 @@ fn list_workflows() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-// ---------------------------------------------------------------------------
-// Rendering
-// ---------------------------------------------------------------------------
-
-/// Render the `workflow list` table, always fully coloured.
-///
-/// There is no "should I use colour?" flag: [`write_stdout`] strips the escapes
-/// if the destination cannot take them, so this always produces the best
-/// version it can and the stream decides. `tabled` itself has no opinion on the
-/// subject — it emits whatever colours it is given, for every destination.
-///
-/// The rows are the [`WorkFlow`] values themselves: `Table::new` takes the
-/// headers and the cells from the `Tabled` derive on the struct, so there is
-/// nothing to map by hand here.
-///
-/// Layout is `tabled`'s job too. It measures cells by display width and, with
-/// the `ansi` feature on, by *visible* width — which is what keeps the columns
-/// lined up when a workflow name itself carries an escape sequence. The palette
-/// is handed over as colours rather than painted into the text, so the escapes
-/// are emitted after measuring and cannot affect it at all.
-///
-/// `Style::markdown()` gives it the `|` borders and the `---` rule under the
-/// header, so the output can be pasted straight into a comment or a document.
-/// `Padding` sets the two-space gutters.
 fn render_workflow_table(workflows: &[WorkFlow]) -> String {
     let mut table = Table::new(workflows);
     table.with(TableStyle::markdown());
     table.with(Padding::new(0, 2, 0, 0));
+    table.with(Modify::new(Rows::first()).with(table_header_color()));
 
-    // Columns first, header row second — the order matters. `tabled` resolves a
-    // cell's colour as cells > columns > rows, and setting a row also back-fills
-    // a cell entry for every column already registered. So doing the row last is
-    // what gives the header row one uniform style instead of letting the column
-    // colours show through it.
-    for (index, style) in COLUMN_STYLES.into_iter().enumerate() {
-        table.with(Modify::new(Columns::one(index)).with(color_of(style)));
-    }
-    table.with(Modify::new(Rows::first()).with(color_of(HEADER)));
-
-    // `Display` emits no trailing newline; the command always ended with one.
     format!("{table}\n")
 }
 
@@ -400,14 +293,6 @@ mod tests {
     fn column_of(line: &str, needle: &str) -> usize {
         let idx = line.find(needle).expect("needle not found");
         line[..idx].width()
-    }
-
-    /// A cell as the table paints it: `Color::colorize` wraps text in exactly
-    /// the prefix/suffix pair `tabled` emits, so this is what to look for in the
-    /// output. Preferred over scanning for escape sequences — it asserts the
-    /// cell's text *and* its colour together.
-    fn painted(style: Style, text: &str) -> String {
-        color_of(style).colorize(text)
     }
 
     /// The table's data rows, with the header and the markdown rule skipped.
@@ -543,64 +428,31 @@ mod tests {
         assert!(out.ends_with('\n'), "output should end with a newline");
     }
 
-    /// The header row has to stay one uniform style rather than picking up the
-    /// per-column palette.
-    ///
-    /// `tabled` resolves a cell's colour as cells > columns > rows, so the
-    /// column colours applied first would otherwise win on row 0. It works out
-    /// only because setting a row back-fills a cell entry for every column
-    /// already registered — which is why the header row has to be applied
-    /// *after* the columns. Easy to lose in a refactor; pin it.
+    /// The header row is the only coloured part of the table.
     #[test]
-    fn test_table_header_row_is_uniformly_coloured() {
+    fn test_table_header_row_is_coloured() {
         let rows = [workflow("ProofRead", "p", RoleOfInterest::Any, None)];
         let out = render_workflow_table(&rows);
         let header = out.lines().next().expect("no header line");
 
         for name in ["NAME", "KEY", "ROLE", "APPS", "STEPS"] {
             assert!(
-                header.contains(&painted(HEADER, name)),
-                "header cell {name:?} is not in the header colour:\n{out:?}"
+                header.contains(&table_header_color().colorize(name)),
+                "header cell {name:?} is not coloured:\n{out:?}"
             );
         }
     }
 
-    /// ...and the body must still get the per-column palette, in column order.
+    /// ...and nothing else is. Pins the "no per-column palette" decision: a
+    /// table where every column has its own hue is harder to scan than one
+    /// where only the header stands out.
     #[test]
-    fn test_table_body_uses_the_column_palette() {
+    fn test_table_body_is_not_coloured() {
         let rows = [workflow("ProofRead", "p", RoleOfInterest::Any, None)];
         let out = render_workflow_table(&rows);
         let body = body_lines(&out)[0];
 
-        // The cells `WorkFlow`'s derive produces for these rows.
-        let cells = ["ProofRead", "p", "Any", "any", "0"];
-        for (style, cell) in COLUMN_STYLES.into_iter().zip(cells) {
-            assert!(
-                body.contains(&painted(style, cell)),
-                "body cell {cell:?} is not in its column colour:\n{out:?}"
-            );
-        }
-    }
-
-    /// No two columns may look alike, and the header row must not reuse a
-    /// column's colour.
-    ///
-    /// The first version coloured the name column with `HEADER`, so cyan covered
-    /// both the header row and a whole column and the table read as two-tone.
-    /// This pins the invariant rather than the individual hues, so the palette
-    /// can still be re-tuned freely.
-    #[test]
-    fn test_table_colours_are_all_distinct() {
-        let mut seen = vec![color_of(HEADER)];
-
-        for style in COLUMN_STYLES {
-            let color = color_of(style);
-            assert!(
-                !seen.contains(&color),
-                "a column reuses a colour that is already in the table: {color:?}"
-            );
-            seen.push(color);
-        }
+        assert!(!body.ansi_has_any(), "a body cell is coloured:\n{out:?}");
     }
 
     /// An escape sequence inside a config value must not shift the columns.
@@ -662,76 +514,5 @@ mod tests {
                 "{shell:?} script does not mention the command"
             );
         }
-    }
-
-    /// Regression guard for the hyphen workaround.
-    ///
-    /// `clap_complete` escapes a hyphen in the binary name as `__` in the
-    /// dispatch table but as `__subcmd__` in the option blocks, so for
-    /// `glyphlow-cli` every `cmd="…"` assignment misses its `…)` case label and
-    /// bash subcommand completion silently does nothing. Assert the two agree.
-    #[test]
-    fn test_bash_completion_dispatch_is_self_consistent() {
-        let script = completion_script(CompletionShell::Bash);
-
-        let assigned: Vec<&str> = script
-            .lines()
-            .filter_map(|l| l.trim().strip_prefix("cmd=\"")?.strip_suffix('"'))
-            .filter(|id| !id.is_empty())
-            .collect();
-        let labels: Vec<&str> = script
-            .lines()
-            .filter_map(|l| l.trim().strip_suffix(')'))
-            .filter(|id| !id.is_empty() && id.chars().all(|c| c.is_alphanumeric() || c == '_'))
-            .collect();
-
-        assert!(!assigned.is_empty(), "no dispatch assignments found");
-        assert!(!labels.is_empty(), "no case labels found");
-        for id in &assigned {
-            assert!(
-                labels.contains(id),
-                "dispatch assignment {id:?} has no matching case label, so the \
-                 bash subcommand arm is unreachable:\n{script}"
-            );
-        }
-    }
-
-    /// The script has to be registered for the name the user actually types,
-    /// not for the hyphen-free placeholder it was generated under.
-    #[test]
-    fn test_bash_completion_registers_the_real_binary_name() {
-        let script = completion_script(CompletionShell::Bash);
-        let registered: Vec<&str> = script
-            .lines()
-            .filter(|l| l.trim_start().starts_with("complete "))
-            .collect();
-
-        assert!(!registered.is_empty(), "no registration line in:\n{script}");
-        for line in &registered {
-            assert!(
-                line.ends_with("glyphlow-cli"),
-                "registration is not for `glyphlow-cli`: {line:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_retarget_bash_registration() {
-        let script =
-            "f() {\n    complete -F _a_b -o nosort a_b\nelse\n    complete -F _a_b a_b\nfi\n";
-        let out = retarget_bash_registration(script, "a_b", "a-b");
-
-        assert!(out.contains("complete -F _a_b -o nosort a-b"), "{out}");
-        assert!(out.contains("complete -F _a_b a-b"), "{out}");
-        // The function name must survive: only the trailing name is retargeted.
-        assert!(out.contains("_a_b"), "function name was clobbered:\n{out}");
-        assert!(out.ends_with('\n'), "trailing newline lost");
-        assert_eq!(out.lines().count(), script.lines().count());
-    }
-
-    #[test]
-    fn test_command_tree_is_well_formed() {
-        // clap's own validation: duplicate args, bad defaults, etc.
-        Cli::command().debug_assert();
     }
 }

@@ -35,6 +35,10 @@ serde_json = "1.0.151"
 serde_regex = "1.2.0"
 clap = { version = "4.6.7", features = ["derive"] }
 clap_complete = "4.6.11"
+# Already in the tree behind clap's `color` feature, which is default-on.
+# Declared directly because our own output goes through the very same
+# auto-detecting stream clap writes its help text to.
+anstream = "1.0.0"
 tabled = { version = "0.22.0", default-features = false, features = ["ansi", "derive"] }
 
 [dev-dependencies]
