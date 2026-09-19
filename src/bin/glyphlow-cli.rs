@@ -7,10 +7,7 @@
 //! server. The first reads the config from disk, the second just prints a shell
 //! completion script derived from the command definition.
 
-use std::{
-    io::{IsTerminal, Write},
-    process::ExitCode,
-};
+use std::{io::Write, process::ExitCode};
 
 use clap::{
     CommandFactory, Parser, Subcommand, ValueEnum,
@@ -211,14 +208,23 @@ async fn send(signal: AppSignal, confirmation: String) -> ExitCode {
 /// Rust ignores `SIGPIPE`, so a plain `print!` turns `glyphlow-cli complete
 /// bash | head` into an EPIPE panic. Producing less output than the reader
 /// wanted is a normal way for a pipeline to end.
+///
+/// This is also the only place that decides whether ANSI escapes survive.
+/// Callers hand over fully-coloured text and [`anstream::stdout`] drops the
+/// escapes when they would be unwelcome. That is deliberately the same
+/// arrangement clap uses for its own output — it builds styled help text and
+/// lets an `AutoStream` filter it — so `--help` and `workflow list` cannot
+/// disagree about `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`, `TERM=dumb` or CI.
 fn write_stdout(bytes: &[u8]) {
-    let mut stdout = std::io::stdout().lock();
+    let mut stdout = anstream::stdout().lock();
     let _ = stdout.write_all(bytes);
     let _ = stdout.flush();
 }
 
+/// Same as [`write_stdout`], for the same reasons. Nothing written here is
+/// coloured today; it goes through the stream so that stays true by default.
 fn write_stderr(bytes: &[u8]) {
-    let mut stderr = std::io::stderr().lock();
+    let mut stderr = anstream::stderr().lock();
     let _ = stderr.write_all(bytes);
     let _ = stderr.flush();
 }
@@ -317,7 +323,7 @@ fn list_workflows() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    let table = render_workflow_table(&workflows, colors_enabled());
+    let table = render_workflow_table(&workflows);
     write_stdout(table.as_bytes());
     ExitCode::SUCCESS
 }
@@ -326,50 +332,40 @@ fn list_workflows() -> ExitCode {
 // Rendering
 // ---------------------------------------------------------------------------
 
-/// Should we emit ANSI escapes? Honours `NO_COLOR` and `CLICOLOR_FORCE`, and
-/// otherwise only colours a terminal.
-fn colors_enabled() -> bool {
-    if std::env::var_os("NO_COLOR").is_some() {
-        return false;
-    }
-    if std::env::var_os("CLICOLOR_FORCE").is_some_and(|value| value != "0") {
-        return true;
-    }
-    std::io::stdout().is_terminal()
-}
-
-/// Render the `workflow list` table. `color` is a parameter rather than a
-/// detection so the output can be asserted in tests.
+/// Render the `workflow list` table, always fully coloured.
+///
+/// There is no "should I use colour?" flag: [`write_stdout`] strips the escapes
+/// if the destination cannot take them, so this always produces the best
+/// version it can and the stream decides. `tabled` itself has no opinion on the
+/// subject — it emits whatever colours it is given, for every destination.
 ///
 /// The rows are the [`WorkFlow`] values themselves: `Table::new` takes the
 /// headers and the cells from the `Tabled` derive on the struct, so there is
 /// nothing to map by hand here.
 ///
-/// Layout and colour are `tabled`'s job too. It measures cells by display width
-/// and, with the `ansi` feature on, by *visible* width — which is what keeps
-/// the columns lined up when a workflow name itself carries an escape sequence.
-/// The palette is handed over as colours rather than painted into the text, so
-/// the escapes are emitted after measuring and cannot affect it at all.
+/// Layout is `tabled`'s job too. It measures cells by display width and, with
+/// the `ansi` feature on, by *visible* width — which is what keeps the columns
+/// lined up when a workflow name itself carries an escape sequence. The palette
+/// is handed over as colours rather than painted into the text, so the escapes
+/// are emitted after measuring and cannot affect it at all.
 ///
-/// `Style::empty()` keeps it borderless (no rule characters, no leading indent)
-/// and `Padding` restores the two-space gutters this command has always
-/// printed.
-fn render_workflow_table(workflows: &[WorkFlow], color: bool) -> String {
+/// `Style::markdown()` gives it the `|` borders and the `---` rule under the
+/// header, so the output can be pasted straight into a comment or a document.
+/// `Padding` sets the two-space gutters.
+fn render_workflow_table(workflows: &[WorkFlow]) -> String {
     let mut table = Table::new(workflows);
-    table.with(TableStyle::empty());
+    table.with(TableStyle::markdown());
     table.with(Padding::new(0, 2, 0, 0));
 
-    if color {
-        // Columns first, header row second — the order matters. `tabled`
-        // resolves a cell's colour as cells > columns > rows, and setting a row
-        // also back-fills a cell entry for every column already registered. So
-        // doing the row last is what gives the header row one uniform style
-        // instead of letting the column colours show through it.
-        for (index, style) in COLUMN_STYLES.into_iter().enumerate() {
-            table.with(Modify::new(Columns::one(index)).with(color_of(style)));
-        }
-        table.with(Modify::new(Rows::first()).with(color_of(HEADER)));
+    // Columns first, header row second — the order matters. `tabled` resolves a
+    // cell's colour as cells > columns > rows, and setting a row also back-fills
+    // a cell entry for every column already registered. So doing the row last is
+    // what gives the header row one uniform style instead of letting the column
+    // colours show through it.
+    for (index, style) in COLUMN_STYLES.into_iter().enumerate() {
+        table.with(Modify::new(Columns::one(index)).with(color_of(style)));
     }
+    table.with(Modify::new(Rows::first()).with(color_of(HEADER)));
 
     // `Display` emits no trailing newline; the command always ended with one.
     format!("{table}\n")
@@ -414,25 +410,66 @@ mod tests {
         color_of(style).colorize(text)
     }
 
+    /// The table's data rows, with the header and the markdown rule skipped.
+    ///
+    /// `Style::markdown()` puts a `|---|` rule on line 1, so the body starts at
+    /// line 2 rather than line 1. Going through this helper keeps that from
+    /// being spelled out — and mis-spelled — in every layout assertion.
+    fn body_lines(table: &str) -> Vec<&str> {
+        table.lines().skip(2).collect()
+    }
+
+    /// The renderer colours unconditionally; the *stream* is what makes the
+    /// output plain. If that ever stops holding, `workflow list | cat` starts
+    /// printing escape codes.
     #[test]
-    fn test_table_has_no_ansi_when_color_is_off() {
+    fn test_stream_strips_colour_when_it_is_not_wanted() {
         let rows = [workflow("ProofRead", "p", RoleOfInterest::Any, None)];
-        let out = render_workflow_table(&rows, false);
-        assert!(!out.ansi_has_any(), "unexpected escape in: {out:?}");
+        let colored = render_workflow_table(&rows);
+
+        let mut stream = anstream::AutoStream::new(Vec::new(), anstream::ColorChoice::Never);
+        stream
+            .write_all(colored.as_bytes())
+            .expect("writing to a Vec cannot fail");
+        let plain = String::from_utf8(stream.into_inner()).expect("ascii plus escapes");
+
+        assert!(
+            colored.ansi_has_any(),
+            "renderer stopped colouring: {colored:?}"
+        );
+        assert!(
+            !plain.ansi_has_any(),
+            "escapes survived the stream: {plain:?}"
+        );
+        assert_eq!(
+            plain,
+            colored.ansi_strip(),
+            "stripping changed more than colour"
+        );
     }
 
     /// Colouring must not disturb the text or the padding.
+    ///
+    /// The expectation is written out rather than derived from the renderer, so
+    /// that this is a check on the output and not a tautology.
     #[test]
     fn test_table_colors_are_the_only_difference() {
         let rows = [
             workflow("ProofRead", "p", RoleOfInterest::Any, None),
             workflow("短", "q", RoleOfInterest::Generic, Some(&["Notes"])),
         ];
-        let plain = render_workflow_table(&rows, false);
-        let colored = render_workflow_table(&rows, true);
+        let colored = render_workflow_table(&rows);
 
         assert!(colored.ansi_has_any(), "no escapes in: {colored:?}");
-        assert_eq!(colored.ansi_strip(), plain.as_str());
+        assert_eq!(
+            colored.ansi_strip(),
+            "\
+|NAME       |KEY  |ROLE     |APPS   |STEPS  |
+|-----------|-----|---------|-------|-------|
+|ProofRead  |p    |Any      |any    |0      |
+|短         |q    |Generic  |Notes  |0      |
+"
+        );
     }
 
     /// Column alignment must follow *display* width, not bytes, or a CJK or
@@ -443,53 +480,66 @@ mod tests {
             workflow("短", "aa", RoleOfInterest::Any, None),
             workflow("wide name", "bb", RoleOfInterest::Generic, None),
         ];
-        let out = render_workflow_table(&rows, false);
-        let lines: Vec<&str> = out.lines().collect();
+        // Stripped: this is about layout, and `test_table_colors_are_the_only_
+        // difference` already covers colour not disturbing it.
+        let out = render_workflow_table(&rows);
+        let out = out.ansi_strip();
+        let header = out.lines().next().expect("no header line");
+        let lines = body_lines(&out);
 
-        assert!(lines[1].starts_with("短"), "got {:?}", lines[1]);
-        assert!(lines[2].starts_with("wide name"), "got {:?}", lines[2]);
+        assert!(lines[0].starts_with("|短"), "got {:?}", lines[0]);
+        assert!(lines[1].starts_with("|wide name"), "got {:?}", lines[1]);
 
         // "短" is 2 columns wide and "wide name" is 9, so the name column is 9
         // wide and every later column starts at the same display column.
         assert_eq!(
-            column_of(lines[1], "aa"),
-            column_of(lines[2], "bb"),
+            column_of(lines[0], "aa"),
+            column_of(lines[1], "bb"),
             "KEY misaligned:\n{out}"
         );
         assert_eq!(
-            column_of(lines[1], "Any"),
-            column_of(lines[2], "Generic"),
+            column_of(lines[0], "Any"),
+            column_of(lines[1], "Generic"),
             "ROLE misaligned:\n{out}"
         );
         assert_eq!(
-            column_of(lines[0], "KEY"),
-            column_of(lines[1], "aa"),
+            column_of(header, "KEY"),
+            column_of(lines[0], "aa"),
             "header does not line up with rows:\n{out}"
         );
     }
 
-    /// `Table::new` prepends `T::headers()`. That is what puts the column names
-    /// on the first line, and it also means a `Tabled` impl that returned the
-    /// wrong number of headers would show up as a shifted or doubled header
-    /// row. Pin the shape.
+    /// `Table::new` prepends `T::headers()`, and `Style::markdown()` adds a rule
+    /// under it. Pin the shape: a `Tabled` impl that returned the wrong number
+    /// of headers would show up here as a shifted or doubled header row.
     #[test]
-    fn test_table_has_exactly_one_header_row() {
+    fn test_table_has_one_header_row_and_one_row_per_workflow() {
         let rows = [
             workflow("ProofRead", "R", RoleOfInterest::Any, None),
             workflow("Copy", "C", RoleOfInterest::Generic, None),
         ];
-        let out = render_workflow_table(&rows, false);
+        let out = render_workflow_table(&rows);
+        let out = out.ansi_strip();
         let lines: Vec<&str> = out.lines().collect();
 
         assert_eq!(
             lines.len(),
-            rows.len() + 1,
-            "expected a header plus one line per workflow, got:\n{out}"
+            rows.len() + 2,
+            "expected a header, a rule, then one line per workflow, got:\n{out}"
         );
         assert!(
-            lines[0].starts_with("NAME"),
+            lines[0].starts_with("|NAME"),
             "first line is not the header:\n{out}"
         );
+        assert!(
+            lines[1].starts_with("|---"),
+            "second line is not the markdown rule:\n{out}"
+        );
+        assert!(
+            lines[2].starts_with("|ProofRead"),
+            "wrong first row:\n{out}"
+        );
+        assert!(lines[3].starts_with("|Copy"), "wrong second row:\n{out}");
         assert!(out.ends_with('\n'), "output should end with a newline");
     }
 
@@ -504,7 +554,7 @@ mod tests {
     #[test]
     fn test_table_header_row_is_uniformly_coloured() {
         let rows = [workflow("ProofRead", "p", RoleOfInterest::Any, None)];
-        let out = render_workflow_table(&rows, true);
+        let out = render_workflow_table(&rows);
         let header = out.lines().next().expect("no header line");
 
         for name in ["NAME", "KEY", "ROLE", "APPS", "STEPS"] {
@@ -519,8 +569,8 @@ mod tests {
     #[test]
     fn test_table_body_uses_the_column_palette() {
         let rows = [workflow("ProofRead", "p", RoleOfInterest::Any, None)];
-        let out = render_workflow_table(&rows, true);
-        let body = out.lines().nth(1).expect("no body line");
+        let out = render_workflow_table(&rows);
+        let body = body_lines(&out)[0];
 
         // The cells `WorkFlow`'s derive produces for these rows.
         let cells = ["ProofRead", "p", "Any", "any", "0"];
@@ -559,6 +609,10 @@ mod tests {
     /// what the `ansi` feature of `tabled` buys: cells are measured by visible
     /// width. Drop the feature and the second row here shifts left by the length
     /// of the escapes.
+    ///
+    /// The lines are stripped *after* rendering, which is what makes this a
+    /// measurement test: if `tabled` counted the escapes as width, the
+    /// misalignment would already be baked into the spacing by now.
     #[test]
     fn test_table_measures_escapes_in_config_values_by_visible_width() {
         let rows = [
@@ -570,17 +624,19 @@ mod tests {
                 None,
             ),
         ];
-        let out = render_workflow_table(&rows, false);
-        let lines: Vec<&str> = out.lines().collect();
+        let out = render_workflow_table(&rows);
+        let stripped = out.ansi_strip();
+        let body = body_lines(&stripped);
+        let header = stripped.lines().next().expect("no header line");
 
         assert_eq!(
-            column_of(&lines[2].ansi_strip(), "y"),
-            column_of(lines[1], "x"),
+            column_of(body[1], "y"),
+            column_of(body[0], "x"),
             "an escape in a workflow name shifted the columns:\n{out:?}"
         );
         assert_eq!(
-            column_of(lines[0], "KEY"),
-            column_of(lines[1], "x"),
+            column_of(header, "KEY"),
+            column_of(body[0], "x"),
             "header does not line up:\n{out:?}"
         );
     }

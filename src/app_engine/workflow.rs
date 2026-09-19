@@ -307,11 +307,7 @@ fn custom_target_for_role(role: RoleOfInterest) -> Option<CustomTarget> {
         RoleOfInterest::StaticText => "statictext|heading",
         RoleOfInterest::TextField => "textfield|textarea|combobox",
         RoleOfInterest::Cell => "cell",
-        RoleOfInterest::Any
-        | RoleOfInterest::Some
-        | RoleOfInterest::Generic
-        | RoleOfInterest::PseudoText
-        | RoleOfInterest::CustomTarget => return None,
+        _ => return None,
     };
     Some(CustomTarget {
         role: role.to_string(),
