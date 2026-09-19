@@ -228,25 +228,18 @@ fn completion_script(shell: CompletionShell) -> String {
 }
 
 fn list_workflows() -> ExitCode {
-    let path = match get_config_path() {
-        Ok(path) => path,
-        Err(e) => {
-            write_stderr(format!("glyphlow-cli: {e}\n").as_bytes());
-            return ExitCode::FAILURE;
-        }
-    };
-
     // Deliberately not `load_config`: listing must not seed a config file.
-    let workflows = match GlyphlowConfig::load_config_readonly(&path) {
-        Ok(config) => config.workflows,
-        Err(e) => {
-            write_stderr(format!("glyphlow-cli: {e}\n").as_bytes());
-            return ExitCode::FAILURE;
-        }
-    };
+    let workflows =
+        match get_config_path().and_then(|path| GlyphlowConfig::load_config_readonly(&path)) {
+            Ok(config) => config.workflows,
+            Err(e) => {
+                write_stderr(format!("glyphlow-cli: {e}\n").as_bytes());
+                return ExitCode::FAILURE;
+            }
+        };
 
     if workflows.is_empty() {
-        write_stdout(format!("No workflows configured in {}\n", path.display()).as_bytes());
+        write_stdout("No workflows configured.\n".as_bytes());
         return ExitCode::SUCCESS;
     }
 
