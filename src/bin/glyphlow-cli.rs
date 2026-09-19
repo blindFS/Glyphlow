@@ -382,6 +382,7 @@ fn render_workflow_table(workflows: &[WorkFlow], color: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ansi_str::AnsiStr;
     use glyphlow::config::RoleOfInterest;
     // Only the tests measure widths directly now; the table itself is tabled's
     // job.
@@ -397,27 +398,6 @@ mod tests {
         }
     }
 
-    /// Remove ANSI CSI sequences (`ESC [ ... final-byte`).
-    fn strip_ansi(input: &str) -> String {
-        let mut out = String::new();
-        let mut chars = input.chars();
-        while let Some(c) = chars.next() {
-            if c != '\u{1b}' {
-                out.push(c);
-                continue;
-            }
-            if chars.next() != Some('[') {
-                continue;
-            }
-            for c in chars.by_ref() {
-                if ('\u{40}'..='\u{7e}').contains(&c) {
-                    break;
-                }
-            }
-        }
-        out
-    }
-
     /// Display column at which `needle` starts. Byte offsets are useless here:
     /// rows with multi-byte characters have different byte lengths for the same
     /// display width.
@@ -426,53 +406,19 @@ mod tests {
         line[..idx].width()
     }
 
-    /// Every ANSI CSI sequence in `input`, in order.
-    ///
-    /// Comparing whole sequences rather than substrings matters here: anstyle
-    /// emits a style as *one sequence per attribute*, so `HEADER` is
-    /// `ESC[1m ESC[36m` and a plain `contains("ESC[36m")` would report the
-    /// header as carrying the (unbolded) role colour.
-    fn csi_sequences(input: &str) -> Vec<String> {
-        let mut out = Vec::new();
-        let mut rest = input;
-
-        while let Some(start) = rest.find('\u{1b}') {
-            rest = &rest[start..];
-            // The `[` introducer is itself in the `0x40..=0x7e` range, so the
-            // final-byte scan has to start after it.
-            if !rest[1..].starts_with('[') {
-                rest = &rest[1..];
-                continue;
-            }
-
-            let end = rest[2..]
-                .char_indices()
-                .find(|(_, c)| ('\u{40}'..='\u{7e}').contains(c))
-                .map(|(i, c)| i + c.len_utf8() + 2);
-            match end {
-                Some(end) => {
-                    out.push(rest[..end].to_owned());
-                    rest = &rest[end..];
-                }
-                None => break,
-            }
-        }
-
-        out
-    }
-
-    /// The exact escape stream a cell carrying `style` is wrapped in.
-    fn painted_with(style: Style) -> Vec<String> {
-        let mut out = csi_sequences(&style.render().to_string());
-        out.push(style.render_reset().to_string());
-        out
+    /// A cell as the table paints it: `Color::colorize` wraps text in exactly
+    /// the prefix/suffix pair `tabled` emits, so this is what to look for in the
+    /// output. Preferred over scanning for escape sequences — it asserts the
+    /// cell's text *and* its colour together.
+    fn painted(style: Style, text: &str) -> String {
+        color_of(style).colorize(text)
     }
 
     #[test]
     fn test_table_has_no_ansi_when_color_is_off() {
         let rows = [workflow("ProofRead", "p", RoleOfInterest::Any, None)];
         let out = render_workflow_table(&rows, false);
-        assert!(!out.contains('\u{1b}'), "unexpected escape in: {out:?}");
+        assert!(!out.ansi_has_any(), "unexpected escape in: {out:?}");
     }
 
     /// Colouring must not disturb the text or the padding.
@@ -485,8 +431,8 @@ mod tests {
         let plain = render_workflow_table(&rows, false);
         let colored = render_workflow_table(&rows, true);
 
-        assert!(colored.contains('\u{1b}'), "no escapes in: {colored:?}");
-        assert_eq!(strip_ansi(&colored), plain);
+        assert!(colored.ansi_has_any(), "no escapes in: {colored:?}");
+        assert_eq!(colored.ansi_strip(), plain.as_str());
     }
 
     /// Column alignment must follow *display* width, not bytes, or a CJK or
@@ -561,14 +507,12 @@ mod tests {
         let out = render_workflow_table(&rows, true);
         let header = out.lines().next().expect("no header line");
 
-        let expected: Vec<String> = (0..COLUMN_STYLES.len())
-            .flat_map(|_| painted_with(HEADER))
-            .collect();
-        assert_eq!(
-            csi_sequences(header),
-            expected,
-            "header row is not one uniform colour:\n{out:?}"
-        );
+        for name in ["NAME", "KEY", "ROLE", "APPS", "STEPS"] {
+            assert!(
+                header.contains(&painted(HEADER, name)),
+                "header cell {name:?} is not in the header colour:\n{out:?}"
+            );
+        }
     }
 
     /// ...and the body must still get the per-column palette, in column order.
@@ -578,16 +522,14 @@ mod tests {
         let out = render_workflow_table(&rows, true);
         let body = out.lines().nth(1).expect("no body line");
 
-        let expected: Vec<String> = COLUMN_STYLES
-            .iter()
-            .flat_map(|style| painted_with(*style))
-            .collect();
-
-        assert_eq!(
-            csi_sequences(body),
-            expected,
-            "body cells do not follow the column palette:\n{out:?}"
-        );
+        // The cells `WorkFlow`'s derive produces for these rows.
+        let cells = ["ProofRead", "p", "Any", "any", "0"];
+        for (style, cell) in COLUMN_STYLES.into_iter().zip(cells) {
+            assert!(
+                body.contains(&painted(style, cell)),
+                "body cell {cell:?} is not in its column colour:\n{out:?}"
+            );
+        }
     }
 
     /// No two columns may look alike, and the header row must not reuse a
@@ -599,15 +541,15 @@ mod tests {
     /// can still be re-tuned freely.
     #[test]
     fn test_table_colours_are_all_distinct() {
-        let mut seen: Vec<Vec<String>> = vec![painted_with(HEADER)];
+        let mut seen = vec![color_of(HEADER)];
 
         for style in COLUMN_STYLES {
-            let painted = painted_with(style);
+            let color = color_of(style);
             assert!(
-                !seen.contains(&painted),
-                "a column reuses a colour that is already in the table: {painted:?}"
+                !seen.contains(&color),
+                "a column reuses a colour that is already in the table: {color:?}"
             );
-            seen.push(painted);
+            seen.push(color);
         }
     }
 
@@ -632,7 +574,7 @@ mod tests {
         let lines: Vec<&str> = out.lines().collect();
 
         assert_eq!(
-            column_of(&strip_ansi(lines[2]), "y"),
+            column_of(&lines[2].ansi_strip(), "y"),
             column_of(lines[1], "x"),
             "an escape in a workflow name shifted the columns:\n{out:?}"
         );
