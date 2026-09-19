@@ -188,14 +188,6 @@ glyphlow-cli workflow run proofread
 glyphlow-cli complete zsh
 ```
 
-Notes:
-
-- Requests are fire-and-forget: the exit status only reports that the request
-  reached the server, not that the action succeeded. Failures such as an unknown
-  workflow name are shown as an on-screen notification.
-- The CLI talks to the currently focused window unless the server says
-  otherwise, so run it while the target window has focus.
-
 ## Purging
 
 This app is designed to be lean and clean, it only generates 3 files:
