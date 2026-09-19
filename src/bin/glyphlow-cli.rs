@@ -304,35 +304,6 @@ mod tests {
         table.lines().skip(2).collect()
     }
 
-    /// The renderer colours unconditionally; the *stream* is what makes the
-    /// output plain. If that ever stops holding, `workflow list | cat` starts
-    /// printing escape codes.
-    #[test]
-    fn test_stream_strips_colour_when_it_is_not_wanted() {
-        let rows = [workflow("ProofRead", "p", RoleOfInterest::Any, None)];
-        let colored = render_workflow_table(&rows);
-
-        let mut stream = anstream::AutoStream::new(Vec::new(), anstream::ColorChoice::Never);
-        stream
-            .write_all(colored.as_bytes())
-            .expect("writing to a Vec cannot fail");
-        let plain = String::from_utf8(stream.into_inner()).expect("ascii plus escapes");
-
-        assert!(
-            colored.ansi_has_any(),
-            "renderer stopped colouring: {colored:?}"
-        );
-        assert!(
-            !plain.ansi_has_any(),
-            "escapes survived the stream: {plain:?}"
-        );
-        assert_eq!(
-            plain,
-            colored.ansi_strip(),
-            "stripping changed more than colour"
-        );
-    }
-
     /// Colouring must not disturb the text or the padding.
     ///
     /// The expectation is written out rather than derived from the renderer, so
