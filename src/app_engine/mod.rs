@@ -285,3 +285,79 @@ impl AppEngine {
         }
     }
 }
+
+#[cfg(test)]
+mod multi_selection_tests {
+    use super::*;
+
+    /// The first pick only records the anchor; the pair comes from the second
+    /// pick. Without this two-step behaviour a single selection would act as a
+    /// one-element range instead of waiting for the other end.
+    #[test]
+    fn first_pick_anchors_and_second_pick_returns_the_pair() {
+        let mut state = MultiSeletionState::default();
+
+        assert_eq!(state.set_one_side(3), None, "the first pick only anchors");
+        assert_eq!(state.one_side_idx, Some(3));
+
+        assert_eq!(state.set_one_side(7), Some((3, 7)), "the second pick pairs up");
+    }
+
+    /// The anchor is deliberately *not* consumed when a pair is produced, so
+    /// only `toggle`, `reset` and `clear_one_side` drop it. Callers that finish
+    /// a selection go through one of those.
+    #[test]
+    fn anchor_survives_a_completed_pair_until_explicitly_cleared() {
+        let mut state = MultiSeletionState::default();
+        state.set_one_side(3);
+
+        assert_eq!(state.set_one_side(7), Some((3, 7)));
+        assert_eq!(state.one_side_idx, Some(3), "the anchor is still set");
+
+        assert_eq!(
+            state.set_one_side(9),
+            Some((3, 9)),
+            "a third pick re-ranges from the original anchor"
+        );
+    }
+
+    /// Toggling must not leave a half-made selection behind: re-enabling has to
+    /// start from a clean slate rather than resume the stale anchor.
+    #[test]
+    fn toggle_flips_and_discards_any_half_made_selection() {
+        let mut state = MultiSeletionState::default();
+        state.set_one_side(4);
+        state.role = Some(RoleOfInterest::TextField);
+
+        state.toggle();
+        assert!(state.is_on);
+        assert_eq!(state.one_side_idx, None, "toggling on must clear the anchor");
+        assert_eq!(state.role, None);
+
+        state.set_one_side(5);
+        state.toggle();
+        assert!(!state.is_on);
+        assert_eq!(state.one_side_idx, None, "toggling off must clear the anchor");
+        assert_eq!(state.role, None);
+    }
+
+    /// `clear_one_side` drops only the anchor. It must not switch the mode off,
+    /// or a user would silently fall out of multi-selection after one range.
+    #[test]
+    fn clear_one_side_keeps_multi_selection_on() {
+        let mut state = MultiSeletionState::default();
+        state.toggle();
+        state.set_one_side(6);
+        state.role = Some(RoleOfInterest::Generic);
+
+        state.clear_one_side();
+
+        assert!(state.is_on, "clearing the anchor must not switch the mode off");
+        assert_eq!(state.one_side_idx, None);
+        assert_eq!(
+            state.role,
+            Some(RoleOfInterest::Generic),
+            "the role is unrelated to the anchor and must survive"
+        );
+    }
+}

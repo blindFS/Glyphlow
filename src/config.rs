@@ -414,7 +414,7 @@ impl AlphabeticKey for Key {
             Key::AltLeft => Some(Key::AltRight),
             Key::ControlLeft => Some(Key::ControlRight),
             Key::ShiftLeft => Some(Key::ShiftRight),
-            Key::ShiftRight => Some(Key::MetaRight),
+            Key::MetaLeft => Some(Key::MetaRight),
             _ => None,
         }
     }
@@ -1057,6 +1057,188 @@ mod tests {
             decoded.keys,
             vec![Key::ControlLeft, Key::ShiftLeft, Key::KeyZ]
         );
+    }
+
+    /// `save_config` writes a binding as `"ALT + G"` and `load_config` reads it
+    /// back, so every key the config format can hold has to survive the trip.
+    #[rstest]
+    #[case::letter(Key::KeyA, "A")]
+    #[case::last_letter(Key::KeyZ, "Z")]
+    #[case::alt(Key::AltLeft, "ALT")]
+    #[case::ctrl(Key::ControlLeft, "CTRL")]
+    #[case::meta(Key::MetaLeft, "META")]
+    #[case::shift(Key::ShiftLeft, "SHIFT")]
+    #[case::space(Key::Space, "SPACE")]
+    fn a_key_round_trips_through_its_config_string(#[case] key: Key, #[case] expected: &str) {
+        assert_eq!(key.to_str(), expected);
+        assert_eq!(Key::from_str(expected), Some(key));
+    }
+
+    /// The written form is upper case, but the parser accepts any casing. An
+    /// unknown token is an error rather than a silent fallback, so a typo in the
+    /// config is reported instead of binding the wrong key.
+    #[rstest]
+    #[case::lower_case("alt", Some(Key::AltLeft))]
+    #[case::unknown_word("HYPER", None)]
+    #[case::empty("", None)]
+    fn a_key_token_is_parsed_case_insensitively(
+        #[case] token: &str,
+        #[case] expected: Option<Key>,
+    ) {
+        assert_eq!(Key::from_str(token), expected);
+    }
+
+    /// The global trigger is matched with either hand, so binding `ALT + G` also
+    /// has to fire while the *right* Alt is held. Only the left-hand modifiers
+    /// need a twin — pressing the right one on its own already matches directly.
+    #[rstest]
+    #[case::alt(Key::AltLeft, Some(Key::AltRight))]
+    #[case::ctrl(Key::ControlLeft, Some(Key::ControlRight))]
+    #[case::shift(Key::ShiftLeft, Some(Key::ShiftRight))]
+    #[case::meta(Key::MetaLeft, Some(Key::MetaRight))]
+    #[case::already_the_right_hand(Key::AltRight, None)]
+    #[case::not_a_modifier(Key::KeyG, None)]
+    fn a_left_hand_modifier_mirrors_to_its_right_hand_twin(
+        #[case] key: Key,
+        #[case] expected: Option<Key>,
+    ) {
+        assert_eq!(key.right_alternative(), expected);
+    }
+
+    /// The shift layer of a search query. The key listener calls this only while
+    /// Shift is held in `Mode::Searching`, so a wrong entry is a silently wrong
+    /// search character rather than a crash.
+    #[rstest]
+    #[case::digit_1(Key::Num1, '!')]
+    #[case::digit_2(Key::Num2, '@')]
+    #[case::digit_3(Key::Num3, '#')]
+    #[case::digit_4(Key::Num4, '$')]
+    #[case::digit_5(Key::Num5, '%')]
+    #[case::digit_6(Key::Num6, '^')]
+    #[case::digit_7(Key::Num7, '&')]
+    #[case::digit_8(Key::Num8, '*')]
+    #[case::digit_9(Key::Num9, '(')]
+    #[case::digit_0(Key::Num0, ')')]
+    #[case::grave(Key::Grave, '~')]
+    #[case::minus(Key::Minus, '_')]
+    #[case::equal(Key::Equal, '+')]
+    #[case::bracket_left(Key::BracketLeft, '{')]
+    #[case::bracket_right(Key::BracketRight, '}')]
+    #[case::backslash(Key::Backslash, '|')]
+    #[case::semicolon(Key::Semicolon, ':')]
+    #[case::quote(Key::Quote, '"')]
+    #[case::comma(Key::Comma, '<')]
+    #[case::period(Key::Period, '>')]
+    #[case::slash(Key::Slash, '?')]
+    fn a_symbol_key_shifts_to_the_character_printed_above_it(
+        #[case] key: Key,
+        #[case] expected: char,
+    ) {
+        assert_eq!(key.shifted_char(), expected);
+    }
+
+    /// Shift does not change a letter: `to_char` already yields upper case, so
+    /// `shifted_char` must agree with it rather than fall through to the default.
+    #[rstest]
+    #[case::first(Key::KeyA)]
+    #[case::last(Key::KeyZ)]
+    fn shift_leaves_a_letter_alone(#[case] key: Key) {
+        assert_eq!(key.shifted_char(), key.to_char());
+    }
+
+    /// Everything without a printed shift symbol takes the same catch-all arm and
+    /// falls back to a space, which the listener then rewrites into the in-band
+    /// word separator. Deliberate for `Space`; the side effect is that Shift + an
+    /// arrow key types a separator.
+    #[rstest]
+    #[case::space(Key::Space)]
+    #[case::arrow_up(Key::ArrowUp)]
+    fn a_key_without_a_shift_symbol_falls_back_to_a_space(#[case] key: Key) {
+        assert_eq!(key.shifted_char(), ' ');
+    }
+
+    /// Differential guard on the table above: every key that is printed with a
+    /// shift symbol has to actually change under shift. A copy-paste slip in the
+    /// match — two arms both mapping to `'#'`, say — is invisible everywhere else.
+    #[test]
+    fn only_the_symbol_keys_change_under_shift() {
+        let symbol_keys = [
+            Key::Num0,
+            Key::Num1,
+            Key::Num2,
+            Key::Num3,
+            Key::Num4,
+            Key::Num5,
+            Key::Num6,
+            Key::Num7,
+            Key::Num8,
+            Key::Num9,
+            Key::Grave,
+            Key::Minus,
+            Key::Equal,
+            Key::BracketLeft,
+            Key::BracketRight,
+            Key::Backslash,
+            Key::Semicolon,
+            Key::Quote,
+            Key::Comma,
+            Key::Period,
+            Key::Slash,
+        ];
+        for key in symbol_keys {
+            assert_ne!(
+                key.shifted_char(),
+                key.to_char(),
+                "{key:?} is printed with a shift symbol, so shift must change it"
+            );
+        }
+    }
+
+    /// `handle_file_update` calls `safe_reload` with the *running* config as the
+    /// authority, so the live bindings have to win. Note the argument order
+    /// here: the pre-existing reload tests call it the other way round, which
+    /// makes their "should sync" assertion hold no matter which side wins.
+    #[test]
+    fn a_reload_keeps_the_live_bindings_and_compares_only_keys() {
+        let running = GlyphlowConfig::default();
+
+        // A label is not a binding, so this edit is applied in place.
+        let mut relabelled = GlyphlowConfig::default();
+        relabelled.workflows[0].display = "Renamed".into();
+        assert!(running.safe_reload(&mut relabelled));
+        assert_eq!(relabelled.workflows[0].display, "Renamed");
+
+        // A key is, so the edit is refused and the live key is restored.
+        let mut rebound = GlyphlowConfig::default();
+        rebound.workflows[0].key = "Y".into();
+        assert!(!running.safe_reload(&mut rebound));
+        assert_eq!(rebound.workflows[0].key, running.workflows[0].key);
+    }
+
+    /// Same for text actions. The pre-existing test only ever changes the
+    /// *number* of them, so the same-length cases are what pin the comparison
+    /// down to the key rather than to the whole entry.
+    #[test]
+    fn text_actions_are_compared_by_key_not_by_label() {
+        let with_one_action = |key: &str| GlyphlowConfig {
+            text_actions: vec![CommandAction {
+                command: "true".into(),
+                args: vec![],
+                display: "Copy".into(),
+                key: key.into(),
+            }],
+            ..Default::default()
+        };
+        let running = with_one_action("C");
+
+        let mut relabelled = with_one_action("C");
+        relabelled.text_actions[0].display = "Duplicate".into();
+        assert!(running.safe_reload(&mut relabelled));
+        assert_eq!(relabelled.text_actions[0].display, "Duplicate");
+
+        let mut rebound = with_one_action("K");
+        assert!(!running.safe_reload(&mut rebound));
+        assert_eq!(rebound.text_actions[0].key, "C");
     }
 
     #[test]

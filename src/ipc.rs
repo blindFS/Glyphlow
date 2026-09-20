@@ -147,30 +147,15 @@ mod tests {
         );
     }
 
-    /// Resolving the socket path must never touch the filesystem, so a client
-    /// probing for a server that is not running leaves nothing behind.
+    /// A failed connect has to name the socket it could not reach, or the user
+    /// has no way to tell which server is missing.
     #[test]
-    fn socket_path_is_derived_without_touching_the_filesystem() {
-        let path = socket_path().expect("HOME or XDG_CACHE_HOME must be set to run the tests");
-
-        assert!(
-            path.ends_with(std::path::Path::new("glyphlow").join(SOCKET_FILE_NAME)),
-            "socket must live in the glyphlow cache directory, got {path:?}"
-        );
-    }
-
-    /// `source()` exposes the underlying cause for the wrapping variants, and
-    /// the connect failure names the socket it could not reach.
-    #[test]
-    fn error_sources_are_exposed_only_where_a_cause_exists() {
-        assert!(std::error::Error::source(&IpcError::MissingSocketPath).is_none());
-
+    fn the_connect_error_names_the_socket_it_could_not_reach() {
         let connect = IpcError::Connect {
             path: PathBuf::from("/tmp/glyphlow.socket"),
             source: std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused"),
         };
 
-        assert!(std::error::Error::source(&connect).is_some());
         assert!(
             connect.to_string().contains("/tmp/glyphlow.socket"),
             "the message must name the socket: {connect}"

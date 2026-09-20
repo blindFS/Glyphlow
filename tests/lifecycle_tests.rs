@@ -12,6 +12,10 @@ use std::sync::{
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+/// Five words, so the default alphabet gives every word a single-key label:
+/// `alpha` = `A`, `beta` = `B`, `gamma` = `C`, `delta` = `D`, `zeta` = `E`.
+const FIVE_WORDS: &str = "alpha beta gamma delta zeta";
+
 /// A single step the simulator thread performs.
 ///
 /// The `Expect*` events poll with a timeout, so a transition that never happens
@@ -241,6 +245,105 @@ fn main() {
             ],
             cli_config,
         )
+        .await;
+
+        println!("Running Scenario 12: Backspace leaves word picking for the text action menu");
+        run_test_scenario(vec![
+            TestEvent::SetClipboard(FIVE_WORDS.to_string()),
+            TestEvent::SendSignal(AppSignal::ReadClipboard),
+            TestEvent::ExpectMode(Mode::TextActionMenu),
+            TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
+            TestEvent::ExpectMode(Mode::WordPicking),
+            // Nothing typed yet, so there is nothing to pop: backspace is the
+            // "go back one level" key.
+            TestEvent::PressKey(Key::Backspace),
+            TestEvent::ReleaseKey(Key::Backspace),
+            TestEvent::ExpectMode(Mode::TextActionMenu),
+        ])
+        .await;
+
+        println!("Running Scenario 13: Backspace pops the hint key, then the search filter");
+        run_test_scenario(vec![
+            TestEvent::SetClipboard(FIVE_WORDS.to_string()),
+            TestEvent::SendSignal(AppSignal::ReadClipboard),
+            TestEvent::ExpectMode(Mode::TextActionMenu),
+            TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
+            TestEvent::ExpectMode(Mode::WordPicking),
+            // Search for "et": it matches beta and zeta, but not alpha.
+            TestEvent::PressKey(Key::Slash),
+            TestEvent::ReleaseKey(Key::Slash),
+            TestEvent::PressKey(Key::KeyE),
+            TestEvent::ReleaseKey(Key::KeyE),
+            TestEvent::PressKey(Key::KeyT),
+            TestEvent::ReleaseKey(Key::KeyT),
+            TestEvent::PressKey(Key::Enter),
+            TestEvent::ExpectMode(Mode::WordPicking),
+            // `A` is alpha's label, but the search still filters alpha out, so
+            // this key matches nothing and word picking is not left.
+            TestEvent::PressKey(Key::KeyA),
+            TestEvent::ReleaseKey(Key::KeyA),
+            TestEvent::ExpectMode(Mode::WordPicking),
+            // The first backspace pops the hint key, the second drops the search
+            // filter, so the same key now resolves to alpha.
+            TestEvent::PressKey(Key::Backspace),
+            TestEvent::ReleaseKey(Key::Backspace),
+            TestEvent::PressKey(Key::Backspace),
+            TestEvent::ReleaseKey(Key::Backspace),
+            TestEvent::PressKey(Key::KeyA),
+            TestEvent::ReleaseKey(Key::KeyA),
+            TestEvent::ExpectMode(Mode::TextActionMenu),
+        ])
+        .await;
+
+        println!("Running Scenario 14: Backspace cancels the selected side of a range");
+        run_test_scenario(vec![
+            TestEvent::SetClipboard(FIVE_WORDS.to_string()),
+            TestEvent::SendSignal(AppSignal::ReadClipboard),
+            TestEvent::ExpectMode(Mode::TextActionMenu),
+            TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
+            TestEvent::ExpectMode(Mode::WordPicking),
+            TestEvent::SendSignal(AppSignal::ToggleMultiSelection),
+            // `A` anchors the range at alpha rather than leaving word picking:
+            // the first pick of a range only marks one end.
+            TestEvent::PressKey(Key::KeyA),
+            TestEvent::ReleaseKey(Key::KeyA),
+            TestEvent::ExpectMode(Mode::WordPicking),
+            // Backspace drops that anchor ...
+            TestEvent::PressKey(Key::Backspace),
+            TestEvent::ReleaseKey(Key::Backspace),
+            // ... so `B` anchors at beta instead of completing "alpha beta".
+            TestEvent::PressKey(Key::KeyB),
+            TestEvent::ReleaseKey(Key::KeyB),
+            TestEvent::ExpectMode(Mode::WordPicking),
+            // The re-anchor is real, not a stuck state: `C` now completes the
+            // range "beta gamma" and lands on the text action menu.
+            TestEvent::PressKey(Key::KeyC),
+            TestEvent::ReleaseKey(Key::KeyC),
+            TestEvent::ExpectMode(Mode::TextActionMenu),
+        ])
+        .await;
+
+        println!("Running Scenario 15: Backspace in search pops the query, then leaves search");
+        run_test_scenario(vec![
+            TestEvent::SetClipboard(FIVE_WORDS.to_string()),
+            TestEvent::SendSignal(AppSignal::ReadClipboard),
+            TestEvent::ExpectMode(Mode::TextActionMenu),
+            TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
+            TestEvent::ExpectMode(Mode::WordPicking),
+            TestEvent::PressKey(Key::Slash),
+            TestEvent::ReleaseKey(Key::Slash),
+            TestEvent::ExpectMode(Mode::Searching(FilterMode::WordPicking)),
+            TestEvent::PressKey(Key::KeyE),
+            TestEvent::ReleaseKey(Key::KeyE),
+            // One backspace only shortens the query, it does not leave search.
+            TestEvent::PressKey(Key::Backspace),
+            TestEvent::ReleaseKey(Key::Backspace),
+            TestEvent::ExpectMode(Mode::Searching(FilterMode::WordPicking)),
+            // With the query empty, backspace falls back to word picking.
+            TestEvent::PressKey(Key::Backspace),
+            TestEvent::ReleaseKey(Key::Backspace),
+            TestEvent::ExpectMode(Mode::WordPicking),
+        ])
         .await;
     });
 

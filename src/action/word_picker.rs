@@ -380,4 +380,60 @@ mod tests {
         );
         assert_eq!(multilingual_split(input), expected);
     }
+
+    /// `rgba_to_css_color` is the only thing that formats a colour into the
+    /// generated word-picker CSS, so the exact spelling — spaces, two decimal
+    /// places — is part of the stylesheet contract.
+    #[rstest]
+    #[case::opaque_white((255, 255, 255, 255), "rgba(255, 255, 255, 1.00)")]
+    #[case::half_alpha((255, 0, 0, 128), "rgba(255, 0, 0, 0.50)")]
+    fn formats_an_rgba_tuple_as_css(#[case] rgba: (u8, u8, u8, u8), #[case] expected: &str) {
+        assert_eq!(rgba_to_css_color(rgba), expected);
+    }
+
+    /// Every `{*_color}` placeholder has to be substituted, and each has to get
+    /// *its own* theme colour. A typo in a placeholder name would otherwise ship a
+    /// literal `{fg_color}` into the attributed string, where it renders as text
+    /// instead of failing loudly.
+    #[test]
+    fn every_colour_placeholder_gets_its_own_colour() {
+        let theme = GlyphlowTheme::default();
+        let css = replace_color_in_css(WORD_PICKER_STYLE, &theme, 3);
+
+        assert!(
+            !css.contains("_color}"),
+            "a placeholder was left unsubstituted: {css}"
+        );
+
+        let fg = rgba_to_css_color(cgcolor_to_rgba(&theme.menu_fg_color).unwrap());
+        let bg = rgba_to_css_color(cgcolor_to_rgba(&theme.menu_bg_color).unwrap());
+        let hl = rgba_to_css_color(cgcolor_to_rgba(&theme.menu_hl_color).unwrap());
+
+        // Each placeholder maps to its own colour. Checking only the whole
+        // stylesheet would not catch a swap between two of them, since all three
+        // would still be present.
+        assert_eq!(replace_color_in_css("{fg_color}", &theme, 3), fg);
+        assert_eq!(replace_color_in_css("{bg_color}", &theme, 3), bg);
+        assert_eq!(replace_color_in_css("{hl_color}", &theme, 3), hl);
+
+        // The wiring above is only meaningful if the three differ to begin with.
+        assert_ne!(fg, bg, "the default theme must distinguish fg from bg");
+        assert_ne!(fg, hl, "the default theme must distinguish fg from hl");
+    }
+
+    /// `dim_level` is the denominator of the foreground alpha — that is how the
+    /// unselected side of a multi-selection is faded out. Production only ever
+    /// passes 3, so that is the only value worth pinning.
+    #[test]
+    fn dimming_divides_the_foreground_alpha() {
+        let dim_level = 3u8;
+        let theme = GlyphlowTheme::default();
+        let mut expected = cgcolor_to_rgba(&theme.menu_fg_color).unwrap();
+        expected.3 /= dim_level;
+
+        assert_eq!(
+            replace_color_in_css("{dim_color}", &theme, dim_level),
+            rgba_to_css_color(expected)
+        );
+    }
 }

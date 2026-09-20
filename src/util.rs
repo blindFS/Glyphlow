@@ -437,6 +437,44 @@ mod frame_tests {
         frames.sort();
         assert_eq!(frames, [a, b, c]);
     }
+
+    /// `contains` is inclusive on all four edges, matching `intersect`. The
+    /// element explorer's early-stop relies on this: a parent whose frame only
+    /// *touches* the child's still counts as containing it.
+    #[rstest]
+    #[case::strictly_inside(true, Frame::new(10.0, 10.0, 20.0, 20.0))]
+    #[case::identical(true, Frame::new(0.0, 0.0, 100.0, 100.0))]
+    #[case::touching_the_right_edge(true, Frame::new(50.0, 0.0, 100.0, 100.0))]
+    #[case::touching_the_bottom_edge(true, Frame::new(0.0, 50.0, 100.0, 100.0))]
+    #[case::one_pixel_past_the_right_edge(false, Frame::new(50.0, 0.0, 100.1, 100.0))]
+    #[case::one_pixel_past_the_left_edge(false, Frame::new(-0.1, 0.0, 50.0, 100.0))]
+    fn containment_is_inclusive_on_every_edge(
+        #[case] expected: bool,
+        #[case] inner: Frame,
+    ) {
+        let outer = Frame::new(0.0, 0.0, 100.0, 100.0);
+        assert_eq!(outer.contains(&inner), expected);
+    }
+
+    /// The overlay frame is the union of every screen, and it is the coordinate
+    /// space every hint box, ripple and cursor trail is drawn in — so a wrong
+    /// union misplaces all of them.
+    #[rstest]
+    #[case::single_screen(
+        vec![Frame::new(0.0, 0.0, 1920.0, 1080.0)],
+        Frame::new(0.0, 0.0, 1920.0, 1080.0)
+    )]
+    #[case::screens_side_by_side(
+        vec![Frame::new(0.0, 0.0, 1920.0, 1080.0), Frame::new(1920.0, 0.0, 3840.0, 1080.0)],
+        Frame::new(0.0, 0.0, 3840.0, 1080.0)
+    )]
+    #[case::screen_to_the_left(
+        vec![Frame::new(-1920.0, 0.0, 0.0, 1080.0), Frame::new(0.0, 0.0, 1920.0, 1080.0)],
+        Frame::new(-1920.0, 0.0, 1920.0, 1080.0)
+    )]
+    fn unions_every_screen_into_one_overlay(#[case] screens: Vec<Frame>, #[case] expected: Frame) {
+        assert_eq!(Frame::union_of_frames(&screens), expected);
+    }
 }
 
 #[cfg(test)]
@@ -639,5 +677,88 @@ mod format_str_tests {
         #[case] expected: &str,
     ) {
         assert_eq!(format_fixed_width(input, width), expected);
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+    use rstest::rstest;
+
+    /// The query is a "contains" pattern, but `󱁐` — the in-band stand-in the key
+    /// listener substitutes for a real space — means "anything in between".
+    /// Without it a two-word query would be impossible to express, because the
+    /// space key is never delivered as part of a query.
+    #[rstest]
+    #[case::plain_substring("alpha", "alpha beta", true)]
+    #[case::substring_anywhere("pha", "alpha beta", true)]
+    #[case::absent("omega", "alpha beta", false)]
+    #[case::words_in_order("alpha󱁐beta", "alpha beta", true)]
+    #[case::words_with_a_gap("alpha󱁐beta", "alpha and beta", true)]
+    #[case::words_out_of_order("beta󱁐alpha", "alpha beta", false)]
+    fn matches_a_substring_with_in_band_word_separators(
+        #[case] query: &str,
+        #[case] haystack: &str,
+        #[case] expected: bool,
+    ) {
+        let re = search_regex(query).expect("a non-empty query always compiles");
+        assert_eq!(re.is_match(haystack), expected, "query {query:?}");
+    }
+
+    /// An empty query means "no filter", which callers detect as `None` — not as
+    /// a pattern that matches nothing.
+    #[test]
+    fn an_empty_query_is_no_filter() {
+        assert!(search_regex("").is_none());
+    }
+
+    /// Stray separators collapse, so a query cannot be broken by an accidental
+    /// space at either end or by two in a row.
+    #[rstest]
+    #[case::leading("󱁐alpha", "alpha")]
+    #[case::trailing("alpha󱁐", "alpha")]
+    #[case::repeated("alpha󱁐󱁐󱁐beta", "alpha󱁐beta")]
+    fn stray_separators_collapse(#[case] query: &str, #[case] equivalent: &str) {
+        assert_eq!(
+            search_regex(query).unwrap().as_str(),
+            search_regex(equivalent).unwrap().as_str(),
+            "{query:?} must behave exactly like {equivalent:?}"
+        );
+    }
+
+    /// A query made of separators alone collapses to the empty pattern, which
+    /// matches everything. That is the same *effect* as an empty query, but
+    /// reached by a different route: `None` versus a pattern that matches
+    /// anything. Both are "no filter" to the callers, which test with
+    /// `is_none_or`.
+    #[test]
+    fn a_query_of_separators_alone_matches_everything() {
+        let re = search_regex("󱁐").expect("a non-empty query still yields a pattern");
+
+        assert!(re.is_match(""));
+        assert!(re.is_match("anything at all"));
+    }
+
+    /// The user types into a live search box, so an uncompilable pattern is one
+    /// keystroke away. It must degrade to "no filter" — filtering everything out
+    /// would look like the app had lost its content.
+    #[rstest]
+    #[case::unclosed_group("(")]
+    #[case::unclosed_class("[")]
+    fn a_malformed_query_degrades_to_no_filter(#[case] query: &str) {
+        assert!(
+            search_regex(query).is_none(),
+            "{query:?} cannot be compiled, so it must not filter anything out"
+        );
+    }
+
+    /// Search targets and word-picker words are compared case- and
+    /// accent-insensitively, so this folding happens once, up front.
+    #[rstest]
+    #[case::uppercase("ALPHA", "alpha")]
+    #[case::accented("CAFÉ", "cafe")]
+    #[case::sharp_s("Straße", "strasse")]
+    fn lower_ascii_folds_case_and_accents(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(lower_ascii(input), expected);
     }
 }

@@ -258,13 +258,11 @@ impl AppEngine {
                 self.multi_selection.clear_one_side();
                 self.update_hints();
             }
+            // Nothing typed to undo: bring back whatever the visibility check
+            // hid, so those elements can be picked after all.
             FilterMode::Generic => {
                 for hb in self.hint_boxes.iter_mut() {
-                    if hb.disabled {
-                        hb.disabled = false;
-                        hb.set_opacity(1.0);
-                        hb.set_visible(true);
-                    }
+                    hb.restore();
                 }
             }
             _ => (),

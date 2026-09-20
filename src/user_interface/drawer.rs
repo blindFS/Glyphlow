@@ -556,3 +556,34 @@ pub fn calibrated_origin(x: f64, y: f64, overlay_frame: &Frame) -> NSPoint {
         overlay_frame.bottom_right.y - y,
     )
 }
+
+#[cfg(test)]
+mod calibrated_origin_tests {
+    use super::*;
+    use rstest::rstest;
+
+    /// Core Animation places layers in a bottom-left origin space while the rest
+    /// of the app works in screen (top-left) coordinates, so a vertical flip is
+    /// always needed. The overlay is not necessarily anchored at the origin —
+    /// with more than one display it is the union of every screen frame — hence
+    /// the shift as well.
+    #[rstest]
+    // A single 1920x1080 display at the origin: the shift is the identity.
+    #[case::top_left_corner(0.0, 0.0, (0.0, 0.0, 1920.0, 1080.0), (0.0, 1080.0))]
+    #[case::bottom_right_corner(1920.0, 1080.0, (0.0, 0.0, 1920.0, 1080.0), (1920.0, 0.0))]
+    // A display left of the main one: the overlay origin is negative, so the
+    // horizontal shift is not the identity either.
+    #[case::overlay_offset_to_the_left(-1870.0, 200.0, (-1920.0, 0.0, 0.0, 1080.0), (50.0, 880.0))]
+    // An overlay taller than a single screen, e.g. stacked displays.
+    #[case::overlay_taller_than_one_screen(100.0, 200.0, (0.0, 0.0, 1920.0, 2160.0), (100.0, 1960.0))]
+    fn shifts_then_flips_into_layer_coordinates(
+        #[case] x: f64,
+        #[case] y: f64,
+        #[case] overlay: (f64, f64, f64, f64),
+        #[case] expected: (f64, f64),
+    ) {
+        let overlay = Frame::new(overlay.0, overlay.1, overlay.2, overlay.3);
+        let origin = calibrated_origin(x, y, &overlay);
+        assert_eq!((origin.x, origin.y), expected);
+    }
+}
