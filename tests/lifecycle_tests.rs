@@ -12,23 +12,21 @@ use std::sync::{
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+/// A single step the simulator thread performs.
+///
+/// The `Expect*` events poll with a timeout, so a transition that never happens
+/// fails the step instead of hanging the whole run.
 #[derive(Debug, Clone)]
 enum TestEvent {
-    // Simulates pressing a key (updates KeyState first, then calls KeyListener::key_down)
+    /// Updates `KeyState` first, then calls `KeyListener::key_down`.
     PressKey(Key),
-    // Simulates releasing a key (updates KeyState)
     ReleaseKey(Key),
-    // Directly sets the application Mode (allows isolating tests for specific modes)
     SetMode(Mode),
-    // Expects the application to transition to a specific Mode (with timeout)
     ExpectMode(Mode),
-    // Expects a specific AppSignal to be handled by the AppEngine (with timeout)
     ExpectSignal(AppSignal),
-    // Clears the recorded signals history
     ClearSignals,
-    // Sets the clipboard text
     SetClipboard(String),
-    // Sends a raw signal, the way the CLI would over its socket
+    /// Sends a raw signal, the way the CLI would over its socket.
     SendSignal(AppSignal),
 }
 
@@ -288,21 +286,17 @@ async fn run_test_scenario_with_config(events: Vec<TestEvent>, config: GlyphlowC
         let wait_timeout = Duration::from_millis(1500);
 
         for (idx, event) in events.into_iter().enumerate() {
-            println!("[Sim] Executing event {}: {:?}", idx + 1, event);
+            let step = idx + 1;
             match event {
                 TestEvent::PressKey(key) => {
                     sim_key_state.lock().unwrap().key_down(&key);
-                    let swallowed =
-                        key_listener.key_down(key, &sim_state, &mut sim_key_state.lock().unwrap());
-                    println!("[Sim] Key {:?} pressed, swallowed = {}", key, swallowed);
+                    key_listener.key_down(key, &sim_state, &mut sim_key_state.lock().unwrap());
                 }
                 TestEvent::ReleaseKey(key) => {
                     sim_key_state.lock().unwrap().key_up(&key);
-                    println!("[Sim] Key {:?} released", key);
                 }
                 TestEvent::SetMode(mode) => {
-                    *sim_state.lock().unwrap() = mode.clone();
-                    println!("[Sim] Mode forced to {:?}", mode);
+                    *sim_state.lock().unwrap() = mode;
                 }
                 TestEvent::ExpectMode(expected_mode) => {
                     let start = std::time::Instant::now();
@@ -313,10 +307,8 @@ async fn run_test_scenario_with_config(events: Vec<TestEvent>, config: GlyphlowC
                     }
                     assert_eq!(
                         current_mode, expected_mode,
-                        "Assertion failed: expected mode {:?}, but got {:?}",
-                        expected_mode, current_mode
+                        "step {step}: expected mode {expected_mode:?}, but got {current_mode:?}"
                     );
-                    println!("[Sim] Confirmed mode matches {:?}", expected_mode);
                 }
                 TestEvent::ExpectSignal(expected_signal) => {
                     let start = std::time::Instant::now();
@@ -334,22 +326,18 @@ async fn run_test_scenario_with_config(events: Vec<TestEvent>, config: GlyphlowC
                     }
                     assert!(
                         found,
-                        "Assertion failed: expected signal {:?} was not processed. Processed signals: {:?}",
-                        expected_signal,
+                        "step {step}: expected signal {expected_signal:?} was not processed. \
+                         Processed signals: {:?}",
                         *sim_processed_signals.lock().unwrap()
                     );
-                    println!("[Sim] Confirmed signal {:?} was processed", expected_signal);
                 }
                 TestEvent::ClearSignals => {
                     sim_processed_signals.lock().unwrap().clear();
-                    println!("[Sim] Cleared processed signals history");
                 }
                 TestEvent::SetClipboard(text) => {
                     text_to_clipboard(&text);
-                    println!("[Sim] Clipboard set to {:?}", text);
                 }
                 TestEvent::SendSignal(signal) => {
-                    println!("[Sim] Sending signal {:?}", signal);
                     sim_tx
                         .blocking_send(signal)
                         .expect("Failed to send signal to the engine");
@@ -371,7 +359,6 @@ async fn run_test_scenario_with_config(events: Vec<TestEvent>, config: GlyphlowC
         }
 
         if let Ok(signal) = rx.try_recv() {
-            println!("[Main] Processing signal: {:?}", signal);
             processed_signals.lock().unwrap().push(signal.clone());
             app_engine.handle_signal(signal).await;
         }

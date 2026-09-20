@@ -1217,6 +1217,7 @@ pub fn traverse(
 mod tests {
     use super::*;
     use crate::config::CustomTarget;
+    use rstest::rstest;
 
     /// Build a minimal `CustomTarget` with only the `role` field set.
     fn ct_role(role: &str) -> CustomTarget {
@@ -1226,23 +1227,35 @@ mod tests {
         }
     }
 
-    #[test]
-    fn match_helper_test() {
-        assert!(match_helper("Button", &"button"));
-        assert!(match_helper("BUTTON", &"AXButton"));
-        assert!(match_helper("button", &"AXBUTTON"));
-        assert!(match_helper("menu", &"AXMenuItem"));
-        // An empty string is always contained in any string (including itself).
-        assert!(match_helper("", &"anything"));
-        assert!(match_helper("", &""));
-        assert!(!match_helper("image", &"AXButton"));
+    /// Build a `CustomTarget` constrained to an exact element size.
+    fn ct_size(role: &str, width: f64, height: f64) -> CustomTarget {
+        CustomTarget {
+            role: role.into(),
+            size: Some((width, height)),
+            ..Default::default()
+        }
     }
 
-    #[test]
-    fn match_helper_pipe() {
-        assert!(match_helper("button|textfield", &"AXButton"));
-        assert!(match_helper("button|textfield", &"AXTextField"));
-        assert!(match_helper("button | textfield", &"AXTextField"));
+    /// `match_helper` is a case-insensitive substring test, with `|` separating
+    /// alternatives. An empty pattern is contained in everything, itself
+    /// included.
+    #[rstest]
+    #[case::exact_lowercase("Button", "button", true)]
+    #[case::pattern_lowercase("BUTTON", "AXButton", true)]
+    #[case::both_uppercase("button", "AXBUTTON", true)]
+    #[case::substring("menu", "AXMenuItem", true)]
+    #[case::empty_pattern_matches_anything("", "anything", true)]
+    #[case::empty_pattern_matches_empty("", "", true)]
+    #[case::mismatch("image", "AXButton", false)]
+    #[case::pipe_first_alternative("button|textfield", "AXButton", true)]
+    #[case::pipe_second_alternative("button|textfield", "AXTextField", true)]
+    #[case::pipe_tolerates_spaces("button | textfield", "AXTextField", true)]
+    fn match_helper_is_case_insensitive_substring_with_pipe_alternatives(
+        #[case] pattern: &str,
+        #[case] value: &str,
+        #[case] expected: bool,
+    ) {
+        assert_eq!(match_helper(pattern, &value), expected);
     }
 
     #[test]
@@ -1300,8 +1313,10 @@ mod tests {
         );
     }
 
+    /// `action` names an accessibility action to perform, not a pattern, so a
+    /// `|` in it must survive verbatim instead of being read as alternatives.
     #[test]
-    fn compiled_target_new_action_field_propagated() {
+    fn action_is_kept_verbatim_and_not_split_on_pipe() {
         let ct = CustomTarget {
             role: "MenuItem".into(),
             action: Some("press | highlight".into()),
@@ -1320,80 +1335,41 @@ mod tests {
         }
     }
 
-    #[test]
-    fn basic_match_role_exact() {
-        let elem = make_basic("AXButton", None);
-        let target = CompiledTarget::new(&ct_role("AXButton")).unwrap();
-        assert!(elem.match_custom_target(&target));
-    }
+    /// A target matches only when *every* field it constrains matches. Fields
+    /// left unset are ignored, and an element with no frame can never satisfy a
+    /// size constraint.
+    #[rstest]
+    #[case::role_exact("AXButton", None, ct_role("AXButton"), true)]
+    #[case::role_substring_is_case_insensitive("AXButton", None, ct_role("button"), true)]
+    #[case::role_pipe_is_or("AXMenuItem", None, ct_role("button|menuitem"), true)]
+    #[case::role_mismatch("AXImage", None, ct_role("button"), false)]
+    #[case::size_matches(
+        "AXButton",
+        Some((0.0, 0.0, 100.0, 50.0)),
+        ct_size("AXButton", 100.0, 50.0),
+        true
+    )]
+    #[case::size_mismatch(
+        "AXButton",
+        Some((0.0, 0.0, 200.0, 80.0)),
+        ct_size("AXButton", 100.0, 50.0),
+        false
+    )]
+    #[case::size_required_but_element_has_no_frame(
+        "AXButton",
+        None,
+        ct_size("AXButton", 100.0, 50.0),
+        false
+    )]
+    fn basic_attributes_match_only_when_every_constraint_holds(
+        #[case] role: &str,
+        #[case] frame: Option<(f64, f64, f64, f64)>,
+        #[case] target: CustomTarget,
+        #[case] expected: bool,
+    ) {
+        let elem = make_basic(role, frame.map(|(x1, y1, x2, y2)| Frame::new(x1, y1, x2, y2)));
+        let target = CompiledTarget::new(&target).expect("test targets must compile");
 
-    #[test]
-    fn basic_match_role_substring() {
-        // "button" is a substring of "AXButton" (case-insensitive).
-        let elem = make_basic("AXButton", None);
-        let target = CompiledTarget::new(&ct_role("button")).unwrap();
-        assert!(elem.match_custom_target(&target));
-    }
-
-    #[test]
-    fn basic_match_role_pipe_or() {
-        let elem = make_basic("AXMenuItem", None);
-        let target = CompiledTarget::new(&ct_role("button|menuitem")).unwrap();
-        assert!(elem.match_custom_target(&target));
-    }
-
-    #[test]
-    fn basic_match_role_mismatch() {
-        let elem = make_basic("AXImage", None);
-        let target = CompiledTarget::new(&ct_role("button")).unwrap();
-        assert!(!elem.match_custom_target(&target));
-    }
-
-    #[test]
-    fn basic_match_size_matches() {
-        let frame = Frame::new(0.0, 0.0, 100.0, 50.0);
-        let elem = make_basic("AXButton", Some(frame));
-        let ct = CustomTarget {
-            role: "AXButton".into(),
-            size: Some((100.0, 50.0)),
-            ..Default::default()
-        };
-        let target = CompiledTarget::new(&ct).unwrap();
-        assert!(elem.match_custom_target(&target));
-    }
-
-    #[test]
-    fn basic_match_size_mismatch() {
-        let frame = Frame::new(0.0, 0.0, 200.0, 80.0);
-        let elem = make_basic("AXButton", Some(frame));
-        let ct = CustomTarget {
-            role: "AXButton".into(),
-            size: Some((100.0, 50.0)),
-            ..Default::default()
-        };
-        let target = CompiledTarget::new(&ct).unwrap();
-        assert!(!elem.match_custom_target(&target));
-    }
-
-    #[test]
-    fn basic_match_size_required_but_no_frame() {
-        // If the target requires a specific size but the element has no frame,
-        // it should not match.
-        let elem = make_basic("AXButton", None);
-        let ct = CustomTarget {
-            role: "AXButton".into(),
-            size: Some((100.0, 50.0)),
-            ..Default::default()
-        };
-        let target = CompiledTarget::new(&ct).unwrap();
-        assert!(!elem.match_custom_target(&target));
-    }
-
-    #[test]
-    fn basic_match_no_size_constraint_ignores_frame() {
-        // When the target has no size constraint the element frame is irrelevant.
-        let elem_no_frame = make_basic("AXButton", None);
-        let target = CompiledTarget::new(&ct_role("AXButton")).unwrap();
-        assert!(elem_no_frame.match_custom_target(&target));
+        assert_eq!(elem.match_custom_target(&target), expected);
     }
 }

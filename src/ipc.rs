@@ -38,14 +38,18 @@ pub fn socket_path() -> Option<PathBuf> {
 }
 
 fn cache_dir_path() -> Option<PathBuf> {
-    std::env::var("XDG_CACHE_HOME")
-        .ok()
+    let xdg_cache_home = std::env::var("XDG_CACHE_HOME").ok();
+    let home = std::env::var("HOME").ok();
+
+    cache_dir_from(xdg_cache_home.as_deref(), home.as_deref())
+}
+
+/// The pure part of [`cache_dir_path`], split out so the precedence rule can be
+/// tested without mutating the process environment.
+fn cache_dir_from(xdg_cache_home: Option<&str>, home: Option<&str>) -> Option<PathBuf> {
+    xdg_cache_home
         .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var("HOME")
-                .ok()
-                .map(|dir| PathBuf::from(dir).join(".cache"))
-        })
+        .or_else(|| home.map(|dir| PathBuf::from(dir).join(".cache")))
         .map(|base| base.join("glyphlow"))
 }
 
@@ -115,4 +119,61 @@ pub async fn send_signal(signal: &AppSignal) -> Result<(), IpcError> {
         .map_err(IpcError::Write)?;
     stream.flush().await.map_err(IpcError::Write)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+
+    /// `XDG_CACHE_HOME` wins over `HOME`, and either base gets a `glyphlow`
+    /// suffix. With neither set there is no cache directory to speak of.
+    #[rstest]
+    #[case::xdg_cache_home_wins(
+        Some("/xdg/cache"),
+        Some("/home/user"),
+        Some("/xdg/cache/glyphlow")
+    )]
+    #[case::home_is_the_fallback(None, Some("/home/user"), Some("/home/user/.cache/glyphlow"))]
+    #[case::neither_is_set(None, None, None)]
+    fn cache_dir_prefers_xdg_cache_home(
+        #[case] xdg_cache_home: Option<&str>,
+        #[case] home: Option<&str>,
+        #[case] expected: Option<&str>,
+    ) {
+        assert_eq!(
+            cache_dir_from(xdg_cache_home, home),
+            expected.map(PathBuf::from)
+        );
+    }
+
+    /// Resolving the socket path must never touch the filesystem, so a client
+    /// probing for a server that is not running leaves nothing behind.
+    #[test]
+    fn socket_path_is_derived_without_touching_the_filesystem() {
+        let path = socket_path().expect("HOME or XDG_CACHE_HOME must be set to run the tests");
+
+        assert!(
+            path.ends_with(std::path::Path::new("glyphlow").join(SOCKET_FILE_NAME)),
+            "socket must live in the glyphlow cache directory, got {path:?}"
+        );
+    }
+
+    /// `source()` exposes the underlying cause for the wrapping variants, and
+    /// the connect failure names the socket it could not reach.
+    #[test]
+    fn error_sources_are_exposed_only_where_a_cause_exists() {
+        assert!(std::error::Error::source(&IpcError::MissingSocketPath).is_none());
+
+        let connect = IpcError::Connect {
+            path: PathBuf::from("/tmp/glyphlow.socket"),
+            source: std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused"),
+        };
+
+        assert!(std::error::Error::source(&connect).is_some());
+        assert!(
+            connect.to_string().contains("/tmp/glyphlow.socket"),
+            "the message must name the socket: {connect}"
+        );
+    }
 }

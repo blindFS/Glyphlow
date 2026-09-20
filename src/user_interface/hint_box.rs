@@ -581,6 +581,7 @@ pub fn find_overlaps(hint_boxes: &[HintBox], min_size: f64) -> Vec<(usize, usize
 #[cfg(test)]
 mod collision_tests {
     use super::*;
+    use rstest::rstest;
 
     fn mock_box(idx: usize, x: f64, y: f64) -> HintBox {
         HintBox::new(
@@ -593,52 +594,54 @@ mod collision_tests {
         )
     }
 
-    #[test]
-    fn test_simple_collision_resolution() {
-        let mut boxes = vec![
-            mock_box(0, 100.0, 100.0),
-            mock_box(1, 105.0, 100.0), // 5px diff, threshold is 10
-        ];
-
-        resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 100);
-
-        let diff_x = (boxes[0].x - boxes[1].x).abs();
-        assert!(
-            diff_x >= 10.0,
-            "Boxes should be at least 10px apart, got {}",
-            diff_x
-        );
-        assert_eq!(
-            boxes[0].y, 100.0,
-            "Y coordinate shouldn't change if X move was smaller"
-        );
-    }
-
-    #[test]
-    fn test_chain_reaction() {
-        // A overlaps B, B overlaps C.
-        // Solving A-B should push B into C, which then needs solving.
-        let mut boxes = vec![
-            mock_box(0, 100.0, 100.0),
-            mock_box(1, 108.0, 100.0), // Overlaps 0 by 2px
-            mock_box(2, 116.0, 100.0), // Overlaps 1 by 2px
-        ];
-
-        resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 500);
-
-        // Verify all pairs
-        for i in 0..boxes.len() {
-            for j in i + 1..boxes.len() {
-                let dx = (boxes[i].x - boxes[j].x).abs();
-                let dy = (boxes[i].y - boxes[j].y).abs();
+    /// The invariant the resolver exists to establish: every pair ends up
+    /// separated by at least the threshold on *some* axis.
+    fn assert_no_pair_collides(boxes: &[HintBox], x_thres: f64, y_thres: f64) {
+        for (i, a) in boxes.iter().enumerate() {
+            for b in &boxes[i + 1..] {
+                let (dx, dy) = ((a.x - b.x).abs(), (a.y - b.y).abs());
                 assert!(
-                    dx >= 10.0 || dy >= 10.0,
-                    "Collision found between {} and {}",
-                    i,
-                    j
+                    dx >= x_thres || dy >= y_thres,
+                    "boxes {} and {} still collide: dx = {dx}, dy = {dy}",
+                    a.idx,
+                    b.idx
                 );
             }
         }
+    }
+
+    /// Every pair must be separated, whatever the arrangement: one overlapping
+    /// pair, a chain where fixing a pair pushes a box into the next one, or
+    /// boxes straddling a spatial-grid cell boundary (which must not hide the
+    /// overlap from the grid lookup).
+    #[rstest]
+    #[case::simple_pair(vec![(0, 100.0, 100.0), (1, 105.0, 100.0)], 100)]
+    #[case::chain_reaction(vec![(0, 100.0, 100.0), (1, 108.0, 100.0), (2, 116.0, 100.0)], 500)]
+    #[case::straddling_a_grid_cell(vec![(0, 9.9, 10.0), (1, 10.1, 10.0)], 100)]
+    fn separates_every_overlapping_pair(
+        #[case] spec: Vec<(usize, f64, f64)>,
+        #[case] max_ops: usize,
+    ) {
+        let mut boxes: Vec<HintBox> = spec
+            .into_iter()
+            .map(|(idx, x, y)| mock_box(idx, x, y))
+            .collect();
+
+        resolve_collisions_reactive(&mut boxes, 10.0, 10.0, max_ops);
+
+        assert_no_pair_collides(&boxes, 10.0, 10.0);
+    }
+
+    /// Two boxes 5px apart are separated along whichever axis needs the smaller
+    /// nudge: X needs 5px and Y would need 10px, so Y must be left alone.
+    #[test]
+    fn separates_along_the_axis_needing_the_smaller_nudge() {
+        let mut boxes = vec![mock_box(0, 100.0, 100.0), mock_box(1, 105.0, 100.0)];
+
+        resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 100);
+
+        assert_eq!(boxes[0].y, 100.0, "Y must not move when X is cheaper");
+        assert_no_pair_collides(&boxes, 10.0, 10.0);
     }
 
     #[test]
@@ -654,35 +657,32 @@ mod collision_tests {
         );
     }
 
+    /// Ten boxes stacked on a single point can never all be separated, so the
+    /// `max_ops` budget has to cut the loop short instead of spinning forever.
+    /// The result only needs to stay complete, finite and deterministic.
     #[test]
-    fn test_spatial_grid_boundary() {
-        // Place boxes on either side of a grid cell boundary
-        // If x_thres is 10, cell boundary is at multiples of 10.
-        let mut boxes = vec![
-            mock_box(0, 9.9, 10.0),  // Cell (0, 1)
-            mock_box(1, 10.1, 10.0), // Cell (1, 1)
-        ];
+    fn max_ops_budget_terminates_deterministically() {
+        let stacked = || {
+            (0..10)
+                .map(|i| mock_box(i, 100.0, 100.0))
+                .collect::<Vec<_>>()
+        };
 
-        resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 100);
+        let mut first = stacked();
+        resolve_collisions_reactive(&mut first, 10.0, 10.0, 50);
 
-        let diff_x = (boxes[0].x - boxes[1].x).abs();
-        let diff_y = (boxes[0].y - boxes[1].y).abs();
-        assert!(
-            diff_x >= 10.0 || diff_y >= 10.0,
-            "Should resolve collisions even across grid boundaries"
-        );
-    }
+        let mut second = stacked();
+        resolve_collisions_reactive(&mut second, 10.0, 10.0, 50);
 
-    #[test]
-    fn test_max_ops_safety() {
-        // Create a "Black Hole" of points that cannot be perfectly resolved
-        // to ensure we don't loop forever.
-        let mut boxes = (0..10)
-            .map(|i| mock_box(i, 100.0, 100.0))
-            .collect::<Vec<_>>();
-
-        // This should hit the max_ops and exit gracefully
-        resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 50);
+        assert_eq!(first.len(), 10, "boxes must not be dropped");
+        for (a, b) in first.iter().zip(&second) {
+            assert_eq!((a.x, a.y), (b.x, b.y), "resolution is not deterministic");
+            assert!(
+                a.x.is_finite() && a.y.is_finite(),
+                "box {} ended up at a non-finite position",
+                a.idx
+            );
+        }
     }
 }
 

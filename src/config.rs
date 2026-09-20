@@ -1038,6 +1038,7 @@ mod vec_cgcolor_format {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
     use std::collections::HashSet;
 
     #[test]
@@ -1220,16 +1221,16 @@ mod tests {
         assert_eq!(old_config.text_actions.len(), 1);
     }
 
-    #[test]
-    fn test_hint_keys_sanitization() {
-        // Case is normalized: typed letters are reported upper-cased.
-        assert_eq!(HintKeys::new("asdfjkl;").as_str(), "ASDFJKL;");
-        // Duplicates are dropped, keeping the first occurrence.
-        assert_eq!(HintKeys::new("aabcc").as_str(), "ABC");
-        // Characters the key listener cannot report are dropped.
-        assert_eq!(HintKeys::new("a!b c\tdé").as_str(), "ABCD");
-        // Digits and most punctuation are valid hint keys.
-        assert_eq!(HintKeys::new("123;',.").as_str(), "123;',.");
+    /// Sanitizing is lenient on purpose: case is normalized, duplicates keep
+    /// their first occurrence, and anything the key listener cannot report is
+    /// dropped rather than rejected.
+    #[rstest]
+    #[case::case_is_normalized("asdfjkl;", "ASDFJKL;")]
+    #[case::duplicates_keep_the_first_occurrence("aabcc", "ABC")]
+    #[case::untypable_characters_are_dropped("a!b c\tdé", "ABCD")]
+    #[case::digits_and_most_punctuation_are_valid("123;',.", "123;',.")]
+    fn hint_keys_sanitizes_input(#[case] raw: &str, #[case] expected: &str) {
+        assert_eq!(HintKeys::new(raw).as_str(), expected);
     }
 
     /// `/` starts a text search in filtering mode, so it never reaches the hint
@@ -1294,62 +1295,49 @@ mod tests {
         assert_eq!(HintKeys::default().as_str(), "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
     }
 
-    #[test]
-    fn test_hint_keys_default_labels_are_unchanged() {
-        let keys = HintKeys::default();
-
-        // Unpadded labels, as used while elements are still being traversed.
-        assert_eq!(keys.label_for_index(0, None), "A");
-        assert_eq!(keys.label_for_index(1, None), "B");
-        assert_eq!(keys.label_for_index(25, None), "Z");
-        assert_eq!(keys.label_for_index(26, None), "AB");
-
-        // Padded labels, as used once the hint width is known.
-        assert_eq!(keys.label_for_index(0, Some(1)), "A");
-        assert_eq!(keys.label_for_index(25, Some(1)), "Z");
-        assert_eq!(keys.label_for_index(0, Some(2)), "AA");
-        assert_eq!(keys.label_for_index(25, Some(2)), "ZA");
-        assert_eq!(keys.label_for_index(26, Some(2)), "AB");
-    }
-
+    /// How a custom alphabet is laid out: 8 keys address 8 hints with a single
+    /// keystroke, and the 9th hint starts the two-keystroke block.
     #[test]
     fn test_hint_keys_custom_alphabet_labels() {
         let keys = HintKeys::new("asdfjkl;");
         assert_eq!(keys.base(), 8);
 
-        // 8 keys address up to 8 hints with a single keystroke.
         assert_eq!(keys.digits_for_len(8), 1);
         assert_eq!(keys.label_for_index(0, Some(1)), "A");
         assert_eq!(keys.label_for_index(7, Some(1)), ";");
 
-        // The 9th hint needs two keystrokes.
         assert_eq!(keys.digits_for_len(9), 2);
         assert_eq!(keys.label_for_index(0, Some(2)), "AA");
         assert_eq!(keys.label_for_index(8, Some(2)), "AS");
         assert_eq!(keys.label_for_index(63, Some(2)), ";;");
     }
 
-    #[test]
-    fn test_hint_keys_digits_for_len() {
-        let letters = HintKeys::default();
-        assert_eq!(letters.digits_for_len(0), 1);
-        assert_eq!(letters.digits_for_len(1), 1);
-        assert_eq!(letters.digits_for_len(26), 1);
-        assert_eq!(letters.digits_for_len(27), 2);
-        assert_eq!(letters.digits_for_len(676), 2);
-        assert_eq!(letters.digits_for_len(677), 3);
-
-        let home_row = HintKeys::new("asdfjkl;");
-        assert_eq!(home_row.digits_for_len(1), 1);
-        assert_eq!(home_row.digits_for_len(9), 2);
-        assert_eq!(home_row.digits_for_len(64), 2);
-        assert_eq!(home_row.digits_for_len(65), 3);
-
-        let binary = HintKeys::new("jk");
-        assert_eq!(binary.digits_for_len(2), 1);
-        assert_eq!(binary.digits_for_len(3), 2);
-        assert_eq!(binary.digits_for_len(4), 2);
-        assert_eq!(binary.digits_for_len(5), 3);
+    /// The width needed is the smallest `d` with `base.pow(d) >= len`, so each
+    /// alphabet flips to the next width exactly one hint past its capacity.
+    #[rstest]
+    // 26 keys: one keystroke covers 26 hints, two cover 676.
+    #[case::letters_zero("ABCDEFGHIJKLMNOPQRSTUVWXYZ", 0, 1)]
+    #[case::letters_one("ABCDEFGHIJKLMNOPQRSTUVWXYZ", 1, 1)]
+    #[case::letters_at_capacity("ABCDEFGHIJKLMNOPQRSTUVWXYZ", 26, 1)]
+    #[case::letters_one_past_capacity("ABCDEFGHIJKLMNOPQRSTUVWXYZ", 27, 2)]
+    #[case::letters_two_digit_capacity("ABCDEFGHIJKLMNOPQRSTUVWXYZ", 676, 2)]
+    #[case::letters_one_past_two_digit_capacity("ABCDEFGHIJKLMNOPQRSTUVWXYZ", 677, 3)]
+    // 8 keys: one keystroke covers 8 hints, two cover 64.
+    #[case::home_row_one("ASDFJKL;", 1, 1)]
+    #[case::home_row_one_past_capacity("ASDFJKL;", 9, 2)]
+    #[case::home_row_two_digit_capacity("ASDFJKL;", 64, 2)]
+    #[case::home_row_one_past_two_digit_capacity("ASDFJKL;", 65, 3)]
+    // 2 keys: every extra keystroke only doubles the reach.
+    #[case::binary_at_capacity("JK", 2, 1)]
+    #[case::binary_one_past_capacity("JK", 3, 2)]
+    #[case::binary_two_digit_capacity("JK", 4, 2)]
+    #[case::binary_one_past_two_digit_capacity("JK", 5, 3)]
+    fn digits_for_len_is_the_smallest_sufficient_width(
+        #[case] alphabet: &str,
+        #[case] len: usize,
+        #[case] expected: u32,
+    ) {
+        assert_eq!(HintKeys::new(alphabet).digits_for_len(len), expected);
     }
 
     /// `label_for_index` is written for speed (no intermediate buffer, exact
@@ -1398,7 +1386,8 @@ mod tests {
         }
     }
 
-    /// Every hint must be reachable by a distinct keystroke sequence, and all    /// labels of one batch must be the same width so that none is a prefix of
+    /// Every hint must be reachable by a distinct keystroke sequence, and all
+    /// labels of one batch must be the same width so that none is a prefix of
     /// another (which would make filtering ambiguous).
     #[test]
     fn test_hint_keys_labels_are_unique_and_fixed_width() {

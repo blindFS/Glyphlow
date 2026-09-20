@@ -346,79 +346,37 @@ fn multilingual_split(input: &str) -> (Vec<String>, Vec<usize>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
 
-    #[test]
-    fn test_basic_latin_splitting() {
-        let input = "Hello world rust";
+    /// `multilingual_split` cuts a line into tokens at script boundaries and
+    /// reports each token's *byte* offset, so every case pins both halves of
+    /// the returned tuple.
+    #[rstest]
+    #[case::basic_latin("Hello world rust", &["Hello", "world", "rust"], &[0, 6, 12])]
+    // "こんにちは" is 15 bytes, the space sits at byte 15, "世界" starts at 16.
+    #[case::cjk_only("こんにちは 世界 常用漢字", &["こんにちは", "世界", "常用漢字"], &[0, 16, 23])]
+    // Hello (5 bytes) + 世界 (6) + 2024 (4) + 年 (3), with no separators.
+    #[case::mixed_adjacency("Hello世界2024年", &["Hello", "世界", "2024", "年"], &[0, 5, 11, 15])]
+    #[case::alternating_scripts("Rustはawesomeです", &["Rust", "は", "awesome", "です"], &[0, 4, 7, 14])]
+    #[case::punctuation_stays_with_its_word("Wait!世界...", &["Wait!", "世界", "..."], &[0, 5, 11])]
+    // A URL stays one token even though it mixes ASCII, CJK and punctuation.
+    #[case::url_is_one_token(
+        "Check https://example.com/path/世界/page?query=1#hash",
+        &["Check", "https://example.com/path/世界/page?query=1#hash"],
+        &[0, 6]
+    )]
+    #[case::empty("", &[], &[])]
+    #[case::whitespace_only("   ", &[], &[])]
+    // Emoji are 4 bytes each, so the offsets are byte offsets, not char counts.
+    #[case::emoji_are_four_bytes_each("English😁👻", &["English", "😁", "👻"], &[0, 7, 11])]
+    fn splits_on_script_boundaries(
+        #[case] input: &str,
+        #[case] words: &[&str],
+        #[case] offsets: &[usize],
+    ) {
         let expected = (
-            vec!["Hello".into(), "world".into(), "rust".into()],
-            vec![0, 6, 12],
-        );
-        assert_eq!(multilingual_split(input), expected);
-    }
-
-    #[test]
-    fn test_cjk_only_splitting() {
-        let input = "こんにちは 世界 常用漢字";
-        // "こんにちは" is 15 bytes. Space at 15. "世界" starts at 16.
-        let expected = (
-            vec!["こんにちは".into(), "世界".into(), "常用漢字".into()],
-            vec![0, 16, 23],
-        );
-        assert_eq!(multilingual_split(input), expected);
-    }
-
-    #[test]
-    fn test_mixed_adjacency_splitting() {
-        let input = "Hello世界2024年";
-        // Hello (5) + 世界 (6) + 2024 (4) + 年 (3)
-        let expected = (
-            vec!["Hello".into(), "世界".into(), "2024".into(), "年".into()],
-            vec![0, 5, 11, 15],
-        );
-        assert_eq!(multilingual_split(input), expected);
-    }
-
-    #[test]
-    fn test_url_protection() {
-        let input = "Check https://example.com/path/世界/page?query=1#hash";
-        let (res, off) = multilingual_split(input);
-        assert_eq!(res[1], "https://example.com/path/世界/page?query=1#hash");
-        assert_eq!(off[1], 6);
-    }
-
-    #[test]
-    fn test_multiple_script_boundaries() {
-        let input = "Rustはawesomeです";
-        let expected = (
-            vec!["Rust".into(), "は".into(), "awesome".into(), "です".into()],
-            vec![0, 4, 7, 14],
-        );
-        assert_eq!(multilingual_split(input), expected);
-    }
-
-    #[test]
-    fn test_punctuation_behavior() {
-        let input = "Wait!世界...";
-        let expected = (
-            vec!["Wait!".into(), "世界".into(), "...".into()],
-            vec![0, 5, 11],
-        );
-        assert_eq!(multilingual_split(input), expected);
-    }
-
-    #[test]
-    fn test_edge_case_empty_and_whitespace() {
-        assert_eq!(multilingual_split(""), (vec![], vec![]));
-        assert_eq!(multilingual_split("   "), (vec![], vec![]));
-    }
-
-    #[test]
-    fn test_ascii_with_emojis() {
-        let input = "English😁👻";
-        let expected = (
-            vec!["English".into(), "😁".into(), "👻".into()],
-            vec![0, 7, 11], // Emojis are 4 bytes
+            words.iter().map(|w| (*w).to_owned()).collect::<Vec<String>>(),
+            offsets.to_vec(),
         );
         assert_eq!(multilingual_split(input), expected);
     }
