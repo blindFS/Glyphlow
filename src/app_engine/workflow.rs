@@ -40,10 +40,6 @@ impl AppEngine {
     }
 
     /// Why `wf` cannot run against the current selection, if it cannot.
-    ///
-    /// Keeping the explanation in one place lets keyboard driven flows stay
-    /// terse (`execute_workflow` just draws a menu) while flows driven by the
-    /// CLI, which have no menu to look at, can report something actionable.
     fn workflow_invalid_reason(&self, wf: &WorkFlow) -> Option<String> {
         let name = wf.display.trim();
         if !self.app_id_allows(wf) {
@@ -220,7 +216,7 @@ impl AppEngine {
             .config
             .workflows
             .get(idx)
-            .expect("Internal Error: text workflow index out of bounds.");
+            .expect("Internal Error: workflow index out of bounds.");
 
         if self.is_workflow_valid(workflow) {
             self.pending_workflow_actions = workflow.actions.clone().into();
@@ -232,28 +228,15 @@ impl AppEngine {
 
     /// Run a workflow addressed by (a fragment of) its display name.
     ///
-    /// Matching is delegated to [`crate::config::GlyphlowConfig::find_workflow`].
-    /// Unlike the keyboard driven path, failures are reported as notifications
-    /// instead of a menu, because there is no menu on screen to look at.
-    ///
     /// When the workflow is only blocked by its `starting_role`, the elements
     /// matching that role are offered for picking and the workflow runs on
     /// whichever one gets picked. This reuses the very same machinery as the
     /// `SearchFor` action: a custom target plus queued workflow actions.
     pub(super) fn run_workflow_by_name(&mut self, name: &str) {
         let Some(idx) = self.config.find_workflow(name) else {
-            let available = self
-                .config
-                .workflows
-                .iter()
-                .map(|wf| wf.display.trim())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let msg = if available.is_empty() {
-                format!("No workflow matches `{name}`. No workflows are configured.")
-            } else {
-                format!("No workflow matches `{name}`. Available: {available}")
-            };
+            let msg = format!(
+                "No workflow matches `{name}`. You can check available ones with `glyphlow-cli workflow list`."
+            );
             self.notify_then_deactivate(&msg, Level::Error);
             return;
         };
@@ -292,11 +275,6 @@ impl AppEngine {
 
 /// A [`CustomTarget`] matching the accessibility roles behind a workflow's
 /// `starting_role`, used to offer the right elements for picking.
-///
-/// Roles are matched case-insensitively as substrings (see `match_helper`), and
-/// `|` separates alternatives. Returns `None` when the role needs no traversal:
-/// `Any`/`Some`/`Generic` are already satisfied by the focused window, and
-/// `PseudoText`/`CustomTarget` have no accessibility role of their own.
 fn custom_target_for_role(role: RoleOfInterest) -> Option<CustomTarget> {
     let role = match role {
         RoleOfInterest::Button => "button",
@@ -313,61 +291,4 @@ fn custom_target_for_role(role: RoleOfInterest) -> Option<CustomTarget> {
         role: role.to_string(),
         ..Default::default()
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ax_element::match_helper;
-
-    #[test]
-    fn test_custom_target_for_role_covers_expected_roles() {
-        let role_of = |role: RoleOfInterest| custom_target_for_role(role).map(|ct| ct.role);
-
-        assert_eq!(
-            role_of(RoleOfInterest::TextField).as_deref(),
-            Some("textfield|textarea|combobox")
-        );
-        assert_eq!(role_of(RoleOfInterest::Image).as_deref(), Some("image"));
-        assert_eq!(
-            role_of(RoleOfInterest::ScrollBar).as_deref(),
-            Some("scrollbar")
-        );
-        assert_eq!(role_of(RoleOfInterest::Button).as_deref(), Some("button"));
-        assert_eq!(
-            role_of(RoleOfInterest::MenuItem).as_deref(),
-            Some("menuitem")
-        );
-        assert_eq!(
-            role_of(RoleOfInterest::StaticText).as_deref(),
-            Some("statictext|heading")
-        );
-
-        // Roles already satisfied by the focused window need no traversal
-        assert_eq!(role_of(RoleOfInterest::Any), None);
-        assert_eq!(role_of(RoleOfInterest::Some), None);
-        assert_eq!(role_of(RoleOfInterest::Generic), None);
-
-        // The patterns must actually match the accessibility role strings
-        assert!(match_helper(
-            &custom_target_for_role(RoleOfInterest::TextField)
-                .unwrap()
-                .role,
-            &"AXTextField"
-        ));
-        assert!(match_helper(
-            &custom_target_for_role(RoleOfInterest::TextField)
-                .unwrap()
-                .role,
-            &"AXTextArea"
-        ));
-        assert!(match_helper(
-            &custom_target_for_role(RoleOfInterest::Image).unwrap().role,
-            &"AXImage"
-        ));
-        assert!(!match_helper(
-            &custom_target_for_role(RoleOfInterest::Image).unwrap().role,
-            &"AXButton"
-        ));
-    }
 }

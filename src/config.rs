@@ -874,10 +874,6 @@ impl GlyphlowConfig {
         }
     }
 
-    /// Load the config without the "write a default file when it is missing"
-    /// side effect of [`Self::load_config`]. For read-only callers such as the
-    /// CLI's `workflow list`, which should not create a config file just by
-    /// being run. A missing file is not an error: it yields the defaults.
     pub fn load_config_readonly(path: &PathBuf) -> Result<Self, String> {
         match fs::read_to_string(path) {
             Ok(content) => toml::from_str::<Self>(&content)
