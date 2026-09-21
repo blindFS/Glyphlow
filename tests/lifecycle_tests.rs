@@ -12,23 +12,25 @@ use std::sync::{
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+/// Five words, so the default alphabet gives every word a single-key label:
+/// `alpha` = `A`, `beta` = `B`, `gamma` = `C`, `delta` = `D`, `zeta` = `E`.
+const FIVE_WORDS: &str = "alpha beta gamma delta zeta";
+
+/// A single step the simulator thread performs.
+///
+/// The `Expect*` events poll with a timeout, so a transition that never happens
+/// fails the step instead of hanging the whole run.
 #[derive(Debug, Clone)]
 enum TestEvent {
-    // Simulates pressing a key (updates KeyState first, then calls KeyListener::key_down)
+    /// Updates `KeyState` first, then calls `KeyListener::key_down`.
     PressKey(Key),
-    // Simulates releasing a key (updates KeyState)
     ReleaseKey(Key),
-    // Directly sets the application Mode (allows isolating tests for specific modes)
     SetMode(Mode),
-    // Expects the application to transition to a specific Mode (with timeout)
     ExpectMode(Mode),
-    // Expects a specific AppSignal to be handled by the AppEngine (with timeout)
     ExpectSignal(AppSignal),
-    // Clears the recorded signals history
     ClearSignals,
-    // Sets the clipboard text
     SetClipboard(String),
-    // Sends a raw signal, the way the CLI would over its socket
+    /// Sends a raw signal, the way the CLI would over its socket.
     SendSignal(AppSignal),
 }
 
@@ -244,6 +246,105 @@ fn main() {
             cli_config,
         )
         .await;
+
+        println!("Running Scenario 12: Backspace leaves word picking for the text action menu");
+        run_test_scenario(vec![
+            TestEvent::SetClipboard(FIVE_WORDS.to_string()),
+            TestEvent::SendSignal(AppSignal::ReadClipboard),
+            TestEvent::ExpectMode(Mode::TextActionMenu),
+            TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
+            TestEvent::ExpectMode(Mode::WordPicking),
+            // Nothing typed yet, so there is nothing to pop: backspace is the
+            // "go back one level" key.
+            TestEvent::PressKey(Key::Backspace),
+            TestEvent::ReleaseKey(Key::Backspace),
+            TestEvent::ExpectMode(Mode::TextActionMenu),
+        ])
+        .await;
+
+        println!("Running Scenario 13: Backspace pops the hint key, then the search filter");
+        run_test_scenario(vec![
+            TestEvent::SetClipboard(FIVE_WORDS.to_string()),
+            TestEvent::SendSignal(AppSignal::ReadClipboard),
+            TestEvent::ExpectMode(Mode::TextActionMenu),
+            TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
+            TestEvent::ExpectMode(Mode::WordPicking),
+            // Search for "et": it matches beta and zeta, but not alpha.
+            TestEvent::PressKey(Key::Slash),
+            TestEvent::ReleaseKey(Key::Slash),
+            TestEvent::PressKey(Key::KeyE),
+            TestEvent::ReleaseKey(Key::KeyE),
+            TestEvent::PressKey(Key::KeyT),
+            TestEvent::ReleaseKey(Key::KeyT),
+            TestEvent::PressKey(Key::Enter),
+            TestEvent::ExpectMode(Mode::WordPicking),
+            // `A` is alpha's label, but the search still filters alpha out, so
+            // this key matches nothing and word picking is not left.
+            TestEvent::PressKey(Key::KeyA),
+            TestEvent::ReleaseKey(Key::KeyA),
+            TestEvent::ExpectMode(Mode::WordPicking),
+            // The first backspace pops the hint key, the second drops the search
+            // filter, so the same key now resolves to alpha.
+            TestEvent::PressKey(Key::Backspace),
+            TestEvent::ReleaseKey(Key::Backspace),
+            TestEvent::PressKey(Key::Backspace),
+            TestEvent::ReleaseKey(Key::Backspace),
+            TestEvent::PressKey(Key::KeyA),
+            TestEvent::ReleaseKey(Key::KeyA),
+            TestEvent::ExpectMode(Mode::TextActionMenu),
+        ])
+        .await;
+
+        println!("Running Scenario 14: Backspace cancels the selected side of a range");
+        run_test_scenario(vec![
+            TestEvent::SetClipboard(FIVE_WORDS.to_string()),
+            TestEvent::SendSignal(AppSignal::ReadClipboard),
+            TestEvent::ExpectMode(Mode::TextActionMenu),
+            TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
+            TestEvent::ExpectMode(Mode::WordPicking),
+            TestEvent::SendSignal(AppSignal::ToggleMultiSelection),
+            // `A` anchors the range at alpha rather than leaving word picking:
+            // the first pick of a range only marks one end.
+            TestEvent::PressKey(Key::KeyA),
+            TestEvent::ReleaseKey(Key::KeyA),
+            TestEvent::ExpectMode(Mode::WordPicking),
+            // Backspace drops that anchor ...
+            TestEvent::PressKey(Key::Backspace),
+            TestEvent::ReleaseKey(Key::Backspace),
+            // ... so `B` anchors at beta instead of completing "alpha beta".
+            TestEvent::PressKey(Key::KeyB),
+            TestEvent::ReleaseKey(Key::KeyB),
+            TestEvent::ExpectMode(Mode::WordPicking),
+            // The re-anchor is real, not a stuck state: `C` now completes the
+            // range "beta gamma" and lands on the text action menu.
+            TestEvent::PressKey(Key::KeyC),
+            TestEvent::ReleaseKey(Key::KeyC),
+            TestEvent::ExpectMode(Mode::TextActionMenu),
+        ])
+        .await;
+
+        println!("Running Scenario 15: Backspace in search pops the query, then leaves search");
+        run_test_scenario(vec![
+            TestEvent::SetClipboard(FIVE_WORDS.to_string()),
+            TestEvent::SendSignal(AppSignal::ReadClipboard),
+            TestEvent::ExpectMode(Mode::TextActionMenu),
+            TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
+            TestEvent::ExpectMode(Mode::WordPicking),
+            TestEvent::PressKey(Key::Slash),
+            TestEvent::ReleaseKey(Key::Slash),
+            TestEvent::ExpectMode(Mode::Searching(FilterMode::WordPicking)),
+            TestEvent::PressKey(Key::KeyE),
+            TestEvent::ReleaseKey(Key::KeyE),
+            // One backspace only shortens the query, it does not leave search.
+            TestEvent::PressKey(Key::Backspace),
+            TestEvent::ReleaseKey(Key::Backspace),
+            TestEvent::ExpectMode(Mode::Searching(FilterMode::WordPicking)),
+            // With the query empty, backspace falls back to word picking.
+            TestEvent::PressKey(Key::Backspace),
+            TestEvent::ReleaseKey(Key::Backspace),
+            TestEvent::ExpectMode(Mode::WordPicking),
+        ])
+        .await;
     });
 
     println!("All lifecycle integration tests passed!");
@@ -288,21 +389,17 @@ async fn run_test_scenario_with_config(events: Vec<TestEvent>, config: GlyphlowC
         let wait_timeout = Duration::from_millis(1500);
 
         for (idx, event) in events.into_iter().enumerate() {
-            println!("[Sim] Executing event {}: {:?}", idx + 1, event);
+            let step = idx + 1;
             match event {
                 TestEvent::PressKey(key) => {
                     sim_key_state.lock().unwrap().key_down(&key);
-                    let swallowed =
-                        key_listener.key_down(key, &sim_state, &mut sim_key_state.lock().unwrap());
-                    println!("[Sim] Key {:?} pressed, swallowed = {}", key, swallowed);
+                    key_listener.key_down(key, &sim_state, &mut sim_key_state.lock().unwrap());
                 }
                 TestEvent::ReleaseKey(key) => {
                     sim_key_state.lock().unwrap().key_up(&key);
-                    println!("[Sim] Key {:?} released", key);
                 }
                 TestEvent::SetMode(mode) => {
-                    *sim_state.lock().unwrap() = mode.clone();
-                    println!("[Sim] Mode forced to {:?}", mode);
+                    *sim_state.lock().unwrap() = mode;
                 }
                 TestEvent::ExpectMode(expected_mode) => {
                     let start = std::time::Instant::now();
@@ -313,10 +410,8 @@ async fn run_test_scenario_with_config(events: Vec<TestEvent>, config: GlyphlowC
                     }
                     assert_eq!(
                         current_mode, expected_mode,
-                        "Assertion failed: expected mode {:?}, but got {:?}",
-                        expected_mode, current_mode
+                        "step {step}: expected mode {expected_mode:?}, but got {current_mode:?}"
                     );
-                    println!("[Sim] Confirmed mode matches {:?}", expected_mode);
                 }
                 TestEvent::ExpectSignal(expected_signal) => {
                     let start = std::time::Instant::now();
@@ -334,22 +429,18 @@ async fn run_test_scenario_with_config(events: Vec<TestEvent>, config: GlyphlowC
                     }
                     assert!(
                         found,
-                        "Assertion failed: expected signal {:?} was not processed. Processed signals: {:?}",
-                        expected_signal,
+                        "step {step}: expected signal {expected_signal:?} was not processed. \
+                         Processed signals: {:?}",
                         *sim_processed_signals.lock().unwrap()
                     );
-                    println!("[Sim] Confirmed signal {:?} was processed", expected_signal);
                 }
                 TestEvent::ClearSignals => {
                     sim_processed_signals.lock().unwrap().clear();
-                    println!("[Sim] Cleared processed signals history");
                 }
                 TestEvent::SetClipboard(text) => {
                     text_to_clipboard(&text);
-                    println!("[Sim] Clipboard set to {:?}", text);
                 }
                 TestEvent::SendSignal(signal) => {
-                    println!("[Sim] Sending signal {:?}", signal);
                     sim_tx
                         .blocking_send(signal)
                         .expect("Failed to send signal to the engine");
@@ -371,7 +462,6 @@ async fn run_test_scenario_with_config(events: Vec<TestEvent>, config: GlyphlowC
         }
 
         if let Ok(signal) = rx.try_recv() {
-            println!("[Main] Processing signal: {:?}", signal);
             processed_signals.lock().unwrap().push(signal.clone());
             app_engine.handle_signal(signal).await;
         }

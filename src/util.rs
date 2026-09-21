@@ -318,127 +318,96 @@ pub fn format_fixed_width(input: &str, fixed_length: usize) -> Cow<'_, str> {
 #[cfg(test)]
 mod frame_tests {
     use super::*;
+    use rstest::rstest;
     use std::cmp::Ordering;
 
-    #[test]
-    fn test_frame_ordering_vertical_priority() {
-        // Higher y (bottom_right.y) should be "Greater" regardless of x
-        let frame_top = Frame::new(0.0, 0.0, 10.0, 50.0);
-        let frame_bottom = Frame::new(100.0, 0.0, 110.0, 20.0);
-
-        assert_eq!(frame_top.cmp(&frame_bottom), Ordering::Greater);
-        assert_eq!(frame_bottom.cmp(&frame_top), Ordering::Less);
-    }
-
-    #[test]
-    fn test_frame_ordering_horizontal_within_threshold() {
-        // These frames have similar y-coordinates (difference < MIN_HEIGHT_THRESHOLD)
-        // So they should be sorted by x (top_left.x)
-        let frame_left = Frame::new(10.0, 0.0, 20.0, 15.0);
-        let frame_right = Frame::new(50.0, 0.0, 60.0, 16.0);
-
-        assert_eq!(frame_left.cmp(&frame_right), Ordering::Less);
-        assert_eq!(frame_right.cmp(&frame_left), Ordering::Greater);
-    }
-
-    #[test]
-    fn test_intersect_success() {
-        let f1 = Frame::new(0.0, 0.0, 10.0, 10.0);
-        let f2 = Frame::new(5.0, 5.0, 15.0, 15.0);
-
-        let intersection = f1.intersect(&f2).expect("Should intersect");
-
-        assert_eq!(intersection.top_left.x, 5.0);
-        assert_eq!(intersection.top_left.y, 5.0);
-        assert_eq!(intersection.bottom_right.x, 10.0);
-        assert_eq!(intersection.bottom_right.y, 10.0);
-    }
-
-    #[test]
-    fn test_intersect_none() {
-        let f1 = Frame::new(0.0, 0.0, 5.0, 5.0);
-        let f2 = Frame::new(10.0, 10.0, 15.0, 15.0);
-
-        assert!(f1.intersect(&f2).is_none());
-    }
-
-    #[test]
-    fn test_intersect_edge_touching() {
-        // Rectangles touching at the exact edge should return None
-        // because of the strict '<' check in your implementation
-        let f1 = Frame::new(0.0, 0.0, 10.0, 10.0);
-        let f2 = Frame::new(10.0, 0.0, 20.0, 10.0);
-
-        assert!(
-            f1.intersect(&f2).is_some(),
-            "Touching edges should intersect"
+    /// `Ord` compares `bottom_right.y` first and only falls back to
+    /// `top_left.x`, so vertical position always wins. `MIN_HEIGHT_THRESHOLD`
+    /// plays no part in ordering — it is only used when guessing font height.
+    #[rstest]
+    #[case::vertical_priority(
+        Frame::new(0.0, 0.0, 10.0, 50.0),
+        Frame::new(100.0, 0.0, 110.0, 20.0),
+        Ordering::Greater
+    )]
+    #[case::same_y_falls_back_to_x(
+        Frame::new(10.0, 0.0, 20.0, 15.0),
+        Frame::new(50.0, 0.0, 60.0, 15.0),
+        Ordering::Less
+    )]
+    #[case::differing_y_ignores_x(
+        Frame::new(10.0, 0.0, 20.0, 15.0),
+        Frame::new(50.0, 0.0, 60.0, 16.0),
+        Ordering::Less
+    )]
+    fn ordering_is_y_then_x(#[case] a: Frame, #[case] b: Frame, #[case] expected: Ordering) {
+        assert_eq!(a.cmp(&b), expected);
+        assert_eq!(
+            b.cmp(&a),
+            expected.reverse(),
+            "ordering must be antisymmetric"
         );
     }
 
-    #[test]
-    fn test_intersect_fully_contained() {
-        let big = Frame::new(0.0, 0.0, 100.0, 100.0);
-        let small = Frame::new(20.0, 20.0, 50.0, 50.0);
-
-        // Small inside big should return small
-        let result = big.intersect(&small).expect("Should intersect");
-        assert_eq!(result, small);
-
-        // Commutative check: big inside small (mathematically)
-        let result_rev = small.intersect(&big).expect("Should intersect");
-        assert_eq!(result_rev, small);
-    }
-
-    #[test]
-    fn test_intersect_partial_overlap_strip() {
-        // Overlap only on X axis, but spans entire Y height
-        let f1 = Frame::new(0.0, 0.0, 20.0, 100.0);
-        let f2 = Frame::new(10.0, 0.0, 30.0, 100.0);
-
-        let result = f1.intersect(&f2).expect("Should intersect");
-        assert_eq!(result, Frame::new(10.0, 0.0, 20.0, 100.0));
-    }
-
-    #[test]
-    fn test_intersect_single_axis_overlap_only() {
-        // X-axis overlaps, but Y-axis does not
-        let f1 = Frame::new(0.0, 0.0, 50.0, 10.0);
-        let f2 = Frame::new(10.0, 20.0, 40.0, 30.0);
-
-        assert!(
-            f1.intersect(&f2).is_none(),
-            "Should not intersect if Y is separated"
-        );
-    }
-
-    #[test]
-    fn test_intersect_identical_frames() {
-        let f1 = Frame::new(10.0, 10.0, 20.0, 20.0);
-        let f2 = Frame::new(10.0, 10.0, 20.0, 20.0);
-
-        let result = f1.intersect(&f2).expect("Should intersect");
-        assert_eq!(result, f1);
-    }
-
-    #[test]
-    fn test_intersect_negative_coordinates() {
-        let f1 = Frame::new(-50.0, -50.0, -10.0, -10.0);
-        let f2 = Frame::new(-20.0, -20.0, 10.0, 10.0);
-
-        let result = f1.intersect(&f2).expect("Should intersect");
-        assert_eq!(result, Frame::new(-20.0, -20.0, -10.0, -10.0));
-    }
-
-    #[test]
-    fn test_intersect_zero_size_overlap() {
-        // One frame is a "point" or "line" (width or height is 0)
-        // Given your `if inter_x1 < inter_x2` logic, this should return None
-        let f1 = Frame::new(0.0, 0.0, 10.0, 10.0);
-        let f2 = Frame::new(5.0, 0.0, 5.0, 10.0); // Zero width
-
-        assert!(
-            f1.intersect(&f2).is_some(),
-            "Zero-width overlap should be Some"
+    /// The bounds check is inclusive (`<=`), so frames that merely touch —
+    /// sharing an edge, or even a single corner — still count as intersecting.
+    /// The result is a possibly zero-width or zero-height frame.
+    #[rstest]
+    #[case::partial_overlap(
+        Frame::new(0.0, 0.0, 10.0, 10.0),
+        Frame::new(5.0, 5.0, 15.0, 15.0),
+        Some(Frame::new(5.0, 5.0, 10.0, 10.0))
+    )]
+    #[case::disjoint_on_both_axes(
+        Frame::new(0.0, 0.0, 5.0, 5.0),
+        Frame::new(10.0, 10.0, 15.0, 15.0),
+        None
+    )]
+    #[case::x_overlaps_but_y_is_separated(
+        Frame::new(0.0, 0.0, 50.0, 10.0),
+        Frame::new(10.0, 20.0, 40.0, 30.0),
+        None
+    )]
+    #[case::sharing_a_vertical_edge(
+        Frame::new(0.0, 0.0, 10.0, 10.0),
+        Frame::new(10.0, 0.0, 20.0, 10.0),
+        Some(Frame::new(10.0, 0.0, 10.0, 10.0))
+    )]
+    #[case::zero_width_frame_inside(
+        Frame::new(0.0, 0.0, 10.0, 10.0),
+        Frame::new(5.0, 0.0, 5.0, 10.0),
+        Some(Frame::new(5.0, 0.0, 5.0, 10.0))
+    )]
+    #[case::fully_contained(
+        Frame::new(0.0, 0.0, 100.0, 100.0),
+        Frame::new(20.0, 20.0, 50.0, 50.0),
+        Some(Frame::new(20.0, 20.0, 50.0, 50.0))
+    )]
+    #[case::identical(
+        Frame::new(10.0, 10.0, 20.0, 20.0),
+        Frame::new(10.0, 10.0, 20.0, 20.0),
+        Some(Frame::new(10.0, 10.0, 20.0, 20.0))
+    )]
+    #[case::overlapping_strip(
+        Frame::new(0.0, 0.0, 20.0, 100.0),
+        Frame::new(10.0, 0.0, 30.0, 100.0),
+        Some(Frame::new(10.0, 0.0, 20.0, 100.0))
+    )]
+    #[case::negative_coordinates(
+        Frame::new(-50.0, -50.0, -10.0, -10.0),
+        Frame::new(-20.0, -20.0, 10.0, 10.0),
+        Some(Frame::new(-20.0, -20.0, -10.0, -10.0))
+    )]
+    fn intersect_is_inclusive_and_commutative(
+        #[case] a: Frame,
+        #[case] b: Frame,
+        #[case] expected: Option<Frame>,
+    ) {
+        assert_eq!(a.intersect(&b), expected);
+        assert_eq!(
+            b.intersect(&a),
+            expected,
+            "intersection must be commutative"
         );
     }
 
@@ -457,45 +426,59 @@ mod frame_tests {
         assert_eq!(frames[2].top_left.x, 100.0);
     }
 
+    /// Regression test: an earlier comparison was not a total order, so
+    /// `sort` could panic with "user-provided comparison function does not
+    /// correctly implement a total order". These three frames are the
+    /// counter-example that used to trigger it.
     #[test]
-    fn test_frame_ordering_horizontal_same_y() {
-        // frames with identical y-coordinates should be sorted by x (top_left.x)
-        let frame_left = Frame::new(10.0, 0.0, 20.0, 15.0);
-        let frame_right = Frame::new(50.0, 0.0, 60.0, 15.0);
+    fn test_total_order_is_consistent_for_sorting() {
+        let a = Frame::new(10.0, 80.0, 20.0, 100.0);
+        let b = Frame::new(0.0, 100.0, 10.0, 105.0);
+        let c = Frame::new(0.0, 90.0, 10.0, 110.0);
 
-        assert_eq!(frame_left.cmp(&frame_right), Ordering::Less);
-        assert_eq!(frame_right.cmp(&frame_left), Ordering::Greater);
-    }
-
-    #[test]
-    fn test_total_order_violation_repro() {
-        // A: y=100, h=20, x=10
-        // B: y=105, h=5,  x=0
-        // C: y=110, h=20, x=0
-        let a = Frame {
-            top_left: CGPoint { x: 10.0, y: 80.0 },
-            bottom_right: CGPoint { x: 20.0, y: 100.0 },
-        };
-        let b = Frame {
-            top_left: CGPoint { x: 0.0, y: 100.0 },
-            bottom_right: CGPoint { x: 10.0, y: 105.0 },
-        };
-        let c = Frame {
-            top_left: CGPoint { x: 0.0, y: 90.0 },
-            bottom_right: CGPoint { x: 10.0, y: 110.0 },
-        };
-
-        // Strict order should be consistent: a < b < c
+        // Transitivity: a < b and b < c must imply a < c.
         assert_eq!(a.cmp(&b), Ordering::Less);
         assert_eq!(b.cmp(&c), Ordering::Less);
         assert_eq!(a.cmp(&c), Ordering::Less);
 
         let mut frames = [a, b, c];
-        // This should no longer panic as it's a proper total order
         frames.sort();
-        assert_eq!(frames[0], a);
-        assert_eq!(frames[1], b);
-        assert_eq!(frames[2], c);
+        assert_eq!(frames, [a, b, c]);
+    }
+
+    /// `contains` is inclusive on all four edges, matching `intersect`. The
+    /// element explorer's early-stop relies on this: a parent whose frame only
+    /// *touches* the child's still counts as containing it.
+    #[rstest]
+    #[case::strictly_inside(true, Frame::new(10.0, 10.0, 20.0, 20.0))]
+    #[case::identical(true, Frame::new(0.0, 0.0, 100.0, 100.0))]
+    #[case::touching_the_right_edge(true, Frame::new(50.0, 0.0, 100.0, 100.0))]
+    #[case::touching_the_bottom_edge(true, Frame::new(0.0, 50.0, 100.0, 100.0))]
+    #[case::one_pixel_past_the_right_edge(false, Frame::new(50.0, 0.0, 100.1, 100.0))]
+    #[case::one_pixel_past_the_left_edge(false, Frame::new(-0.1, 0.0, 50.0, 100.0))]
+    fn containment_is_inclusive_on_every_edge(#[case] expected: bool, #[case] inner: Frame) {
+        let outer = Frame::new(0.0, 0.0, 100.0, 100.0);
+        assert_eq!(outer.contains(&inner), expected);
+    }
+
+    /// The overlay frame is the union of every screen, and it is the coordinate
+    /// space every hint box, ripple and cursor trail is drawn in — so a wrong
+    /// union misplaces all of them.
+    #[rstest]
+    #[case::single_screen(
+        vec![Frame::new(0.0, 0.0, 1920.0, 1080.0)],
+        Frame::new(0.0, 0.0, 1920.0, 1080.0)
+    )]
+    #[case::screens_side_by_side(
+        vec![Frame::new(0.0, 0.0, 1920.0, 1080.0), Frame::new(1920.0, 0.0, 3840.0, 1080.0)],
+        Frame::new(0.0, 0.0, 3840.0, 1080.0)
+    )]
+    #[case::screen_to_the_left(
+        vec![Frame::new(-1920.0, 0.0, 0.0, 1080.0), Frame::new(0.0, 0.0, 1920.0, 1080.0)],
+        Frame::new(-1920.0, 0.0, 1920.0, 1080.0)
+    )]
+    fn unions_every_screen_into_one_overlay(#[case] screens: Vec<Frame>, #[case] expected: Frame) {
+        assert_eq!(Frame::union_of_frames(&screens), expected);
     }
 }
 
@@ -665,72 +648,122 @@ mod select_range_tests {
 #[cfg(test)]
 mod format_str_tests {
     use super::format_fixed_width;
+    use rstest::rstest;
 
-    #[test]
-    fn test_empty_and_zero_edges() {
-        // Empty input should always result in an empty string
-        assert_eq!(format_fixed_width("", 5).to_string(), "");
-        assert_eq!(format_fixed_width("", 0).to_string(), "");
+    /// `format_fixed_width` truncates from the *left*, replacing the dropped
+    /// prefix with a single `.`, and it budgets in display columns rather than
+    /// bytes — which is what the CJK and emoji cases pin down.
+    #[rstest]
+    #[case::empty_input("", 5, "")]
+    #[case::empty_input_zero_width("", 0, "")]
+    // A zero budget drops everything, even for non-empty input.
+    #[case::zero_width_drops_everything("hello", 0, "")]
+    #[case::exact_fit("hello", 5, "hello")]
+    #[case::shorter_than_budget("abc", 5, "abc")]
+    // Budget 3 leaves 2 columns for the suffix.
+    #[case::ascii_truncated("hello", 3, ".lo")]
+    // Budget 1 leaves no room for the suffix, so only the dot survives.
+    #[case::budget_of_one("hello", 1, ".")]
+    // "こんにちは" is 10 columns wide but 15 bytes.
+    #[case::cjk_exact_fit("こんにちは", 10, "こんにちは")]
+    #[case::cjk_truncated("こんにちは", 5, ".ちは")]
+    // One column of slack, but the next character is 2 wide and cannot fit.
+    #[case::cjk_slack_is_not_filled("こんにちは", 6, ".ちは")]
+    // "🦀" is 2 columns wide, so three of them fill a budget of 6.
+    #[case::emoji_exact_fit("🦀🦀🦀", 6, "🦀🦀🦀")]
+    #[case::emoji_truncated("🦀🦀🦀", 5, ".🦀🦀")]
+    #[case::mixed_width_keeps_only_the_emoji("Rust🦀", 3, ".🦀")]
+    #[case::mixed_width_keeps_ascii_and_emoji("Rust🦀", 5, ".st🦀")]
+    // A combining accent is zero-width, so it rides along with the dot.
+    #[case::combining_diacritic_stays_attached("xyz\u{301}", 1, ".\u{301}")]
+    fn truncates_to_a_fixed_display_width(
+        #[case] input: &str,
+        #[case] width: usize,
+        #[case] expected: &str,
+    ) {
+        assert_eq!(format_fixed_width(input, width), expected);
+    }
+}
 
-        // Fixed length of 0 on non-empty input should return an empty string
-        assert_eq!(format_fixed_width("hello", 0).to_string(), "");
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+    use rstest::rstest;
+
+    /// The query is a "contains" pattern, but `󱁐` — the in-band stand-in the key
+    /// listener substitutes for a real space — means "anything in between".
+    /// Without it a two-word query would be impossible to express, because the
+    /// space key is never delivered as part of a query.
+    #[rstest]
+    #[case::plain_substring("alpha", "alpha beta", true)]
+    #[case::substring_anywhere("pha", "alpha beta", true)]
+    #[case::absent("omega", "alpha beta", false)]
+    #[case::words_in_order("alpha󱁐beta", "alpha beta", true)]
+    #[case::words_with_a_gap("alpha󱁐beta", "alpha and beta", true)]
+    #[case::words_out_of_order("beta󱁐alpha", "alpha beta", false)]
+    fn matches_a_substring_with_in_band_word_separators(
+        #[case] query: &str,
+        #[case] haystack: &str,
+        #[case] expected: bool,
+    ) {
+        let re = search_regex(query).expect("a non-empty query always compiles");
+        assert_eq!(re.is_match(haystack), expected, "query {query:?}");
     }
 
+    /// An empty query means "no filter", which callers detect as `None` — not as
+    /// a pattern that matches nothing.
     #[test]
-    fn test_ascii_no_truncation() {
-        assert_eq!(format_fixed_width("hello", 5).to_string(), "hello");
-        assert_eq!(format_fixed_width("abc", 5).to_string(), "abc");
+    fn an_empty_query_is_no_filter() {
+        assert!(search_regex("").is_none());
     }
 
-    #[test]
-    fn test_ascii_truncation() {
-        // Budget = 3. Suffix width = 3 - 1 = 2 ("lo")
-        assert_eq!(format_fixed_width("hello", 3).to_string(), ".lo");
-
-        // Budget = 1. Suffix width = 1 - 1 = 0 ("")
-        assert_eq!(format_fixed_width("hello", 1).to_string(), ".");
+    /// Stray separators collapse, so a query cannot be broken by an accidental
+    /// space at either end or by two in a row.
+    #[rstest]
+    #[case::leading("󱁐alpha", "alpha")]
+    #[case::trailing("alpha󱁐", "alpha")]
+    #[case::repeated("alpha󱁐󱁐󱁐beta", "alpha󱁐beta")]
+    fn stray_separators_collapse(#[case] query: &str, #[case] equivalent: &str) {
+        assert_eq!(
+            search_regex(query).unwrap().as_str(),
+            search_regex(equivalent).unwrap().as_str(),
+            "{query:?} must behave exactly like {equivalent:?}"
+        );
     }
 
+    /// A query made of separators alone collapses to the empty pattern, which
+    /// matches everything. That is the same *effect* as an empty query, but
+    /// reached by a different route: `None` versus a pattern that matches
+    /// anything. Both are "no filter" to the callers, which test with
+    /// `is_none_or`.
     #[test]
-    fn test_cjk_characters() {
-        // "こんにちは" (Konnichiwa) has a total visual width of 10
-        let input = "こんにちは";
+    fn a_query_of_separators_alone_matches_everything() {
+        let re = search_regex("󱁐").expect("a non-empty query still yields a pattern");
 
-        assert_eq!(format_fixed_width(input, 10).to_string(), "こんにちは");
-
-        // Exact fit truncation: Dot (1) + "に" (2) + "は" (2) = 5
-        assert_eq!(format_fixed_width(input, 5).to_string(), ".ちは");
-
-        // Truncation with 1 unit of slack space (next character doesn't fit)
-        assert_eq!(format_fixed_width(input, 6).to_string(), ".ちは");
+        assert!(re.is_match(""));
+        assert!(re.is_match("anything at all"));
     }
 
-    #[test]
-    fn test_emojis() {
-        // "🦀" has a visual width of 2. "🦀🦀🦀" total width = 6.
-        let input = "🦀🦀🦀";
-
-        assert_eq!(format_fixed_width(input, 6).to_string(), "🦀🦀🦀");
-
-        // Truncation: Dot (1) + "🦀" (2) + "🦀" (2) = 5
-        assert_eq!(format_fixed_width(input, 5).to_string(), ".🦀🦀");
+    /// The user types into a live search box, so an uncompilable pattern is one
+    /// keystroke away. It must degrade to "no filter" — filtering everything out
+    /// would look like the app had lost its content.
+    #[rstest]
+    #[case::unclosed_group("(")]
+    #[case::unclosed_class("[")]
+    fn a_malformed_query_degrades_to_no_filter(#[case] query: &str) {
+        assert!(
+            search_regex(query).is_none(),
+            "{query:?} cannot be compiled, so it must not filter anything out"
+        );
     }
 
-    #[test]
-    fn test_mixed_width_strings() {
-        // "Rust🦀" -> "Rust" (4) + "🦀" (2) = Total width 6
-        let input = "Rust🦀";
-
-        assert_eq!(format_fixed_width(input, 3).to_string(), ".🦀");
-        assert_eq!(format_fixed_width(input, 5).to_string(), ".st🦀");
-    }
-
-    #[test]
-    fn test_combining_diacritic_quirk() {
-        // "xyz" + combining acute accent (\u{301})
-        let input = "xyz\u{301}";
-
-        // Accent detaches and glues itself to the ellipsis dot
-        assert_eq!(format_fixed_width(input, 1).to_string(), ".\u{301}");
+    /// Search targets and word-picker words are compared case- and
+    /// accent-insensitively, so this folding happens once, up front.
+    #[rstest]
+    #[case::uppercase("ALPHA", "alpha")]
+    #[case::accented("CAFÉ", "cafe")]
+    #[case::sharp_s("Straße", "strasse")]
+    fn lower_ascii_folds_case_and_accents(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(lower_ascii(input), expected);
     }
 }

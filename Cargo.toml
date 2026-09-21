@@ -43,6 +43,7 @@ tabled = { version = "0.22.0", default-features = false, features = ["ansi", "de
 
 [dev-dependencies]
 ansi-str = "0.9.0"
+rstest = "0.27"
 
 [[test]]
 name = "lifecycle_tests"

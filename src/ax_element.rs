@@ -1217,6 +1217,7 @@ pub fn traverse(
 mod tests {
     use super::*;
     use crate::config::CustomTarget;
+    use rstest::rstest;
 
     /// Build a minimal `CustomTarget` with only the `role` field set.
     fn ct_role(role: &str) -> CustomTarget {
@@ -1226,23 +1227,35 @@ mod tests {
         }
     }
 
-    #[test]
-    fn match_helper_test() {
-        assert!(match_helper("Button", &"button"));
-        assert!(match_helper("BUTTON", &"AXButton"));
-        assert!(match_helper("button", &"AXBUTTON"));
-        assert!(match_helper("menu", &"AXMenuItem"));
-        // An empty string is always contained in any string (including itself).
-        assert!(match_helper("", &"anything"));
-        assert!(match_helper("", &""));
-        assert!(!match_helper("image", &"AXButton"));
+    /// Build a `CustomTarget` constrained to an exact element size.
+    fn ct_size(role: &str, width: f64, height: f64) -> CustomTarget {
+        CustomTarget {
+            role: role.into(),
+            size: Some((width, height)),
+            ..Default::default()
+        }
     }
 
-    #[test]
-    fn match_helper_pipe() {
-        assert!(match_helper("button|textfield", &"AXButton"));
-        assert!(match_helper("button|textfield", &"AXTextField"));
-        assert!(match_helper("button | textfield", &"AXTextField"));
+    /// `match_helper` is a case-insensitive substring test, with `|` separating
+    /// alternatives. An empty pattern is contained in everything, itself
+    /// included.
+    #[rstest]
+    #[case::exact_lowercase("Button", "button", true)]
+    #[case::pattern_lowercase("BUTTON", "AXButton", true)]
+    #[case::both_uppercase("button", "AXBUTTON", true)]
+    #[case::substring("menu", "AXMenuItem", true)]
+    #[case::empty_pattern_matches_anything("", "anything", true)]
+    #[case::empty_pattern_matches_empty("", "", true)]
+    #[case::mismatch("image", "AXButton", false)]
+    #[case::pipe_first_alternative("button|textfield", "AXButton", true)]
+    #[case::pipe_second_alternative("button|textfield", "AXTextField", true)]
+    #[case::pipe_tolerates_spaces("button | textfield", "AXTextField", true)]
+    fn match_helper_is_case_insensitive_substring_with_pipe_alternatives(
+        #[case] pattern: &str,
+        #[case] value: &str,
+        #[case] expected: bool,
+    ) {
+        assert_eq!(match_helper(pattern, &value), expected);
     }
 
     #[test]
@@ -1300,8 +1313,10 @@ mod tests {
         );
     }
 
+    /// `action` names an accessibility action to perform, not a pattern, so a
+    /// `|` in it must survive verbatim instead of being read as alternatives.
     #[test]
-    fn compiled_target_new_action_field_propagated() {
+    fn action_is_kept_verbatim_and_not_split_on_pipe() {
         let ct = CustomTarget {
             role: "MenuItem".into(),
             action: Some("press | highlight".into()),
@@ -1320,80 +1335,193 @@ mod tests {
         }
     }
 
-    #[test]
-    fn basic_match_role_exact() {
-        let elem = make_basic("AXButton", None);
-        let target = CompiledTarget::new(&ct_role("AXButton")).unwrap();
-        assert!(elem.match_custom_target(&target));
+    /// A target matches only when *every* field it constrains matches. Fields
+    /// left unset are ignored, and an element with no frame can never satisfy a
+    /// size constraint.
+    #[rstest]
+    #[case::role_exact("AXButton", None, ct_role("AXButton"), true)]
+    #[case::role_substring_is_case_insensitive("AXButton", None, ct_role("button"), true)]
+    #[case::role_pipe_is_or("AXMenuItem", None, ct_role("button|menuitem"), true)]
+    #[case::role_mismatch("AXImage", None, ct_role("button"), false)]
+    #[case::size_matches(
+        "AXButton",
+        Some((0.0, 0.0, 100.0, 50.0)),
+        ct_size("AXButton", 100.0, 50.0),
+        true
+    )]
+    #[case::size_mismatch(
+        "AXButton",
+        Some((0.0, 0.0, 200.0, 80.0)),
+        ct_size("AXButton", 100.0, 50.0),
+        false
+    )]
+    #[case::size_required_but_element_has_no_frame(
+        "AXButton",
+        None,
+        ct_size("AXButton", 100.0, 50.0),
+        false
+    )]
+    fn basic_attributes_match_only_when_every_constraint_holds(
+        #[case] role: &str,
+        #[case] frame: Option<(f64, f64, f64, f64)>,
+        #[case] target: CustomTarget,
+        #[case] expected: bool,
+    ) {
+        let elem = make_basic(
+            role,
+            frame.map(|(x1, y1, x2, y2)| Frame::new(x1, y1, x2, y2)),
+        );
+        let target = CompiledTarget::new(&target).expect("test targets must compile");
+
+        assert_eq!(elem.match_custom_target(&target), expected);
     }
 
-    #[test]
-    fn basic_match_role_substring() {
-        // "button" is a substring of "AXButton" (case-insensitive).
-        let elem = make_basic("AXButton", None);
-        let target = CompiledTarget::new(&ct_role("button")).unwrap();
-        assert!(elem.match_custom_target(&target));
+    /// The AX role string is all the accessibility tree gives us to decide what
+    /// an element *is*, and everything downstream keys off the result: which
+    /// hint box is drawn, which menu opens, and whether a workflow applies. An
+    /// unrecognised role must fall back to `Generic` rather than to something
+    /// more specific, or we would claim a button is a text field.
+    #[rstest]
+    #[case::image(kAXImageRole, RoleOfInterest::Image)]
+    #[case::text_field(kAXTextFieldRole, RoleOfInterest::TextField)]
+    #[case::text_area(kAXTextAreaRole, RoleOfInterest::TextField)]
+    #[case::combo_box(kAXComboBoxRole, RoleOfInterest::TextField)]
+    #[case::menu_item(kAXMenuItemRole, RoleOfInterest::MenuItem)]
+    #[case::pop_up_button(kAXPopUpButtonRole, RoleOfInterest::Button)]
+    #[case::button(kAXButtonRole, RoleOfInterest::Button)]
+    #[case::check_box(kAXCheckBoxRole, RoleOfInterest::CheckBox)]
+    #[case::static_text(kAXStaticTextRole, RoleOfInterest::StaticText)]
+    #[case::scroll_bar(kAXScrollBarRole, RoleOfInterest::ScrollBar)]
+    // These two have no `kAX*` constant: AppKit reports them by literal.
+    #[case::radio_button("AXRadioButton", RoleOfInterest::Button)]
+    #[case::heading("AXHeading", RoleOfInterest::StaticText)]
+    // Roles we deliberately do not treat as anything special.
+    #[case::group(kAXGroupRole, RoleOfInterest::Generic)]
+    #[case::row(kAXRowRole, RoleOfInterest::Generic)]
+    #[case::unknown_role("AXSomethingNew", RoleOfInterest::Generic)]
+    #[case::empty_role("", RoleOfInterest::Generic)]
+    fn maps_an_accessibility_role_to_our_own(
+        #[case] ax_role: &str,
+        #[case] expected: RoleOfInterest,
+    ) {
+        assert_eq!(role_to_interest(ax_role), expected);
     }
 
-    #[test]
-    fn basic_match_role_pipe_or() {
-        let elem = make_basic("AXMenuItem", None);
-        let target = CompiledTarget::new(&ct_role("button|menuitem")).unwrap();
-        assert!(elem.match_custom_target(&target));
+    /// Three text runs on one line, 45px apart — the shape a sentence's hint
+    /// boxes produce. Pseudo elements are enough here because `select_range`
+    /// only reads the context, the frame and the role.
+    fn cache_of(words: &[&str]) -> ElementCache {
+        let mut cache = ElementCache::default();
+        for (i, word) in words.iter().enumerate() {
+            let x = i as f64 * 45.0;
+            cache.cache.push(ElementOfInterest::pseudo(
+                Some((*word).into()),
+                Frame::new(x, 0.0, x + 40.0, 10.0),
+            ));
+        }
+        cache
     }
 
+    /// `select_range` turns the two picked hints into the text that gets copied.
+    /// Without a role reference every element between the two ends is fair game.
     #[test]
-    fn basic_match_role_mismatch() {
-        let elem = make_basic("AXImage", None);
-        let target = CompiledTarget::new(&ct_role("button")).unwrap();
-        assert!(!elem.match_custom_target(&target));
+    fn a_range_without_a_role_reference_spans_every_element() {
+        let cache = cache_of(&["alpha ", "beta ", "gamma"]);
+
+        let (text, frame) = cache.select_range(0, 2, None).expect("range is selectable");
+
+        assert_eq!(text, "alpha beta gamma");
+        assert_eq!(frame, Frame::new(0.0, 0.0, 130.0, 10.0));
     }
 
+    /// A role reference restricts the range to elements of that role. When
+    /// nothing in between matches, the range is refused outright instead of
+    /// falling back to "ignore the filter" — otherwise a multi-selection across
+    /// two text fields would silently swallow the button sitting between them.
     #[test]
-    fn basic_match_size_matches() {
-        let frame = Frame::new(0.0, 0.0, 100.0, 50.0);
-        let elem = make_basic("AXButton", Some(frame));
-        let ct = CustomTarget {
-            role: "AXButton".into(),
-            size: Some((100.0, 50.0)),
-            ..Default::default()
-        };
-        let target = CompiledTarget::new(&ct).unwrap();
-        assert!(elem.match_custom_target(&target));
+    fn a_role_reference_restricts_the_range_or_refuses_it() {
+        let cache = cache_of(&["alpha ", "beta ", "gamma"]);
+        let own_role = cache.cache[0].role();
+
+        assert!(
+            cache.select_range(0, 2, Some(&own_role)).is_some(),
+            "every element here has the same role, so the range survives"
+        );
+
+        assert_eq!(
+            cache.select_range(0, 2, Some(&RoleOfInterest::TextField)),
+            None,
+            "no element matches that role, so there is nothing to select"
+        );
     }
 
+    /// The element explorer walks the raw tree, so it bypasses every size and
+    /// content filter and keeps duplicates — the user asked to see all of it.
+    /// It also always reports the index it just added.
     #[test]
-    fn basic_match_size_mismatch() {
-        let frame = Frame::new(0.0, 0.0, 200.0, 80.0);
-        let elem = make_basic("AXButton", Some(frame));
-        let ct = CustomTarget {
-            role: "AXButton".into(),
-            size: Some((100.0, 50.0)),
-            ..Default::default()
-        };
-        let target = CompiledTarget::new(&ct).unwrap();
-        assert!(!elem.match_custom_target(&target));
+    fn the_element_explorer_force_adds_anything() {
+        let mut cache = ElementCache::new(10.0, 10.0, 20.0);
+        // Zero-sized and with no context: `add` would reject this outright.
+        let ele = ElementOfInterest::pseudo(None, Frame::new(0.0, 0.0, 0.0, 0.0));
+
+        assert_eq!(
+            cache.add_by_target(ele.clone(), &Target::ChildElement),
+            Some(0)
+        );
+        assert_eq!(cache.cache.len(), 1);
+
+        assert_eq!(
+            cache.add_by_target(ele, &Target::ChildElement),
+            Some(1),
+            "the reported index must follow the cache"
+        );
+        assert_eq!(cache.cache.len(), 2, "the explorer keeps duplicates");
     }
 
+    /// Outside the explorer a pseudo element is never cached. A clipboard-backed
+    /// selection has no accessibility element, so there is nothing to draw a
+    /// hint box on and nothing to press later.
     #[test]
-    fn basic_match_size_required_but_no_frame() {
-        // If the target requires a specific size but the element has no frame,
-        // it should not match.
-        let elem = make_basic("AXButton", None);
-        let ct = CustomTarget {
-            role: "AXButton".into(),
-            size: Some((100.0, 50.0)),
-            ..Default::default()
-        };
-        let target = CompiledTarget::new(&ct).unwrap();
-        assert!(!elem.match_custom_target(&target));
+    fn a_pseudo_element_is_never_cached_outside_the_element_explorer() {
+        let mut cache = ElementCache::new(0.0, 0.0, 0.0);
+        let ele =
+            ElementOfInterest::pseudo(Some("clipboard".into()), Frame::new(0.0, 0.0, 100.0, 20.0));
+
+        assert_eq!(cache.add_by_target(ele, &Target::Text), None);
+        assert!(cache.cache.is_empty());
     }
 
+    /// `clear` has to forget the de-duplication map as well, or the next
+    /// activation would overwrite a stale entry instead of adding a fresh one.
     #[test]
-    fn basic_match_no_size_constraint_ignores_frame() {
-        // When the target has no size constraint the element frame is irrelevant.
-        let elem_no_frame = make_basic("AXButton", None);
-        let target = CompiledTarget::new(&ct_role("AXButton")).unwrap();
-        assert!(elem_no_frame.match_custom_target(&target));
+    fn clear_forgets_the_de_duplication_map() {
+        let mut cache = ElementCache::new(0.0, 0.0, 0.0);
+        cache.add_by_target(
+            ElementOfInterest::pseudo(None, Frame::new(0.0, 0.0, 10.0, 10.0)),
+            &Target::ChildElement,
+        );
+
+        cache.clear();
+
+        assert!(cache.cache.is_empty());
+        assert!(cache.seen_center.is_empty());
+    }
+
+    /// A pseudo element carries its searchable text in `context` because it has no
+    /// accessibility element to read from. The folding itself is `lower_ascii`'s
+    /// business (covered in `util`), so all this pins is that the context is used
+    /// and that a missing context yields an empty target rather than a panic.
+    #[rstest]
+    #[case::lower_cased(Some("Mixed Case"), "mixed case")]
+    #[case::no_context(None, "")]
+    fn a_pseudo_element_searches_its_context(
+        #[case] context: Option<&str>,
+        #[case] expected: &str,
+    ) {
+        let element = ElementOfInterest::pseudo(
+            context.map(str::to_string),
+            Frame::new(0.0, 0.0, 10.0, 10.0),
+        );
+        assert_eq!(element.ascii_search_target(), expected);
     }
 }

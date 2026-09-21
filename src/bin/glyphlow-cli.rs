@@ -266,8 +266,7 @@ mod tests {
     use super::*;
     use ansi_str::AnsiStr;
     use glyphlow::config::RoleOfInterest;
-    // Only the tests measure widths directly now; the table itself is tabled's
-    // job.
+    use rstest::rstest;
     use unicode_width::UnicodeWidthStr;
 
     fn workflow(display: &str, key: &str, role: RoleOfInterest, apps: Option<&[&str]>) -> WorkFlow {
@@ -459,24 +458,104 @@ mod tests {
 
     /// `complete` must produce something for every supported shell, and must
     /// not need a server.
+    #[rstest]
+    #[case::bash(CompletionShell::Bash)]
+    #[case::zsh(CompletionShell::Zsh)]
+    #[case::fish(CompletionShell::Fish)]
+    #[case::elvish(CompletionShell::Elvish)]
+    #[case::powershell(CompletionShell::PowerShell)]
+    fn test_completions_generate_for_every_shell(#[case] shell: CompletionShell) {
+        let script = completion_script(shell);
+
+        assert!(
+            !script.trim().is_empty(),
+            "{shell:?} produced an empty script"
+        );
+        assert!(
+            script.contains("glyphlow"),
+            "{shell:?} script does not mention the command"
+        );
+    }
+
+    /// `activate` maps each CLI kind onto a wire-level [`Target`]. `ocr` is the
+    /// one that is not a plain name match — it becomes `ImageOCR`.
+    #[rstest]
+    #[case::clickable("clickable", Target::Clickable)]
+    #[case::text("text", Target::Text)]
+    #[case::image("image", Target::Image)]
+    #[case::ocr("ocr", Target::ImageOCR)]
+    fn activate_maps_kind_to_wire_target(#[case] arg: &str, #[case] expected: Target) {
+        let cli = Cli::try_parse_from(["glyphlow-cli", "activate", arg])
+            .unwrap_or_else(|e| panic!("`activate {arg}` should parse: {e}"));
+
+        let Command::Activate { kind } = cli.command else {
+            panic!("`activate {arg}` did not produce the activate subcommand");
+        };
+        assert_eq!(kind.to_target(), expected);
+    }
+
     #[test]
-    fn test_completions_generate_for_every_shell() {
-        for shell in [
-            CompletionShell::Bash,
-            CompletionShell::Zsh,
-            CompletionShell::Fish,
-            CompletionShell::Elvish,
-            CompletionShell::PowerShell,
-        ] {
-            let script = completion_script(shell);
-            assert!(
-                !script.trim().is_empty(),
-                "{shell:?} produced an empty script"
-            );
-            assert!(
-                script.contains("glyphlow"),
-                "{shell:?} script does not mention the command"
-            );
-        }
+    fn activate_rejects_an_unknown_kind() {
+        assert!(Cli::try_parse_from(["glyphlow-cli", "activate", "hyperlink"]).is_err());
+    }
+
+    /// A workflow name only ever appears under `workflow run`. A bare
+    /// `workflow <name>` must be a usage error (exit code 2) rather than a
+    /// silent lookup.
+    #[test]
+    fn bare_workflow_name_is_a_usage_error() {
+        let err = Cli::try_parse_from(["glyphlow-cli", "workflow", "ProofRead"])
+            .expect_err("a bare workflow name must not parse");
+
+        assert_eq!(err.exit_code(), 2, "clap usage errors exit with 2");
+    }
+
+    /// The name reaches the server untouched: matching is the server's job, so
+    /// the CLI must not fold case or trim whitespace on the way through.
+    #[test]
+    fn workflow_run_keeps_the_name_verbatim() {
+        let cli = Cli::try_parse_from(["glyphlow-cli", "workflow", "run", " ProofRead "])
+            .expect("`workflow run <name>` should parse");
+
+        let Command::Workflow {
+            command: WorkflowCommand::Run { name },
+        } = cli.command
+        else {
+            panic!("expected the `workflow run` subcommand");
+        };
+        assert_eq!(name, " ProofRead ");
+    }
+
+    #[test]
+    fn workflow_list_parses() {
+        let cli = Cli::try_parse_from(["glyphlow-cli", "workflow", "list"])
+            .expect("`workflow list` should parse");
+
+        assert!(matches!(
+            cli.command,
+            Command::Workflow {
+                command: WorkflowCommand::List
+            }
+        ));
+    }
+
+    /// `complete` accepts the shells `clap_complete` knows about, so a typo
+    /// cannot silently print the wrong script.
+    #[rstest]
+    #[case::bash("bash")]
+    #[case::zsh("zsh")]
+    #[case::fish("fish")]
+    #[case::elvish("elvish")]
+    #[case::powershell("powershell")]
+    fn complete_accepts_every_supported_shell(#[case] shell: &str) {
+        assert!(
+            Cli::try_parse_from(["glyphlow-cli", "complete", shell]).is_ok(),
+            "`complete {shell}` should parse"
+        );
+    }
+
+    #[test]
+    fn complete_rejects_an_unknown_shell() {
+        assert!(Cli::try_parse_from(["glyphlow-cli", "complete", "tcsh"]).is_err());
     }
 }
