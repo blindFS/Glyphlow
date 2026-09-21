@@ -342,7 +342,11 @@ mod frame_tests {
     )]
     fn ordering_is_y_then_x(#[case] a: Frame, #[case] b: Frame, #[case] expected: Ordering) {
         assert_eq!(a.cmp(&b), expected);
-        assert_eq!(b.cmp(&a), expected.reverse(), "ordering must be antisymmetric");
+        assert_eq!(
+            b.cmp(&a),
+            expected.reverse(),
+            "ordering must be antisymmetric"
+        );
     }
 
     /// The bounds check is inclusive (`<=`), so frames that merely touch —
@@ -400,7 +404,11 @@ mod frame_tests {
         #[case] expected: Option<Frame>,
     ) {
         assert_eq!(a.intersect(&b), expected);
-        assert_eq!(b.intersect(&a), expected, "intersection must be commutative");
+        assert_eq!(
+            b.intersect(&a),
+            expected,
+            "intersection must be commutative"
+        );
     }
 
     #[test]
@@ -448,10 +456,7 @@ mod frame_tests {
     #[case::touching_the_bottom_edge(true, Frame::new(0.0, 50.0, 100.0, 100.0))]
     #[case::one_pixel_past_the_right_edge(false, Frame::new(50.0, 0.0, 100.1, 100.0))]
     #[case::one_pixel_past_the_left_edge(false, Frame::new(-0.1, 0.0, 50.0, 100.0))]
-    fn containment_is_inclusive_on_every_edge(
-        #[case] expected: bool,
-        #[case] inner: Frame,
-    ) {
+    fn containment_is_inclusive_on_every_edge(#[case] expected: bool, #[case] inner: Frame) {
         let outer = Frame::new(0.0, 0.0, 100.0, 100.0);
         assert_eq!(outer.contains(&inner), expected);
     }

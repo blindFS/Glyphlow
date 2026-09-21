@@ -277,6 +277,15 @@ impl HintBox {
         }
     }
 
+    /// Undo disabling
+    pub fn restore(&mut self) {
+        if self.disabled {
+            self.disabled = false;
+            self.set_opacity(1.0);
+            self.set_visible(true);
+        }
+    }
+
     pub fn free(&self) {
         self.tri_layer.removeFromSuperlayer();
         self.text_layer.removeFromSuperlayer();

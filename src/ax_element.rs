@@ -1367,7 +1367,10 @@ mod tests {
         #[case] target: CustomTarget,
         #[case] expected: bool,
     ) {
-        let elem = make_basic(role, frame.map(|(x1, y1, x2, y2)| Frame::new(x1, y1, x2, y2)));
+        let elem = make_basic(
+            role,
+            frame.map(|(x1, y1, x2, y2)| Frame::new(x1, y1, x2, y2)),
+        );
         let target = CompiledTarget::new(&target).expect("test targets must compile");
 
         assert_eq!(elem.match_custom_target(&target), expected);
@@ -1461,7 +1464,10 @@ mod tests {
         // Zero-sized and with no context: `add` would reject this outright.
         let ele = ElementOfInterest::pseudo(None, Frame::new(0.0, 0.0, 0.0, 0.0));
 
-        assert_eq!(cache.add_by_target(ele.clone(), &Target::ChildElement), Some(0));
+        assert_eq!(
+            cache.add_by_target(ele.clone(), &Target::ChildElement),
+            Some(0)
+        );
         assert_eq!(cache.cache.len(), 1);
 
         assert_eq!(
@@ -1478,10 +1484,8 @@ mod tests {
     #[test]
     fn a_pseudo_element_is_never_cached_outside_the_element_explorer() {
         let mut cache = ElementCache::new(0.0, 0.0, 0.0);
-        let ele = ElementOfInterest::pseudo(
-            Some("clipboard".into()),
-            Frame::new(0.0, 0.0, 100.0, 20.0),
-        );
+        let ele =
+            ElementOfInterest::pseudo(Some("clipboard".into()), Frame::new(0.0, 0.0, 100.0, 20.0));
 
         assert_eq!(cache.add_by_target(ele, &Target::Text), None);
         assert!(cache.cache.is_empty());

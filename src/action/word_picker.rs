@@ -375,7 +375,10 @@ mod tests {
         #[case] offsets: &[usize],
     ) {
         let expected = (
-            words.iter().map(|w| (*w).to_owned()).collect::<Vec<String>>(),
+            words
+                .iter()
+                .map(|w| (*w).to_owned())
+                .collect::<Vec<String>>(),
             offsets.to_vec(),
         );
         assert_eq!(multilingual_split(input), expected);
