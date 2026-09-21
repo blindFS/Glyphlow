@@ -277,18 +277,6 @@ impl HintBox {
         }
     }
 
-    /// Undo the hiding done by the visibility check.
-    ///
-    /// Guarded by `disabled` on purpose: a box that is merely hidden because the
-    /// current hint prefix does not match it must stay hidden.
-    pub fn restore(&mut self) {
-        if self.disabled {
-            self.disabled = false;
-            self.set_opacity(1.0);
-            self.set_visible(true);
-        }
-    }
-
     pub fn free(&self) {
         self.tri_layer.removeFromSuperlayer();
         self.text_layer.removeFromSuperlayer();
@@ -912,52 +900,5 @@ mod find_overlaps_tests {
             results.is_empty(),
             "Found false positive intersection due to floating point drift."
         );
-    }
-}
-
-#[cfg(test)]
-mod restore_tests {
-    use super::*;
-
-    fn mock_box() -> HintBox {
-        HintBox::new(
-            0,
-            "A".into(),
-            100.0,
-            100.0,
-            Frame::new(0.0, 0.0, 10.0, 10.0),
-            None,
-        )
-    }
-
-    /// The visibility check marks a box as `disabled` *and* fades it out, so
-    /// undoing it has to clear the mark and bring both layers back.
-    #[test]
-    fn restores_a_box_disabled_by_the_visibility_check() {
-        let mut hb = mock_box();
-        hb.disabled = true;
-        hb.set_opacity(0.0);
-        hb.set_visible(false);
-
-        hb.restore();
-
-        assert!(!hb.disabled);
-        assert_eq!(hb.box_layer.opacity(), 1.0);
-        assert!(!hb.box_layer.isHidden());
-    }
-
-    /// Only the visibility check's own mark is undone. A box hidden because the
-    /// current hint prefix does not match it must not be forced back on screen.
-    #[test]
-    fn leaves_a_box_that_is_only_hidden_by_filtering_alone() {
-        let mut hb = mock_box();
-        hb.set_opacity(0.25);
-        hb.set_visible(false);
-
-        hb.restore();
-
-        assert!(!hb.disabled);
-        assert_eq!(hb.box_layer.opacity(), 0.25, "opacity must be untouched");
-        assert!(hb.box_layer.isHidden(), "visibility must be untouched");
     }
 }
