@@ -304,6 +304,7 @@ you can install it only when you want it:
 
 - **Nix**: set `programs.glyphlow.cli.enable = true` (see the Nix section above),
   or install the `glyphlow-cli` flake package directly.
+- **Homebrew**: `brew install glyphlow-cli`
 - **Release archive**: `glyphlow-cli.tar.gz` from the
   [releases page](https://github.com/blindFS/Glyphlow/releases).
 
