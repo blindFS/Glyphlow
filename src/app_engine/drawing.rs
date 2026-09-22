@@ -46,6 +46,31 @@ impl AppEngine {
         })
     }
 
+    /// Settle every label once the final hint count is known.
+    ///
+    /// The digit width grows mid-traversal (the 27th hint needs two characters)
+    /// and every box has to be relabelled when it does. This runs *after*
+    /// collision resolution on purpose: [`HintBox::set_label`] re-lays the box
+    /// out, so relabelling earlier would set a layer frame once here and again in
+    /// [`Self::finalize_hints`]. Two frame changes in two transactions means the
+    /// second restarts the first's animation, and the box jumps instead of
+    /// growing smoothly.
+    ///
+    /// Comparing the label we would assign against the one already in place costs
+    /// a `String` and no measurement, so a traversal that never widens lays
+    /// nothing out again.
+    pub(super) fn relabel_hints(&mut self) {
+        for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
+            let label = self
+                .config
+                .hint_keys
+                .label_for_index(i, Some(self.hint_width));
+            if label != hb.label {
+                hb.set_label(label, &self.overlay_frame, &self.config.theme);
+            }
+        }
+    }
+
     pub(super) fn finalize_hints(&self) {
         self.hint_boxes.iter().for_each(|hb| {
             hb.refresh(0, &self.overlay_frame, &self.config.theme);

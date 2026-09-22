@@ -350,14 +350,9 @@ impl AppEngine {
             }
 
             self.hint_boxes.push(hb);
-            let digits = self.config.hint_keys.digits_for_len(self.hint_boxes.len());
-
-            if digits > self.hint_width {
-                for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
-                    hb.label = self.config.hint_keys.label_for_index(i, Some(digits));
-                }
-            }
-            self.hint_width = digits;
+            // A wider label is applied by `relabel_hints` once traversal ends, so
+            // that the resize shares a transaction with the final positions.
+            self.hint_width = self.config.hint_keys.digits_for_len(self.hint_boxes.len());
         }
     }
 
@@ -371,6 +366,9 @@ impl AppEngine {
                 self.resolve_overlapping();
             }
             resolve_collisions(&mut self.hint_boxes, self.hint_width, &self.config.theme);
+            // Positions are final now, so relabelling here resizes and repositions
+            // in one transaction instead of animating the box twice.
+            self.relabel_hints();
             // Update layers to match final positions and labels without clearing (avoid flicker)
             self.finalize_hints();
 
