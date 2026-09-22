@@ -251,114 +251,89 @@ pub trait AlphabeticKey {
     fn right_alternative(&self) -> Option<Key>;
 }
 
-impl AlphabeticKey for Key {
-    fn to_char(&self) -> char {
-        match self {
-            Key::KeyA => 'A',
-            Key::KeyB => 'B',
-            Key::KeyC => 'C',
-            Key::KeyD => 'D',
-            Key::KeyE => 'E',
-            Key::KeyF => 'F',
-            Key::KeyG => 'G',
-            Key::KeyH => 'H',
-            Key::KeyI => 'I',
-            Key::KeyJ => 'J',
-            Key::KeyK => 'K',
-            Key::KeyL => 'L',
-            Key::KeyM => 'M',
-            Key::KeyN => 'N',
-            Key::KeyO => 'O',
-            Key::KeyP => 'P',
-            Key::KeyQ => 'Q',
-            Key::KeyR => 'R',
-            Key::KeyS => 'S',
-            Key::KeyT => 'T',
-            Key::KeyU => 'U',
-            Key::KeyV => 'V',
-            Key::KeyW => 'W',
-            Key::KeyX => 'X',
-            Key::KeyY => 'Y',
-            Key::KeyZ => 'Z',
-            Key::Num1 => '1',
-            Key::Num2 => '2',
-            Key::Num3 => '3',
-            Key::Num4 => '4',
-            Key::Num5 => '5',
-            Key::Num6 => '6',
-            Key::Num7 => '7',
-            Key::Num8 => '8',
-            Key::Num9 => '9',
-            Key::Num0 => '0',
-            Key::Grave => '`',
-            Key::Minus => '-',
-            Key::Equal => '=',
-            Key::BracketLeft => '[',
-            Key::BracketRight => ']',
-            Key::Backslash => '\\',
-            Key::Semicolon => ';',
-            Key::Quote => '\'',
-            Key::Comma => ',',
-            Key::Period => '.',
-            Key::Slash => '/',
-            Key::Backspace | Key::Delete => '󰁮',
-            Key::ShiftLeft | Key::ShiftRight => '󰘶',
-            _ => ' ',
+/// Builds [`AlphabeticKey::to_char`] and [`AlphabeticKey::shifted_char`] from a
+/// single table.
+///
+/// The two are views of one keyboard layout — what a key types, and what it
+/// types with Shift held — so writing them as two 45-arm matches means keeping
+/// two tables in agreement by hand. Keys that type no character at all
+/// (modifiers, Escape, ...) are left out and fall through to `' '`.
+macro_rules! key_char_table {
+    ($($key:ident => $plain:literal / $shifted:literal),* $(,)?) => {
+        fn to_char(&self) -> char {
+            match self {
+                $(Key::$key => $plain,)*
+                // Stand-ins for keys that are not characters at all.
+                Key::Backspace | Key::Delete => '󰁮',
+                Key::ShiftLeft | Key::ShiftRight => '󰘶',
+                _ => ' ',
+            }
         }
-    }
 
-    fn shifted_char(&self) -> char {
-        match self {
-            Key::KeyA => 'A',
-            Key::KeyB => 'B',
-            Key::KeyC => 'C',
-            Key::KeyD => 'D',
-            Key::KeyE => 'E',
-            Key::KeyF => 'F',
-            Key::KeyG => 'G',
-            Key::KeyH => 'H',
-            Key::KeyI => 'I',
-            Key::KeyJ => 'J',
-            Key::KeyK => 'K',
-            Key::KeyL => 'L',
-            Key::KeyM => 'M',
-            Key::KeyN => 'N',
-            Key::KeyO => 'O',
-            Key::KeyP => 'P',
-            Key::KeyQ => 'Q',
-            Key::KeyR => 'R',
-            Key::KeyS => 'S',
-            Key::KeyT => 'T',
-            Key::KeyU => 'U',
-            Key::KeyV => 'V',
-            Key::KeyW => 'W',
-            Key::KeyX => 'X',
-            Key::KeyY => 'Y',
-            Key::KeyZ => 'Z',
-            Key::Num1 => '!',
-            Key::Num2 => '@',
-            Key::Num3 => '#',
-            Key::Num4 => '$',
-            Key::Num5 => '%',
-            Key::Num6 => '^',
-            Key::Num7 => '&',
-            Key::Num8 => '*',
-            Key::Num9 => '(',
-            Key::Num0 => ')',
-            Key::Grave => '~',
-            Key::Minus => '_',
-            Key::Equal => '+',
-            Key::BracketLeft => '{',
-            Key::BracketRight => '}',
-            Key::Backslash => '|',
-            Key::Semicolon => ':',
-            Key::Quote => '"',
-            Key::Comma => '<',
-            Key::Period => '>',
-            Key::Slash => '?',
-            Key::Backspace | Key::Delete => '󰁮',
-            _ => ' ',
+        fn shifted_char(&self) -> char {
+            match self {
+                $(Key::$key => $shifted,)*
+                Key::Backspace | Key::Delete => '󰁮',
+                _ => ' ',
+            }
         }
+    };
+}
+
+impl AlphabeticKey for Key {
+    key_char_table! {
+        // Letters report themselves either way: the key listener delivers the
+        // base key, never the character Shift would have produced.
+        KeyA => 'A' / 'A',
+        KeyB => 'B' / 'B',
+        KeyC => 'C' / 'C',
+        KeyD => 'D' / 'D',
+        KeyE => 'E' / 'E',
+        KeyF => 'F' / 'F',
+        KeyG => 'G' / 'G',
+        KeyH => 'H' / 'H',
+        KeyI => 'I' / 'I',
+        KeyJ => 'J' / 'J',
+        KeyK => 'K' / 'K',
+        KeyL => 'L' / 'L',
+        KeyM => 'M' / 'M',
+        KeyN => 'N' / 'N',
+        KeyO => 'O' / 'O',
+        KeyP => 'P' / 'P',
+        KeyQ => 'Q' / 'Q',
+        KeyR => 'R' / 'R',
+        KeyS => 'S' / 'S',
+        KeyT => 'T' / 'T',
+        KeyU => 'U' / 'U',
+        KeyV => 'V' / 'V',
+        KeyW => 'W' / 'W',
+        KeyX => 'X' / 'X',
+        KeyY => 'Y' / 'Y',
+        KeyZ => 'Z' / 'Z',
+        // The digit row, unshifted and shifted.
+        Num1 => '1' / '!',
+        Num2 => '2' / '@',
+        Num3 => '3' / '#',
+        Num4 => '4' / '$',
+        Num5 => '5' / '%',
+        Num6 => '6' / '^',
+        Num7 => '7' / '&',
+        Num8 => '8' / '*',
+        Num9 => '9' / '(',
+        Num0 => '0' / ')',
+        Grave => '`' / '~',
+        Minus => '-' / '_',
+        Equal => '=' / '+',
+        BracketLeft => '[' / '{',
+        BracketRight => ']' / '}',
+        Backslash => '\\' / '|',
+        Semicolon => ';' / ':',
+        Quote => '\'' / '"',
+        Comma => ',' / '<',
+        Period => '.' / '>',
+        // `/` starts a text search in filtering mode, so it never reaches the
+        // hint filter — but it is still a character the key reports.
+        Slash => '/' / '?',
     }
 
     fn to_str(&self) -> String {
@@ -1057,6 +1032,43 @@ mod tests {
             decoded.keys,
             vec![Key::ControlLeft, Key::ShiftLeft, Key::KeyZ]
         );
+    }
+
+    /// `to_char` and `shifted_char` are generated from one table, so this pins
+    /// the layout itself: what each key reports, and what it reports with Shift
+    /// held. `TYPABLE_HINT_CHARS` is derived from the same layout, which is why
+    /// the digits and this punctuation have to stay usable as hint keys.
+    #[rstest]
+    #[case::letter_ignores_shift(Key::KeyQ, 'Q', 'Q')]
+    #[case::first_digit(Key::Num1, '1', '!')]
+    #[case::last_digit(Key::Num0, '0', ')')]
+    #[case::grave(Key::Grave, '`', '~')]
+    #[case::minus(Key::Minus, '-', '_')]
+    #[case::equal(Key::Equal, '=', '+')]
+    #[case::open_bracket(Key::BracketLeft, '[', '{')]
+    #[case::close_bracket(Key::BracketRight, ']', '}')]
+    #[case::backslash(Key::Backslash, '\\', '|')]
+    #[case::semicolon(Key::Semicolon, ';', ':')]
+    #[case::quote(Key::Quote, '\'', '"')]
+    #[case::comma(Key::Comma, ',', '<')]
+    #[case::period(Key::Period, '.', '>')]
+    #[case::slash(Key::Slash, '/', '?')]
+    // Not characters: they report a stand-in glyph instead. Shift has none, so
+    // it falls back to the blank.
+    #[case::backspace(Key::Backspace, '󰁮', '󰁮')]
+    #[case::delete_reports_the_same(Key::Delete, '󰁮', '󰁮')]
+    #[case::shift(Key::ShiftLeft, '󰘶', ' ')]
+    // Everything else is blank.
+    #[case::escape(Key::Escape, ' ', ' ')]
+    #[case::space(Key::Space, ' ', ' ')]
+    #[case::modifier(Key::MetaLeft, ' ', ' ')]
+    fn to_char_and_shifted_char_follow_one_keyboard_layout(
+        #[case] key: Key,
+        #[case] plain: char,
+        #[case] shifted: char,
+    ) {
+        assert_eq!(key.to_char(), plain, "to_char for {key:?}");
+        assert_eq!(key.shifted_char(), shifted, "shifted_char for {key:?}");
     }
 
     #[test]

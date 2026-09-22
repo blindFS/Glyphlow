@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use super::AppEngine;
 use crate::{
     AppSignal, FilterMode, Mode,
@@ -353,36 +351,28 @@ impl AppEngine {
         }
     }
 
-    /// If only 1 word is matched, then update the selected text and show the menu
+    /// If the match is unambiguous, update the selected text and show the menu.
     pub(super) fn check_word_picker(&mut self) {
         if !self.ready_for_unique() {
             return;
         }
 
-        let Some(wp) = self.word_picker.as_mut() else {
+        let Some(wp) = self.word_picker.as_ref() else {
             return;
         };
-        let matched_words = wp.matched_words();
 
-        // Duplicated words when multi_selection is off
-        let unique_matching = matched_words.len() == 1
-            || (!self.multi_selection.is_on
-                && matched_words
-                    .iter()
-                    .map(|(_, w)| w)
-                    .collect::<HashSet<_>>()
-                    .len()
-                    == 1);
+        // Exactly one match is unambiguous. Several matches are still fine when
+        // multi-selection is off and they are all the same word, because then
+        // there is nothing to tell apart.
+        let unique_matching = wp.matched_count() == 1
+            || (!self.multi_selection.is_on && wp.all_matches_are_one_word());
 
         let mut new_text = None;
 
-        if unique_matching && let Some((idx, text)) = matched_words.first() {
+        if unique_matching && let Some((idx, text)) = wp.first_matched_word() {
             if self.multi_selection.is_on {
-                if let Some((idx1, idx2)) = self.multi_selection.set_one_side(*idx) {
-                    let text = self
-                        .word_picker
-                        .as_ref()
-                        .expect("Internal Error: no word picker set yet.")
+                if let Some((idx1, idx2)) = self.multi_selection.set_one_side(idx) {
+                    let text = wp
                         .select_range(idx1, idx2)
                         .expect("Internal Error: wrong word picker indexing.");
                     new_text = Some(text)

@@ -295,7 +295,18 @@ pub fn search_regex(text: &str) -> Option<Regex> {
     Regex::new(&format!(".*{text_pattern}.*")).ok()
 }
 
+/// Folds `text` to lowercase ASCII, transliterating anything outside ASCII on
+/// the way (`Straße` -> `strasse`, `CAFÉ` -> `cafe`).
+///
+/// This is how search targets and word-picker words are compared, so it runs
+/// once per word while the user types.
 pub fn lower_ascii(text: &str) -> String {
+    // `any_ascii` pushes ASCII characters through unchanged, so for pure ASCII
+    // input it is the identity and only the lowercase pass is left. Most
+    // documents are ASCII, and this halves the allocations on that path.
+    if text.is_ascii() {
+        return text.to_ascii_lowercase();
+    }
     any_ascii::any_ascii(text).to_ascii_lowercase()
 }
 
@@ -792,7 +803,38 @@ mod search_tests {
     #[case::uppercase("ALPHA", "alpha")]
     #[case::accented("CAFÉ", "cafe")]
     #[case::sharp_s("Straße", "strasse")]
+    #[case::already_folded("alpha", "alpha")]
+    #[case::digits_and_punctuation("R2-D2 (v1.5)!", "r2-d2 (v1.5)!")]
     fn lower_ascii_folds_case_and_accents(#[case] input: &str, #[case] expected: &str) {
         assert_eq!(lower_ascii(input), expected);
+    }
+
+    /// ASCII takes the fast path, where the transliteration step is skipped.
+    /// Pin that skipping it is unobservable: over every kind of input this
+    /// folding sees, the fast path has to agree with the
+    /// transliterate-then-lowercase pass it replaced.
+    #[rstest]
+    #[case::empty("")]
+    #[case::ascii_lower("alpha")]
+    #[case::ascii_upper("ALPHA")]
+    #[case::ascii_symbols("R2-D2 (v1.5)! \\[]{}~^")]
+    #[case::accented_upper("CAFÉ")]
+    #[case::ascii_mixed_with_accents("R2 Straße (CAFÉ)")]
+    #[case::cjk("深圳")]
+    #[case::greek("άνθρωποι")]
+    fn lower_ascii_agrees_with_transliterating_then_lowercasing(#[case] input: &str) {
+        let reference = any_ascii::any_ascii(input).to_ascii_lowercase();
+        assert_eq!(lower_ascii(input), reference);
+    }
+
+    /// The fast path covers *all* of ASCII, including the characters a naive
+    /// `char::to_lowercase` would leave alone. `is_ascii` is the whole
+    /// condition, so a control character or a symbol has to survive untouched.
+    #[test]
+    fn lower_ascii_is_a_plain_lowercase_pass_for_ascii() {
+        let every_ascii = (0u8..=127).map(char::from).collect::<String>();
+        assert!(every_ascii.is_ascii());
+        assert_eq!(lower_ascii(&every_ascii), every_ascii.to_ascii_lowercase());
+        assert!(lower_ascii(&every_ascii).is_ascii());
     }
 }

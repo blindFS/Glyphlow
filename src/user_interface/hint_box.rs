@@ -7,7 +7,10 @@ use objc2_core_graphics::{CGColor, CGMutablePath};
 use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer, kCAAlignmentCenter};
 use rstar::{AABB, RTree, RTreeObject};
-use std::collections::{HashMap, VecDeque};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, VecDeque},
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HintBox {
@@ -24,6 +27,16 @@ pub struct HintBox {
     pub(super) box_layer: Retained<CALayer>,
     tri_layer: Retained<CAShapeLayer>,
     pub(super) frame_layer: Option<Retained<CALayer>>,
+    /// The `(prefix_len, label)` that [`Self::update_text`] last measured, with
+    /// the text size it produced.
+    ///
+    /// Measuring runs a CoreText framesetter, and the same label is laid out
+    /// twice per activation: once by [`Self::draw`], then again by the refresh
+    /// that follows collision resolution. Remembering the result makes that
+    /// second pass free, and with it any later refresh at an unchanged prefix.
+    /// The label and the prefix are enough to key on because a theme change
+    /// deactivates first, which drops every box.
+    measured: RefCell<Option<(usize, String, CGSize)>>,
 }
 
 impl HintBox {
@@ -67,6 +80,7 @@ impl HintBox {
             box_layer: bl,
             tri_layer,
             frame_layer,
+            measured: RefCell::new(None),
         }
     }
 
@@ -163,7 +177,12 @@ impl HintBox {
 
         // Text & Box Layer
         let attr_string = self.attributed_string(key_prefix_len, theme);
-        let (text_size, _) = estimate_frame_for_text(&attr_string, overlay_frame.size());
+        // Deliberately the same constraints `update_text` measures with: the
+        // memo below is only sound while the two agree. A hint label is a couple
+        // of characters, so neither the overlay size nor no constraint at all
+        // ever wraps it.
+        let (text_size, _) = estimate_frame_for_text(&attr_string, (f64::MAX, f64::MAX));
+        *self.measured.borrow_mut() = Some((key_prefix_len, self.label.clone(), text_size));
         let margin = theme.hint_margin_size as f64;
         let box_size = CGSize::new(
             text_size.width + (margin * 2.0),
@@ -199,6 +218,17 @@ impl HintBox {
 
     /// Updates the text and re-estimates the size, returns true if the size changed
     fn update_text(&self, prefix_len: usize, theme: &GlyphlowTheme) -> bool {
+        // The layer already shows this label at this prefix, at a size we know,
+        // so re-measuring would only repeat the framesetter pass.
+        let already_measured = self
+            .measured
+            .borrow()
+            .as_ref()
+            .is_some_and(|(prefix, label, _)| *prefix == prefix_len && *label == self.label);
+        if already_measured {
+            return false;
+        }
+
         let attr_string = self.attributed_string(prefix_len, theme);
         unsafe {
             self.text_layer.setString(Some(&attr_string));
@@ -209,6 +239,7 @@ impl HintBox {
             &attr_string,
             (f64::MAX, f64::MAX), // No constraints for label
         );
+        *self.measured.borrow_mut() = Some((prefix_len, self.label.clone(), text_size));
 
         let current_text_size = self.text_layer.frame().size;
         if text_size == current_text_size {
@@ -263,17 +294,24 @@ impl HintBox {
         }
     }
 
+    /// The layers that draw the box itself: its background, and — when the
+    /// element is large enough to be colour coded — the frame around it.
+    ///
+    /// The text and the triangle are sublayers of `box_layer`, so they follow it
+    /// and never have to be listed separately.
+    fn chrome_layers(&self) -> impl Iterator<Item = &CALayer> {
+        std::iter::once(&*self.box_layer).chain(self.frame_layer.as_deref())
+    }
+
     pub fn set_opacity(&self, opacity: f32) {
-        self.box_layer.setOpacity(opacity);
-        if let Some(fl) = &self.frame_layer {
-            fl.setOpacity(opacity);
+        for layer in self.chrome_layers() {
+            layer.setOpacity(opacity);
         }
     }
 
     pub fn set_visible(&self, visible: bool) {
-        self.box_layer.setHidden(!visible);
-        if let Some(fl) = &self.frame_layer {
-            fl.setHidden(!visible);
+        for layer in self.chrome_layers() {
+            layer.setHidden(!visible);
         }
     }
 
