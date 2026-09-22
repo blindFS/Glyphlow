@@ -116,6 +116,10 @@ enum ActivationKind {
     Text,
     Image,
     Ocr,
+    Input,
+    Editor,
+    ChildElement,
+    Scrollable,
 }
 
 impl ActivationKind {
@@ -125,6 +129,10 @@ impl ActivationKind {
             ActivationKind::Text => Target::Text,
             ActivationKind::Image => Target::Image,
             ActivationKind::Ocr => Target::ImageOCR,
+            ActivationKind::Input => Target::Editable,
+            ActivationKind::Editor => Target::Edit,
+            ActivationKind::ChildElement => Target::ChildElement,
+            ActivationKind::Scrollable => Target::Scrollable,
         }
     }
 }
@@ -136,6 +144,10 @@ impl std::fmt::Display for ActivationKind {
             ActivationKind::Text => "text",
             ActivationKind::Image => "image",
             ActivationKind::Ocr => "ocr",
+            ActivationKind::Input => "input",
+            ActivationKind::Editor => "editor",
+            ActivationKind::ChildElement => "child-element",
+            ActivationKind::Scrollable => "scrollable",
         })
     }
 }
@@ -468,13 +480,17 @@ mod tests {
         );
     }
 
-    /// `activate` maps each CLI kind onto a wire-level [`Target`]. `ocr` is the
-    /// one that is not a plain name match — it becomes `ImageOCR`.
+    /// `activate` maps each CLI kind onto a wire-level [`Target`]. `ocr` is not a
+    /// plain name match — it becomes `ImageOCR`.
     #[rstest]
     #[case::clickable("clickable", Target::Clickable)]
     #[case::text("text", Target::Text)]
     #[case::image("image", Target::Image)]
     #[case::ocr("ocr", Target::ImageOCR)]
+    #[case::input("input", Target::Editable)]
+    #[case::editor("editor", Target::Edit)]
+    #[case::child_element("child-element", Target::ChildElement)]
+    #[case::scrollable("scrollable", Target::Scrollable)]
     fn activate_maps_kind_to_wire_target(#[case] arg: &str, #[case] expected: Target) {
         let cli = Cli::try_parse_from(["glyphlow-cli", "activate", arg])
             .unwrap_or_else(|e| panic!("`activate {arg}` should parse: {e}"));

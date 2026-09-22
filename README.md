@@ -309,10 +309,10 @@ you can install it only when you want it:
 
 ```bash
 # Activate elements of a kind, then pick one from the overlay hints
-glyphlow-cli activate clickable   # buttons, menu items, ...
-glyphlow-cli activate text        # static text
-glyphlow-cli activate image       # images
-glyphlow-cli activate ocr         # text recognised in images
+glyphlow-cli activate clickable # buttons, menu items, ...
+glyphlow-cli activate text      # static text
+glyphlow-cli activate image     # images
+...
 
 # Inspect the configured workflows
 glyphlow-cli workflow list
