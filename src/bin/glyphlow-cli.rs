@@ -118,7 +118,7 @@ enum ActivationKind {
     Ocr,
     Input,
     Editor,
-    ChildElement,
+    Child,
     Scrollable,
 }
 
@@ -131,7 +131,7 @@ impl ActivationKind {
             ActivationKind::Ocr => Target::ImageOCR,
             ActivationKind::Input => Target::Editable,
             ActivationKind::Editor => Target::Edit,
-            ActivationKind::ChildElement => Target::ChildElement,
+            ActivationKind::Child => Target::ChildElement,
             ActivationKind::Scrollable => Target::Scrollable,
         }
     }
@@ -146,7 +146,7 @@ impl std::fmt::Display for ActivationKind {
             ActivationKind::Ocr => "ocr",
             ActivationKind::Input => "input",
             ActivationKind::Editor => "editor",
-            ActivationKind::ChildElement => "child",
+            ActivationKind::Child => "child",
             ActivationKind::Scrollable => "scrollable",
         })
     }
@@ -489,7 +489,7 @@ mod tests {
     #[case::ocr("ocr", Target::ImageOCR)]
     #[case::input("input", Target::Editable)]
     #[case::editor("editor", Target::Edit)]
-    #[case::child_element("child", Target::ChildElement)]
+    #[case::child("child", Target::ChildElement)]
     #[case::scrollable("scrollable", Target::Scrollable)]
     fn activate_maps_kind_to_wire_target(#[case] arg: &str, #[case] expected: Target) {
         let cli = Cli::try_parse_from(["glyphlow-cli", "activate", arg])
