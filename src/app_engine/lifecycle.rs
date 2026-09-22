@@ -213,7 +213,7 @@ impl AppEngine {
 
     const TEXT_VIS_CHECK_DEPTH: u8 = 2;
 
-    fn hint_visiblility_check(&self, idx: usize, system_wide: AXUIElementRef) -> bool {
+    fn hint_visibility_check(&self, idx: usize, system_wide: AXUIElementRef) -> bool {
         let (x_i, y_i) = self.hint_boxes[idx].frame.center();
         let ele_i = unsafe { element_at_point(system_wide, x_i, y_i) };
         let Some(mut ele_i) = ele_i else {
@@ -242,7 +242,7 @@ impl AppEngine {
                 && !confirmed_visible[i]
                 && !self.hint_boxes[i].disabled
             {
-                if self.hint_visiblility_check(i, system_wide) {
+                if self.hint_visibility_check(i, system_wide) {
                     confirmed_visible[i] = true;
                 } else {
                     self.hint_boxes[i].fade_out(true);
@@ -255,7 +255,7 @@ impl AppEngine {
                 && !confirmed_visible[j]
                 && !self.hint_boxes[j].disabled
             {
-                if self.hint_visiblility_check(j, system_wide) {
+                if self.hint_visibility_check(j, system_wide) {
                     confirmed_visible[j] = true;
                 } else {
                     self.hint_boxes[j].fade_out(true);

@@ -272,17 +272,27 @@ pub fn select_range_helper(
     Some((text, Frame::new(x_min, y_min, x_max, y_max)))
 }
 
+/// What `Key::Space` becomes while searching, so a typed space separates terms
+/// instead of being another character to look for.
+pub const SEARCH_TERM_SEPARATOR: char = '󱁐';
+
+/// A "contains" pattern for the typed query, or `None` when the query is empty.
+///
+/// Terms are matched literally — this is text the user typed, not a pattern —
+/// and joined with `.*` so all of them have to appear, in order.
 pub fn search_regex(text: &str) -> Option<Regex> {
-    (!text.is_empty())
-        .then_some({
-            let text_pattern = text
-                .split('󱁐')
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-                .join(".*");
-            Regex::new(&format!(".*{text_pattern}.*"))
-        })
-        .and_then(|r| r.ok())
+    if text.is_empty() {
+        return None;
+    }
+    // Escaped on purpose: callers read `None` as "no filter", so an unescaped
+    // `(` used to switch filtering off silently instead of searching for it.
+    let text_pattern = text
+        .split(SEARCH_TERM_SEPARATOR)
+        .filter(|s| !s.is_empty())
+        .map(regex::escape)
+        .collect::<Vec<_>>()
+        .join(".*");
+    Regex::new(&format!(".*{text_pattern}.*")).ok()
 }
 
 pub fn lower_ascii(text: &str) -> String {
@@ -744,17 +754,36 @@ mod search_tests {
         assert!(re.is_match("anything at all"));
     }
 
-    /// The user types into a live search box, so an uncompilable pattern is one
-    /// keystroke away. It must degrade to "no filter" — filtering everything out
-    /// would look like the app had lost its content.
+    /// Metacharacters are ordinary characters here: a query is text the user
+    /// typed, not a pattern. They used to be interpreted, so `(` and `[` made the
+    /// pattern uncompilable — which switched filtering off instead of searching —
+    /// and `.` matched any character.
     #[rstest]
-    #[case::unclosed_group("(")]
-    #[case::unclosed_class("[")]
-    fn a_malformed_query_degrades_to_no_filter(#[case] query: &str) {
-        assert!(
-            search_regex(query).is_none(),
-            "{query:?} cannot be compiled, so it must not filter anything out"
-        );
+    #[case::dot("a.b", "xa.by", "xaxby")]
+    #[case::unclosed_group("(", "f(x)", "fx")]
+    #[case::unclosed_class("[a]", "[a]b", "ab")]
+    #[case::plus("C++", "C++ code", "C code")]
+    fn metacharacters_are_matched_literally(
+        #[case] query: &str,
+        #[case] hit: &str,
+        #[case] miss: &str,
+    ) {
+        let re = search_regex(query).expect("a literal query always compiles");
+        assert!(re.is_match(hit), "{query:?} should match {hit:?}");
+        assert!(!re.is_match(miss), "{query:?} should not match {miss:?}");
+    }
+
+    /// Every metacharacter the search box can type has to stay searchable.
+    #[rstest]
+    fn every_typable_metacharacter_is_literal(
+        #[values(
+            '(', ')', '[', ']', '{', '}', '*', '+', '?', '|', '^', '$', '\\', '.', '-'
+        )]
+        c: char,
+    ) {
+        let query = c.to_string();
+        let re = search_regex(&query).expect("a literal query always compiles");
+        assert!(re.is_match(&format!("a{c}b")), "{c:?} should match itself");
     }
 
     /// Search targets and word-picker words are compared case- and
