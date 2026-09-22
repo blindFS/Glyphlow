@@ -27,8 +27,7 @@ struct Menu {
 ///
 /// `begin` and `commit` have to be paired, and a stray `begin` leaves the
 /// transaction open for every later change on the thread. Keeping the pair
-/// inside one construct is the point: call sites only say what they want to
-/// draw.
+/// inside one construct is the point.
 macro_rules! without_animations {
     ($($body:tt)*) => {{
         CATransaction::begin();
@@ -113,6 +112,7 @@ impl Menu {
         }
     }
 
+    /// Shrink the font if the text does not fit `screen_frame`.
     fn estimate_text_size(
         &self,
         screen_frame: &Frame,
@@ -192,7 +192,7 @@ impl Menu {
         })
     }
 
-    /// Shrink font size on large estimated frame size if `auto_resize` is true
+    /// Draw `attr_string`, shrinking the font if `auto_resize` is set.
     fn draw_attributed_string(
         &self,
         attr_string: Retained<NSMutableAttributedString>,
@@ -348,7 +348,8 @@ impl UIDrawer {
             .setFrame(NSRect::new(origin, search_frame.size));
     }
 
-    /// Shrink font size on large estimated frame size if `auto_resize` is true
+    /// Draw `attr_string` in the menu, shrinking the font if `auto_resize` is
+    /// set.
     pub fn draw_attributed_string(
         &self,
         theme: &GlyphlowTheme,
@@ -479,6 +480,7 @@ impl UIDrawer {
     }
 }
 
+/// The screens in AX coordinates (top-left origin).
 pub fn get_screen_frames(mtm: MainThreadMarker) -> Vec<Frame> {
     let screens = NSScreen::screens(mtm);
     if screens.len() > 1 && NSScreen::screensHaveSeparateSpaces(mtm) {
@@ -560,7 +562,9 @@ impl GlyphlowDrawingLayer for CALayer {
     }
 }
 
-/// Coordinate shift, top left -> bottom left
+/// Screen coordinates (top-left origin) into layer coordinates (bottom-left):
+/// shift by the overlay origin, then flip the y axis. The overlay is the union of
+/// every screen frame, so its origin is not necessarily `(0, 0)`.
 pub fn calibrated_origin(x: f64, y: f64, overlay_frame: &Frame) -> NSPoint {
     NSPoint::new(
         x - overlay_frame.top_left.x,

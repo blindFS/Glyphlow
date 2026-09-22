@@ -67,6 +67,8 @@ impl AppEngine {
         self.notify(msg, log_level);
     }
 
+    /// Show a notification; it clears itself after a delay that depends on the
+    /// log level.
     pub(super) fn notify(&mut self, msg: &str, log_level: Level) {
         let timeout_secs = match log_level {
             Level::Trace | Level::Info => SHORT_TIMEOUT,
@@ -102,16 +104,12 @@ impl AppEngine {
         true
     }
 
-    /// Select the currently focused window as the default element of interest.
+    /// Select the focused window as the default element of interest, so that
+    /// element-relative workflows (press, menu) have something to act on.
     ///
-    /// Requests coming from the CLI have no interactive selection yet, so we
-    /// fall back to the focused window. This gives element-relative workflows
-    /// (e.g. press, menu) something to act on.
-    ///
-    /// Callers must call [`Self::get_app_window_info`] first **and only call
-    /// this when it returned `true`**: otherwise the window info is the
-    /// sentinel default (the system-wide element spanning every screen), and a
-    /// generic workflow would act on the middle of the screen.
+    /// Callers must have called [`Self::get_app_window_info`] first **and checked
+    /// that it returned `true`**: otherwise this selects the sentinel system-wide
+    /// element, and a generic workflow would act on the middle of the screen.
     pub fn select_focused_window(&mut self) {
         let AppWindowInfo { window, frame, .. } = &self.last_app_window_info;
         self.selected = Some(ElementOfInterest::new(
@@ -122,6 +120,9 @@ impl AppEngine {
         ));
     }
 
+    /// Start a traversal for `target` and hand back the channel its results
+    /// arrive on. Custom targets search the whole overlay, everything else the
+    /// focused window.
     pub(super) fn ui_element_traverse_on_activation(
         &mut self,
         target: Target,
@@ -184,6 +185,8 @@ impl AppEngine {
 
     const HINTBOX_FLUSH_BATCH_SIZE: usize = 5;
 
+    /// Clear the previous state, traverse for `target`, and draw hint boxes as
+    /// the results stream in.
     pub(super) fn activate(&mut self, target: Target) {
         // NOTE: make sure filtering mode is set for all kinds of activations
         self.set_mode(Mode::Filtering);
@@ -228,6 +231,7 @@ impl AppEngine {
             || cached_ele_i.is_ancestor_of(&mut ele_i)
     }
 
+    /// Fade out hint boxes whose centre is covered by a different element.
     fn resolve_overlapping(&mut self) {
         let system_wide = unsafe { AXUIElementCreateSystemWide() };
         if system_wide.is_null() {
@@ -356,6 +360,8 @@ impl AppEngine {
         }
     }
 
+    /// Decide what a finished traversal leaves on screen: laid-out hints, a
+    /// fallback element, or a notification.
     fn handle_traversal_finished(&mut self, target: Target) {
         let need_help_msg = target == Target::ChildElement && self.selected.is_none();
 
@@ -393,6 +399,8 @@ impl AppEngine {
         }
     }
 
+    /// A watched file changed: the temp file means the editor wrote back,
+    /// anything else is the config.
     pub(super) fn handle_file_update(&mut self, pb: PathBuf) {
         if pb == self.temp_file
             && let Ok(new_text) = std::fs::read_to_string(&self.temp_file)

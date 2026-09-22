@@ -24,6 +24,8 @@ body {
 .d { color: {dim_color} }
 </style>"#;
 
+/// A token of the picked text: the original, its hint label, and the folded form
+/// searches are matched against.
 #[derive(Debug, Clone)]
 struct Word {
     text: String,
@@ -31,6 +33,7 @@ struct Word {
     ascii: String,
 }
 
+/// Splits a text into pickable words and draws them as a hint-labelled block.
 pub struct WordPicker {
     raw: String,
     words: Vec<Word>,
@@ -93,7 +96,8 @@ impl WordPicker {
         })
     }
 
-    /// Returns HTML string and matched indices
+    /// Render the picker as HTML, with the label prefix and the search match
+    /// highlighted, plus the indices of the words that matched.
     fn to_string(
         &self,
         width_height_ratio: f64,
@@ -293,6 +297,11 @@ fn replace_color_in_css(css: &str, theme: &GlyphlowTheme, dim_level: u8) -> Stri
         .replace("{dim_color}", &rgba_to_css_color(dim_rgba))
 }
 
+/// Split `input` into pickable tokens, with each token's byte offset in `input`.
+///
+/// Three levels, fallen through only as far as needed: whitespace and script
+/// boundaries, then punctuation, then ASCII/non-ASCII — so a URL stays one token
+/// while `Hello世界` splits into `Hello`, `世`, `界`.
 fn multilingual_split(input: &str) -> (Vec<String>, Vec<usize>) {
     let url_re = get_url_re();
     let segment_re = get_segment_re();

@@ -73,7 +73,7 @@ we can swiftly execute the utilities of the apple intelligence writing tool.
 [![demo](assets/recordings/workflow.gif)](https://github.com/user-attachments/assets/3f16cc2b-4963-4cad-956d-4d0c9da5a548)
 
 ```toml
-[[text_workflows]]
+[[workflows]]
 display = " Rewrite"
 key = "R"
 starting_role = "TextField"
@@ -86,6 +86,9 @@ actions = [
   "Press",
 ]
 ```
+
+The list is not merged with the defaults: defining `[[workflows]]` replaces the
+built-in ones, so repeat any default you still want to keep.
 
 ### Other Features
 
@@ -177,6 +180,9 @@ starts.
 ## Configuration
 
 A comprehensive configuration file is generated when you run this app at the first time.
+
+Unknown keys are ignored rather than rejected, so a misspelled option silently
+keeps its default instead of failing to load.
 
 <details>
 <summary><b>Full List of Configuration Options</b></summary>
@@ -306,6 +312,7 @@ you can install it only when you want it:
 glyphlow-cli activate clickable   # buttons, menu items, ...
 glyphlow-cli activate text        # static text
 glyphlow-cli activate image       # images
+glyphlow-cli activate ocr         # text recognised in images
 
 # Inspect the configured workflows
 glyphlow-cli workflow list

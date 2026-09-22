@@ -1,3 +1,6 @@
+//! The `glyphlow` server: an event tap, a file watcher, an IPC socket and a
+//! run-loop tick, all driven from the main thread.
+
 use core_foundation::{
     base::Boolean,
     runloop::{CFRunLoopRunInMode, kCFRunLoopDefaultMode},
@@ -187,6 +190,10 @@ async fn main() {
     }
 }
 
+/// Path of a file in the cache directory.
+///
+/// `create` creates (and truncates) the file; `false` deletes whatever is there
+/// instead — a socket file left over from a previous run must not be reused.
 fn cache_file_path(fname: &str, create: bool) -> Option<PathBuf> {
     let cache_file = ipc::cache_dir()?.join(fname);
     if create {

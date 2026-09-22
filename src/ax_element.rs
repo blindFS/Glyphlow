@@ -1,6 +1,6 @@
 use crate::{
     config::{CustomTarget, GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
-    util::{Frame, lower_ascii, select_range_helper},
+    util::{Frame, lower_ascii, select_text_range},
 };
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
@@ -32,12 +32,10 @@ const BASIC_ATTRIBUTES: [&str; 4] = [
 ];
 
 thread_local! {
-    /// [`BASIC_ATTRIBUTES`] as CF objects.
+    /// [`BASIC_ATTRIBUTES`] as CF objects, built once per thread.
     ///
-    /// Every visited element needs the same four attribute names, and one
-    /// traversal visits thousands of them, so the names are built once per
-    /// thread instead of once per call. `CFArray` is not `Send`, which rules out
-    /// a plain `static`; each traversal thread builds its own copy.
+    /// One traversal visits thousands of elements that all want the same four
+    /// attribute names. `CFArray` is not `Send`, which rules out a `static`.
     static BASIC_ATTRIBUTES_CF: CFArray<CFString> = CFArray::from_CFTypes(
         &BASIC_ATTRIBUTES
             .iter()
@@ -45,9 +43,8 @@ thread_local! {
             .collect::<Vec<_>>(),
     );
 
-    /// The two attributes [`GetAttribute::get_frame`] reads, as CF objects.
-    /// That runs once per ancestor step while walking up the tree, so it is
-    /// cached for the same reason.
+    /// The two attributes [`GetAttribute::get_frame`] reads, cached for the same
+    /// reason: it runs once per ancestor step while walking up the tree.
     static FRAME_ATTRIBUTES_CF: CFArray<CFString> = CFArray::from_CFTypes(&[
         CFString::new(kAXPositionAttribute),
         CFString::new(kAXSizeAttribute),
@@ -60,7 +57,8 @@ pub enum ElementSignal {
     TraversalFinished(Target),
 }
 
-pub(crate) fn match_helper(pattern: &str, value: &impl ToString) -> bool {
+/// Case-insensitive substring test, with `|` separating alternatives.
+pub(crate) fn matches_pattern(pattern: &str, value: &impl ToString) -> bool {
     let value = value.to_string().to_lowercase();
     pattern
         .to_lowercase()
@@ -156,12 +154,14 @@ impl ElementBasicAttributes {
         {
             return false;
         }
-        match_helper(&target.role, &self.role)
+        matches_pattern(&target.role, &self.role)
     }
 }
 
-/// A [`CustomTarget`] with string fields pre-compiled into [`Regex`] objects.
-/// Build once per workflow search action; reuse across the entire element traversal.
+/// A [`CustomTarget`] with its string fields pre-compiled into [`Regex`]es.
+///
+/// Build once per workflow search action, then reuse across the whole element
+/// traversal.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompiledTarget {
     pub role: String,
@@ -212,6 +212,10 @@ impl CompiledTarget {
     }
 }
 
+/// An [`AXUIElement`] that may cross threads.
+///
+/// The wrapper is not `Send`, but the accessibility API accepts calls from any
+/// thread, so elements are handed to traversal threads wrapped in this.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ThreadSafeElement(pub AXUIElement);
 unsafe impl Send for ThreadSafeElement {}
@@ -222,6 +226,8 @@ pub enum ElementKind {
         element: ThreadSafeElement,
         role: RoleOfInterest,
     },
+    /// No accessibility element behind it — clipboard text or an OCR result. It
+    /// can be drawn and picked, but never pressed.
     Pseudo,
 }
 
@@ -284,6 +290,10 @@ impl ElementOfInterest {
         self.element().is_some_and(|this| this == other)
     }
 
+    /// Whether this element is an ancestor of `other`.
+    ///
+    /// `other` is walked upwards **in place**, so on return it holds whichever
+    /// ancestor was reached last rather than the element that was passed in.
     pub fn is_ancestor_of(&self, other: &mut AXUIElement) -> bool {
         let Some(this) = self.element() else {
             return false;
@@ -316,6 +326,11 @@ impl ElementOfInterest {
     }
 }
 
+/// Elements collected during one traversal.
+///
+/// De-duplication is by frame centre: DOM-based apps expose several nodes for
+/// one visual element, all reporting the same centre, and the later one replaces
+/// the earlier.
 #[derive(Default)]
 pub struct ElementCache {
     pub cache: Vec<ElementOfInterest>,
@@ -464,7 +479,7 @@ impl ElementCache {
                 )
             })
             .collect();
-        select_range_helper(&choices, idx1, idx2)
+        select_text_range(&choices, idx1, idx2)
     }
 }
 
@@ -486,6 +501,8 @@ pub trait GetAttribute {
     fn get_attribute(&self, attribute_name: &str) -> Option<CFType>;
     fn get_attribute_string(&self, attribute_name: &str) -> Option<String>;
     fn get_string_value_or_description(&self) -> Option<String>;
+    /// The element's frame clipped to `default_frame`, or `default_frame` itself
+    /// when its position or size is unavailable.
     fn get_frame(&self, default: Frame) -> Frame;
     fn get_dom_classes(&self) -> Option<Vec<String>>;
     fn inspect(&self) -> String;
@@ -650,7 +667,7 @@ impl GetAttribute for AXUIElement {
 
     fn match_custom_target(&self, target: &CompiledTarget) -> bool {
         if let Some(sr) = target.subrole.as_ref()
-            && !self.subrole().is_ok_and(|s| match_helper(sr, &s))
+            && !self.subrole().is_ok_and(|s| matches_pattern(sr, &s))
         {
             return false;
         }
@@ -685,7 +702,7 @@ impl GetAttribute for AXUIElement {
         if let Some(a) = target.action.as_ref()
             && !self
                 .action_names()
-                .is_ok_and(|names| names.iter().any(|n| match_helper(a, &*n)))
+                .is_ok_and(|names| names.iter().any(|n| matches_pattern(a, &*n)))
         {
             return false;
         }
@@ -747,7 +764,7 @@ impl SetAttribute for AXUIElement {
     }
 }
 
-/// A safe helper to extract C-structs from an AXValue stored inside a CFType.
+/// Reads a C struct out of an `AXValue`, or `None` when the cast fails.
 fn cftype_to_rust_type<T: Default>(cf_type: CFTypeRef, value_type: u32) -> Option<T> {
     if cf_type.is_null() {
         return None;
@@ -761,7 +778,8 @@ fn cftype_to_rust_type<T: Default>(cf_type: CFTypeRef, value_type: u32) -> Optio
     }
 }
 
-/// A helper for types have no impl Into<CFType>
+/// Wraps a C struct into an `AXValue`, for the types that have no
+/// `Into<CFType>`.
 fn rust_type_to_cftype<T>(value: T, value_type: u32) -> Option<CFType> {
     unsafe {
         let raw_value = AXValueCreate(value_type, &value as *const _ as *const std::ffi::c_void);
@@ -779,17 +797,30 @@ pub enum Target {
     #[default]
     Clickable,
     Image,
+    /// Run OCR on the picked image instead of pressing it.
     ImageOCR,
+    /// Focus the picked input.
     Editable,
+    /// Open the picked input's text in the external editor. Note this is not the
+    /// same as [`Target::Editable`].
     Edit,
     Text,
+    /// The element explorer: walk the raw tree, keeping duplicates.
     ChildElement,
     Scrollable,
+    /// Elements matching a compiled [`CustomTarget`] search.
     Custom(Box<CompiledTarget>),
 }
 
 const MAX_DEPTH: u8 = 200;
 
+/// Walks the tree under `ts_elem` depth-first, reporting every element that
+/// matches `target` on `result_tx`.
+///
+/// `parent_frame` is the frame children are clipped to and must shrink
+/// monotonically on the way down; `window_frame` narrows at window-ish nodes so
+/// that Electron content scrolled out of view can be told apart from content
+/// that is simply outside the window.
 fn traverse_elements(
     ts_elem: ThreadSafeElement,
     parent_frame: &Frame,
@@ -807,12 +838,10 @@ fn traverse_elements(
         return;
     };
 
-    // Every arm of the dispatch below reports an element the same way:
-    // `ElementOfInterest` carries the role the caller is looking for, and
-    // whatever text a search could match on. The macro keeps the role/target
-    // table from being buried under a five-line `send` per arm; the
-    // four-argument form is for the child walk, which reports a child it has
-    // already read rather than the element currently being visited.
+    // Every dispatch arm below reports an element the same way. The macro keeps
+    // the role/target table readable; the four-argument form is for the child
+    // walk, which reports a child it has already read rather than the element
+    // currently being visited.
     macro_rules! found {
         ($role:expr) => {
             found!(element, ele_fp.frame, $role, None)
@@ -1090,6 +1119,8 @@ fn traverse_elements(
     }
 }
 
+/// `traverse_elements` inside one autorelease pool, followed by the
+/// terminating [`ElementSignal::TraversalFinished`].
 pub fn traverse(
     root: ThreadSafeElement,
     parent_frame: Frame,
@@ -1135,9 +1166,6 @@ mod tests {
         }
     }
 
-    /// `match_helper` is a case-insensitive substring test, with `|` separating
-    /// alternatives. An empty pattern is contained in everything, itself
-    /// included.
     #[rstest]
     #[case::exact_lowercase("Button", "button", true)]
     #[case::pattern_lowercase("BUTTON", "AXButton", true)]
@@ -1149,12 +1177,12 @@ mod tests {
     #[case::pipe_first_alternative("button|textfield", "AXButton", true)]
     #[case::pipe_second_alternative("button|textfield", "AXTextField", true)]
     #[case::pipe_tolerates_spaces("button | textfield", "AXTextField", true)]
-    fn match_helper_is_case_insensitive_substring_with_pipe_alternatives(
+    fn matches_pattern_is_case_insensitive_substring_with_pipe_alternatives(
         #[case] pattern: &str,
         #[case] value: &str,
         #[case] expected: bool,
     ) {
-        assert_eq!(match_helper(pattern, &value), expected);
+        assert_eq!(matches_pattern(pattern, &value), expected);
     }
 
     #[test]
@@ -1321,8 +1349,6 @@ mod tests {
         cache
     }
 
-    /// `select_range` turns the two picked hints into the text that gets copied.
-    /// Without a role reference every element between the two ends is fair game.
     #[test]
     fn a_range_without_a_role_reference_spans_every_element() {
         let cache = cache_of(&["alpha ", "beta ", "gamma"]);
@@ -1333,10 +1359,9 @@ mod tests {
         assert_eq!(frame, Frame::new(0.0, 0.0, 130.0, 10.0));
     }
 
-    /// A role reference restricts the range to elements of that role. When
-    /// nothing in between matches, the range is refused outright instead of
-    /// falling back to "ignore the filter" — otherwise a multi-selection across
-    /// two text fields would silently swallow the button sitting between them.
+    /// Refuses the range rather than falling back to "ignore the filter" —
+    /// otherwise a multi-selection across two text fields would silently swallow
+    /// the button sitting between them.
     #[test]
     fn a_role_reference_restricts_the_range_or_refuses_it() {
         let cache = cache_of(&["alpha ", "beta ", "gamma"]);
@@ -1354,9 +1379,8 @@ mod tests {
         );
     }
 
-    /// The element explorer walks the raw tree, so it bypasses every size and
-    /// content filter and keeps duplicates — the user asked to see all of it.
-    /// It also always reports the index it just added.
+    /// The explorer walks the raw tree, so it bypasses every size and content
+    /// filter and keeps duplicates — the user asked to see all of it.
     #[test]
     fn the_element_explorer_force_adds_anything() {
         let mut cache = ElementCache::new(10.0, 10.0, 20.0);
@@ -1377,9 +1401,9 @@ mod tests {
         assert_eq!(cache.cache.len(), 2, "the explorer keeps duplicates");
     }
 
-    /// Outside the explorer a pseudo element is never cached. A clipboard-backed
-    /// selection has no accessibility element, so there is nothing to draw a
-    /// hint box on and nothing to press later.
+    /// Outside the explorer a pseudo element is never cached: a clipboard-backed
+    /// selection has no accessibility element, so there is nothing to draw a hint
+    /// box on and nothing to press later.
     #[test]
     fn a_pseudo_element_is_never_cached_outside_the_element_explorer() {
         let mut cache = ElementCache::new(0.0, 0.0, 0.0);
@@ -1406,10 +1430,10 @@ mod tests {
         assert!(cache.seen_center.is_empty());
     }
 
-    /// A pseudo element carries its searchable text in `context` because it has no
+    /// A pseudo element carries its searchable text in `context`, since it has no
     /// accessibility element to read from. The folding itself is `lower_ascii`'s
-    /// business (covered in `util`), so all this pins is that the context is used
-    /// and that a missing context yields an empty target rather than a panic.
+    /// business; this pins that `context` is used and that a missing one yields an
+    /// empty target rather than a panic.
     #[rstest]
     #[case::lower_cased(Some("Mixed Case"), "mixed case")]
     #[case::no_context(None, "")]

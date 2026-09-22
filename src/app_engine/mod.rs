@@ -22,14 +22,16 @@ mod interaction;
 mod lifecycle;
 mod workflow;
 
+/// Tracks the two ends of a multi-selection: the first picked hint, and the role
+/// of the elements picked so far, which keeps both ends the same kind.
 #[derive(Debug, Default)]
-pub(super) struct MultiSeletionState {
+pub(super) struct MultiSelectionState {
     pub(super) is_on: bool,
     pub(super) one_side_idx: Option<usize>,
     pub(super) role: Option<RoleOfInterest>,
 }
 
-impl MultiSeletionState {
+impl MultiSelectionState {
     pub(super) fn toggle(&mut self) {
         self.is_on = !self.is_on;
         self.one_side_idx = None;
@@ -56,18 +58,17 @@ impl MultiSeletionState {
     }
 }
 
-/// Global state for Glyphlow,
-/// mainly cached UI elements, and some related drawings
+/// The server's whole runtime state: the picked element, the drawing layers, the
+/// loaded config and everything derived from the last traversal.
 pub struct AppEngine {
     pub(super) state: Arc<Mutex<Mode>>,
     pub(super) key_state: Arc<Mutex<KeyState>>,
     pub(super) element_cache: ElementCache,
     pub(super) ocr_cache: Option<OCRResult>,
     pub(super) word_picker: Option<WordPicker>,
-    /// Used for drawing hint boxes on screen
     pub(super) hint_boxes: Vec<HintBox>,
     pub(super) hint_prefix: String,
-    /// Search related
+    // Search related
     pub(super) is_searching: bool,
     pub(super) search_prefix: String,
     pub(super) search_targets: Vec<String>,
@@ -88,9 +89,8 @@ pub struct AppEngine {
     /// Special treatment for Electron based apps.
     /// Like simulate mouse clicking instead of `element.press()`
     pub(super) last_app_window_info: AppWindowInfo,
-    /// For multi-selection
-    pub(super) multi_selection: MultiSeletionState,
-    /// Something to finish after filtering
+    pub(super) multi_selection: MultiSelectionState,
+    /// Actions of a workflow that is waiting for the user to pick an element.
     pub(super) pending_workflow_actions: VecDeque<WorkFlowAction>,
 }
 
@@ -133,7 +133,7 @@ impl AppEngine {
             editing: None,
             temp_file,
             last_app_window_info: AppWindowInfo::default(overlay_frame),
-            multi_selection: MultiSeletionState::default(),
+            multi_selection: MultiSelectionState::default(),
             pending_workflow_actions: VecDeque::new(),
         }
     }
@@ -141,11 +141,11 @@ impl AppEngine {
     pub async fn handle_signal(&mut self, signal: AppSignal) {
         match signal {
             AppSignal::Activate(target) => {
-                let quick_follow =
+                let auto_advance =
                     matches!(target, Target::Scrollable | Target::Editable | Target::Edit);
                 self.activate(target);
-                if quick_follow {
-                    self.quick_follow().await;
+                if auto_advance {
+                    self.press_sole_hint().await;
                 }
             }
             AppSignal::DeActivate => {

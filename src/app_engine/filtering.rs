@@ -6,17 +6,19 @@ use crate::{
     ax_element::{ElementOfInterest, Target},
     config::RoleOfInterest,
     user_interface::{HintBox, hint_boxes_from_frames},
-    util::{Frame, lower_ascii, select_range_helper},
+    util::{Frame, lower_ascii, select_text_range},
 };
 use log::Level;
 
 const DEBOUNCE_TIMEOUT: u64 = 150;
 
 impl AppEngine {
-    fn ocr_res_filtering(&mut self) {
+    /// Build hint boxes from the OCR result once, then filter them like any
+    /// other hints.
+    fn build_ocr_hints(&mut self) {
         if self.hint_boxes.is_empty() {
             let Some(ocr_res) = self.ocr_cache.as_ref() else {
-                log::warn!("ocr_res_filtering called but OCR cache is not set.");
+                log::warn!("build_ocr_hints called but OCR cache is not set.");
                 return;
             };
             let (digits, ocr_hints) = {
@@ -44,14 +46,14 @@ impl AppEngine {
                 if self.multi_selection.is_on {
                     if let Some((idx1, idx2)) = self.multi_selection.set_one_side(hb_idx) {
                         let Some(ocr_res) = self.ocr_cache.as_ref() else {
-                            log::warn!("ocr_res_filtering called but OCR cache is not set.");
+                            log::warn!("build_ocr_hints called but OCR cache is not set.");
                             return;
                         };
                         let choices: Vec<(&str, Frame, bool)> = ocr_res
                             .iter()
                             .map(|(s, rect)| (s.as_str(), Frame::from_cgrect(rect), true))
                             .collect::<Vec<_>>();
-                        let (text, frame) = select_range_helper(&choices, idx1, idx2)
+                        let (text, frame) = select_text_range(&choices, idx1, idx2)
                             .expect("Internal Error: wrong ocr hint indexing.");
                         self.select(ElementOfInterest::pseudo(None, frame));
                         self.clear_hints();
@@ -63,7 +65,7 @@ impl AppEngine {
                     }
                 } else {
                     let Some(ocr_res) = self.ocr_cache.as_ref() else {
-                        log::warn!("ocr_res_filtering called but OCR cache is not set.");
+                        log::warn!("build_ocr_hints called but OCR cache is not set.");
                         return;
                     };
                     let (selected_text, cg_rect) = ocr_res
@@ -91,7 +93,7 @@ impl AppEngine {
                 self.ocr_cache = Some(ocr_res);
                 self.hint_prefix.clear();
                 self.set_mode(Mode::OCRResultFiltering);
-                self.ocr_res_filtering();
+                self.build_ocr_hints();
             }
             Err(e) => {
                 self.notify_then_deactivate(&format!("OCR failed: {e:?}"), Level::Error);
@@ -102,7 +104,7 @@ impl AppEngine {
         }
     }
 
-    /// Filter the UI elements and redraw hints.
+    /// Recompute the visible hints and, when exactly one is left, act on it.
     async fn filter_by_key(&mut self) {
         let filtered_indices = self.update_hints();
 
@@ -221,13 +223,17 @@ impl AppEngine {
         }
     }
 
-    pub(super) async fn quick_follow(&mut self) {
+    /// Press the only hint for the user when the traversal produced a single
+    /// element.
+    pub(super) async fn press_sole_hint(&mut self) {
         if self.element_cache.cache.len() == 1 {
             self.hint_prefix.push(self.config.hint_keys.first());
             self.filter_by_key().await;
         }
     }
 
+    /// Undo one level of filtering: a typed character first, then a multi
+    /// selection end, and finally the visibility check itself.
     fn go_back_in_filtering(&mut self, mode: FilterMode) {
         match mode {
             // Go back 1 level in element explorer
@@ -279,6 +285,8 @@ impl AppEngine {
         };
     }
 
+    /// Type `key_char` into the hint prefix; `󰁮` deletes, or goes back when the
+    /// prefix is already empty.
     pub(super) async fn filter_by_hint(&mut self, key_char: char, mode: FilterMode) {
         if key_char == '󰁮' {
             if self.hint_prefix.is_empty() {
@@ -294,6 +302,7 @@ impl AppEngine {
         self.check_filtering(mode).await;
     }
 
+    /// Type into the search prefix, debouncing the re-filter that follows.
     pub(super) async fn filter_by_search(&mut self, key_char: char, mode: FilterMode) {
         if key_char == '󰁮' {
             if self.search_prefix.is_empty() {
@@ -330,6 +339,9 @@ impl AppEngine {
         });
     }
 
+    /// Whether the typed prefix is complete enough for a single match to be
+    /// unambiguous: the full hint width is typed, or a search is active with no
+    /// hint prefix narrowing it further.
     fn ready_for_unique(&self) -> bool {
         !self.is_searching
             && (self.hint_prefix.len() == self.hint_width as usize
@@ -339,7 +351,7 @@ impl AppEngine {
     pub(super) async fn check_filtering(&mut self, mode: FilterMode) {
         match mode {
             FilterMode::OCR => {
-                self.ocr_res_filtering();
+                self.build_ocr_hints();
             }
             FilterMode::Generic => {
                 self.filter_by_key().await;

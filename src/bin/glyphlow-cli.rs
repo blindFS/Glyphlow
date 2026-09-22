@@ -180,18 +180,14 @@ async fn send(signal: AppSignal, confirmation: String) -> ExitCode {
     }
 }
 
-/// Write to stdout without panicking on a closed pipe.
+/// Write to stdout without panicking on a closed pipe, and let `anstream` drop
+/// ANSI escapes when they would be unwelcome.
 ///
-/// Rust ignores `SIGPIPE`, so a plain `print!` turns `glyphlow-cli complete
-/// bash | head` into an EPIPE panic. Producing less output than the reader
-/// wanted is a normal way for a pipeline to end.
-///
-/// This is also the only place that decides whether ANSI escapes survive.
-/// Callers hand over fully-coloured text and [`anstream::stdout`] drops the
-/// escapes when they would be unwelcome. That is deliberately the same
-/// arrangement clap uses for its own output — it builds styled help text and
-/// lets an `AutoStream` filter it — so `--help` and `workflow list` cannot
-/// disagree about `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`, `TERM=dumb` or CI.
+/// Rust ignores `SIGPIPE`, so a plain `print!` turns `glyphlow-cli complete bash
+/// | head` into an EPIPE panic, while producing less output than the reader
+/// wanted is a normal way for a pipeline to end. Routing through `anstream` also
+/// keeps `--help` and `workflow list` in agreement about `NO_COLOR`, `CLICOLOR`,
+/// `TERM=dumb` and CI, because clap filters its own output the same way.
 fn write_stdout(bytes: &[u8]) {
     let mut stdout = anstream::stdout().lock();
     let _ = stdout.write_all(bytes);
@@ -199,7 +195,7 @@ fn write_stdout(bytes: &[u8]) {
 }
 
 /// Same as [`write_stdout`], for the same reasons. Nothing written here is
-/// coloured today; it goes through the stream so that stays true by default.
+/// coloured today.
 fn write_stderr(bytes: &[u8]) {
     let mut stderr = anstream::stderr().lock();
     let _ = stderr.write_all(bytes);
@@ -391,7 +387,6 @@ mod tests {
         assert!(out.ends_with('\n'), "output should end with a newline");
     }
 
-    /// The header row is the only coloured part of the table.
     #[test]
     fn test_table_header_row_is_coloured() {
         let rows = [workflow("ProofRead", "p", RoleOfInterest::Any, None)];
@@ -418,12 +413,9 @@ mod tests {
         assert!(!body.ansi_has_any(), "a body cell is coloured:\n{out:?}");
     }
 
-    /// An escape sequence inside a config value must not shift the columns.
-    ///
-    /// `WorkFlow::display` is user-authored, so it can contain anything. This is
-    /// what the `ansi` feature of `tabled` buys: cells are measured by visible
-    /// width. Drop the feature and the second row here shifts left by the length
-    /// of the escapes.
+    /// `WorkFlow::display` is user-authored, so it can contain escape sequences.
+    /// This is what the `ansi` feature of `tabled` buys: cells measured by visible
+    /// width. Drop it and the second row shifts left by the length of the escapes.
     ///
     /// The lines are stripped *after* rendering, which is what makes this a
     /// measurement test: if `tabled` counted the escapes as width, the
@@ -456,8 +448,7 @@ mod tests {
         );
     }
 
-    /// `complete` must produce something for every supported shell, and must
-    /// not need a server.
+    /// Must not need a server.
     #[rstest]
     #[case::bash(CompletionShell::Bash)]
     #[case::zsh(CompletionShell::Zsh)]
@@ -539,8 +530,6 @@ mod tests {
         ));
     }
 
-    /// `complete` accepts the shells `clap_complete` knows about, so a typo
-    /// cannot silently print the wrong script.
     #[rstest]
     #[case::bash("bash")]
     #[case::zsh("zsh")]

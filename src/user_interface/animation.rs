@@ -26,7 +26,7 @@ const HINT_FADE_OUT_DURATION: f64 = 0.5;
 const HINT_DIM_OPACITY: f32 = 0.25;
 
 impl UIDrawer {
-    /// Triggers a ripple animation at the given (x, y) coordinates inside a parent CALayer.
+    /// Draw a ripple at `(x, y)`, in the given colour.
     pub fn draw_ripple(&self, x: f64, y: f64, color: &CFRetained<CGColor>) {
         autoreleasepool(|_| {
             let initial_radius = RIPPLE_INIT_RADIUS;
@@ -104,14 +104,13 @@ impl UIDrawer {
         });
     }
 
-    /// Draws a fading-out triangle cursor trail from `(start_x, start_y)` to `(end_x, end_y)`.
-    /// Ending coordinates are in screen coordinates (top-left origin), need calibration before drawing
-    /// while start coordinates are in bottom-left origin, but relative to the main screen origin.
+    /// Draw a fading triangle from the cursor's current position to
+    /// `(end_x, end_y)`.
     ///
-    /// The triangle vertices are:
-    ///   1. Starting cursor position
-    ///   2. Ending cursor position
-    ///   3. Right-bottom corner of the ending cursor shape (constant offset from ending position)
+    /// The end point is in screen coordinates and gets calibrated, but the start
+    /// point comes from `NSEvent::mouseLocation` — already bottom-left, relative
+    /// to the main screen — and needs its own adjustment when there is more than
+    /// one display.
     pub fn draw_trail(
         &self,
         start_x: f64,
@@ -259,7 +258,8 @@ impl UIDrawer {
 }
 
 impl HintBox {
-    /// Fades the hint box out, then hides it.
+    /// Fade the hint box out; `hide_box` fades the box itself away too, instead
+    /// of leaving it dimmed.
     pub fn fade_out(&self, hide_box: bool) {
         let mut layers = self.frame_layer.iter().collect::<Vec<_>>();
         let mut ending_opacity = HINT_DIM_OPACITY;

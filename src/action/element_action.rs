@@ -17,7 +17,9 @@ use tokio::sync::oneshot;
 
 use crate::util::Frame;
 
-async fn capture_focused_window(frame_rect: CGRect) -> Result<Retained<CGImage>, String> {
+/// Screenshot the screen region `rect`, bridging ScreenCaptureKit's completion
+/// handler back into an `async` fn.
+async fn capture_rect(rect: CGRect) -> Result<Retained<CGImage>, String> {
     let (tx, rx) = oneshot::channel();
     let tx_shared = Arc::new(Mutex::new(Some(tx)));
 
@@ -43,7 +45,7 @@ async fn capture_focused_window(frame_rect: CGRect) -> Result<Retained<CGImage>,
 
     unsafe {
         SCScreenshotManager::captureImageInRect_completionHandler(
-            frame_rect,
+            rect,
             Some(&inner_result_callback),
         )
     };
@@ -51,9 +53,10 @@ async fn capture_focused_window(frame_rect: CGRect) -> Result<Retained<CGImage>,
     rx.await.map_err(|_| "Channel closed.".to_string())?
 }
 
+/// Capture `frame` and put it on the clipboard as JPEG. `false` on failure.
 pub async fn screen_shot(frame: &Frame) -> bool {
     let rect = frame.to_cgrect();
-    let cg_image = match capture_focused_window(rect).await {
+    let cg_image = match capture_rect(rect).await {
         Ok(img) => img,
         Err(e) => {
             log::error!("{e}");
@@ -83,8 +86,12 @@ pub async fn screen_shot(frame: &Frame) -> bool {
     })
 }
 
+/// Recognised text, with the screen rect it was found in.
 pub type OCRResult = Vec<(String, CGRect)>;
 
+/// OCR `frame` and map every observation back to screen coordinates.
+///
+/// Vision reports normalised bottom-left boxes, so the y axis is flipped here.
 pub async fn perform_ocr(
     frame: &Frame,
     languages: &[String],
@@ -92,7 +99,7 @@ pub async fn perform_ocr(
     let rect = frame.to_cgrect();
     let (w, h) = frame.size();
     unsafe {
-        let cg_image = capture_focused_window(rect).await?;
+        let cg_image = capture_rect(rect).await?;
         autoreleasepool(move |_| {
             let request = VNRecognizeTextRequest::default_retained();
             request.setRecognitionLevel(objc2_vision::VNRequestTextRecognitionLevel::Accurate);

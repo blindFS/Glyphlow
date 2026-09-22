@@ -36,6 +36,7 @@ unsafe extern "C" {
     pub fn DCSRecordCopyData(record: CFTypeRef, version: u8) -> CFStringRef;
 }
 
+/// Look `word` up in the first configured dictionary that has it, as rich text.
 // TODO: Indentation, might require regex replacing
 pub fn get_dictionary_attributed_string(
     word: &str,

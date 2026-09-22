@@ -9,25 +9,39 @@ use std::fs;
 use std::path::PathBuf;
 use tabled::Tabled;
 
+/// What kind of element a target or a workflow is about.
+///
+/// [`Any`](Self::Any), [`Some`](Self::Some) and [`Generic`](Self::Generic) are
+/// sentinels a workflow may use as its `starting_role` instead of naming a real
+/// role. They are progressively stricter — `Any` always matches, `Generic` needs
+/// a selection backed by an accessibility element — and
+/// [`CustomTarget`](Self::CustomTarget) is the fourth sentinel. The remaining
+/// variants mirror accessibility roles.
 #[derive(Debug, Default, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub enum RoleOfInterest {
     Button,
     CheckBox,
+    /// Default. A selection that has an accessibility element, whatever its role.
     #[default]
     Generic,
+    /// Unconditional: matches even with nothing selected.
     Any,
+    /// Something is selected, but it may be a pseudo element with no accessibility
+    /// element behind it (clipboard, OCR).
     Some,
     Image,
     MenuItem,
     ScrollBar,
     StaticText,
     TextField,
+    /// Text with no accessibility element behind it (clipboard, OCR).
     PseudoText,
     Cell,
+    /// Result of a `SearchFor` action.
     CustomTarget,
 }
 
-/// Custom target element to search for in a workflow
+/// Custom target element to search for in a workflow.
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
 pub struct CustomTarget {
     pub role: String,
@@ -42,6 +56,7 @@ pub struct CustomTarget {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum WorkFlowAction {
+    /// Print the element's attributes as a notification.
     Debug,
     SelectAll,
     GoParent,
@@ -53,8 +68,10 @@ pub enum WorkFlowAction {
     RightClick,
     MiddleClick,
     ShowMenu,
+    /// Open the action menu for the current selection.
     GlyphlowMenu,
     KeyCombo(KeyBinding),
+    /// Search for a [`CustomTarget`] and continue with whatever it finds.
     SearchFor(CustomTarget),
     Sleep(u64),
 }
@@ -62,11 +79,9 @@ pub enum WorkFlowAction {
 /// A pre-defined workflow: a key, the apps it applies to and the actions it runs.
 ///
 /// The [`Tabled`] derive is what lets `glyphlow-cli workflow list` print these
-/// structs as a table directly, one column per field. Three fields need a
-/// `display` function: `starting_role` has no `Display`, and the stored shape of
-/// `valid_app_ids` and `actions` is not the shape worth showing. `order` is only
-/// needed because the struct keeps `valid_app_ids` beside `key`, where it reads
-/// best in the config file, while the table shows it after the role.
+/// directly. Three fields need a `display` function because their stored shape
+/// is not worth showing, and `order` puts `valid_app_ids` after the role even
+/// though it is declared next to `key`.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Tabled)]
 pub struct WorkFlow {
     #[tabled(rename = "NAME", order = 0)]
@@ -83,6 +98,13 @@ pub struct WorkFlow {
 }
 
 /// Table cell for [`WorkFlow::starting_role`].
+///
+/// The variant name doubles as the string a workflow writes in `config.toml`:
+/// [`RoleOfInterest`] has no `#[serde(rename)]`, so this `Debug` output and the
+/// accepted config spelling are the same text. Renaming a variant — or adding a
+/// serde rename — makes this column name a role the parser will reject, so the
+/// two must move together. `AppEngine::workflow_invalid_reason`'s "needs a …
+/// selection" message reads the same way.
 fn role_label(role: &RoleOfInterest) -> String {
     format!("{role:?}")
 }
@@ -98,8 +120,8 @@ fn apps_label(ids: &Option<Vec<String>>) -> String {
 
 /// Table cell for [`WorkFlow::actions`]: how many steps the workflow runs.
 ///
-/// A slice rather than a `&Vec`, so it does not trip `clippy::ptr_arg`; the
-/// derive's `&self.actions` coerces.
+/// Takes a slice so it does not trip `clippy::ptr_arg`; the derive's
+/// `&self.actions` coerces.
 fn step_count(actions: &[WorkFlowAction]) -> String {
     actions.len().to_string()
 }
@@ -243,21 +265,30 @@ pub fn cgcolor_to_rgba(cgcolor: &CFRetained<CGColor>) -> Option<(u8, u8, u8, u8)
     }
 }
 
+/// Keys as characters, for the hint labels, the menus and the config file.
 pub trait AlphabeticKey {
+    /// What the key types unshifted, or a stand-in glyph for keys that type
+    /// nothing at all (`Backspace`, `Shift`, ...).
     fn to_char(&self) -> char;
+    /// What the key types with Shift held.
     fn shifted_char(&self) -> char;
+    /// The name this key is written as in the config file (`"A"`, `"ALT"`, ...).
     fn to_str(&self) -> String;
+    /// The inverse of [`AlphabeticKey::to_str`] — but not exactly: it knows
+    /// `A`-`Z` and the five modifier names only, so digits and punctuation
+    /// serialize but do not parse back. That asymmetry is deliberate.
     fn from_str(c: &str) -> Option<Key>;
+    /// The right-hand twin of a left-hand modifier.
+    ///
+    /// `MetaLeft` is missing and `ShiftRight` maps to `MetaRight`, so a
+    /// `META + X` binding never fires with the right Cmd key. Its only consumer
+    /// is the global-trigger matcher in `key_listener`.
     fn right_alternative(&self) -> Option<Key>;
 }
 
 /// Builds [`AlphabeticKey::to_char`] and [`AlphabeticKey::shifted_char`] from a
-/// single table.
-///
-/// The two are views of one keyboard layout — what a key types, and what it
-/// types with Shift held — so writing them as two 45-arm matches means keeping
-/// two tables in agreement by hand. Keys that type no character at all
-/// (modifiers, Escape, ...) are left out and fall through to `' '`.
+/// single table, so the two views of one keyboard layout cannot drift apart.
+/// Keys that type nothing are left out and fall through to `' '`.
 macro_rules! key_char_table {
     ($($key:ident => $plain:literal / $shifted:literal),* $(,)?) => {
         fn to_char(&self) -> char {
@@ -395,22 +426,16 @@ impl AlphabeticKey for Key {
     }
 }
 
-/// Characters that can actually reach the hint filter as a plain keystroke.
+/// Characters that can reach the hint filter as a plain keystroke.
 ///
-/// Mirrors the non-modifier branches of `Key::to_char()`, which is what hint
-/// filtering compares typed keys against. Every character here is ASCII, so a
-/// hint label always has one byte per character.
-///
-/// `/` is deliberately absent: `KeyListener::filter_helper` intercepts
-/// `Key::Slash` to start a text search before ever calling `to_char()`, so a
-/// hint labelled with it could never be typed.
+/// Mirrors the non-modifier branches of `Key::to_char()`. `/` is deliberately
+/// absent: `KeyListener::handle_filter_key` intercepts it to start a text search, so
+/// a hint labelled with it could never be typed.
 const TYPABLE_HINT_CHARS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789`-=[]\\;',.";
 
-/// Bit for `c` in a 128-bit bitmap indexed by ASCII code point.
-///
-/// Returns `0` for non-ASCII characters, which can never be hint keys. That
-/// also means a non-ASCII entry accidentally added to [`TYPABLE_HINT_CHARS`]
-/// is ignored rather than silently corrupting the byte-indexed alphabet.
+/// Bit for `c` in a 128-bit bitmap indexed by ASCII code point, or `0` for
+/// non-ASCII — which can never be a hint key, and is ignored rather than
+/// silently corrupting the byte-indexed alphabet.
 const fn ascii_bit(c: char) -> u128 {
     if c.is_ascii() { 1u128 << (c as u8) } else { 0 }
 }
@@ -429,20 +454,18 @@ const TYPABLE_HINT_MASK: u128 = {
 
 /// The ordered set of keys used to label hints.
 ///
-/// Values are normalized on construction: upper-cased (typed keys are reported
-/// upper-cased for letters), de-duplicated, and restricted to
-/// [`TYPABLE_HINT_CHARS`]. An input that leaves fewer than two usable keys is
-/// rejected in favor of [`HintKeys::DEFAULT_ALPHABET`], because a single key
+/// Normalized on construction: upper-cased, de-duplicated, and restricted to
+/// `TYPABLE_HINT_CHARS`. An input that leaves fewer than two usable keys is
+/// rejected in favour of [`HintKeys::DEFAULT_ALPHABET`], because a single key
 /// cannot tell hints apart.
 ///
-/// Only ASCII can end up in here, which is what lets the label builders treat
-/// the alphabet as bytes and keep labels one byte per character.
+/// Always ASCII, which is what lets the label builders index it as bytes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
 pub struct HintKeys(String);
 
 impl HintKeys {
-    /// The historical alphabet, i.e. plain uppercase ASCII letters.
+    /// Plain uppercase ASCII letters.
     pub const DEFAULT_ALPHABET: &'static str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
     /// Below this many distinct keys hints cannot be addressed unambiguously.
@@ -493,12 +516,12 @@ impl HintKeys {
         &self.0
     }
 
-    /// Radix of the hint labels, i.e. how many distinct keys are available.
+    /// Radix of the hint labels: how many distinct keys there are.
     pub fn base(&self) -> usize {
         self.0.len()
     }
 
-    /// The key every padded label starts with, also the first key to press.
+    /// The key every padded label starts with, and the first key to press.
     pub fn first(&self) -> char {
         // Non-empty by construction.
         self.0.as_bytes().first().copied().unwrap_or(b'A') as char
@@ -571,15 +594,14 @@ pub struct KeyBinding {
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Copy)]
 pub enum VisibilityCheckingLevel {
-    /// As long as element frame intersects with whole screen,
-    /// reserved for limited targets
+    /// The frame only has to intersect the whole screen. Reserved for limited
+    /// targets.
     Loosest,
-    /// As long as element frame intersects with window frame
+    /// The frame has to intersect the window frame.
     Loose,
-    /// Element frame should intersect with its own parent,
-    /// as well as the window frame
+    /// The frame has to intersect its own parent, as well as the window frame.
     Medium,
-    /// Element frame should intersect with all its ancestors
+    /// The frame has to intersect all its ancestors.
     Strict,
 }
 
@@ -621,6 +643,12 @@ pub struct GlyphlowConfig {
 }
 
 impl GlyphlowConfig {
+    /// Reconcile a freshly loaded config (`other`) with the running one (`self`).
+    ///
+    /// The global trigger, the editor, the text actions and the workflows are all
+    /// baked into the key listener at startup, so their keys cannot change at
+    /// runtime: for each one that differs, the running value is forced back into
+    /// `other` and `false` is returned, telling the caller to ask for a restart.
     pub fn safe_reload(&self, other: &mut GlyphlowConfig) -> bool {
         let mut compatible = true;
 
@@ -830,6 +858,10 @@ impl GlyphlowConfig {
             .position(|wf| wf.display.to_lowercase().contains(&pattern))
     }
 
+    /// Load the config, **creating a default file when none exists**.
+    ///
+    /// Callers that must not write to disk (e.g. `workflow list`) want
+    /// [`Self::load_config_readonly`] instead.
     pub fn load_config(path: &PathBuf) -> Result<Self, String> {
         if let Ok(content) = fs::read_to_string(path) {
             log::info!("Loading config from {path:?}");
@@ -865,6 +897,7 @@ impl GlyphlowConfig {
     }
 }
 
+/// Path of `config.toml`, creating the containing directory if it is missing.
 pub fn get_config_path() -> Result<PathBuf, String> {
     let base_dir = std::env::var("XDG_CONFIG_HOME")
         .map(PathBuf::from)
@@ -886,7 +919,7 @@ mod key_combo_format {
     use super::*;
     use serde::{Deserializer, Serializer};
 
-    /// --- Serialization: Vec<Key> -> e.g. "ALT + G" ---
+    /// --- Serialization: `Vec<Key>` -> e.g. "ALT + G" ---
     pub fn serialize<S>(keys: &[Key], serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -1411,7 +1444,7 @@ mod tests {
     }
 
     /// `label_for_index` is written for speed (no intermediate buffer, exact
-    /// capacity, O(1) alphabet lookup). It must still agree exactly with the
+    /// capacity, O(1) alphabet lookup), so it must still agree exactly with the
     /// straightforward reference implementation it replaced.
     #[test]
     fn test_label_for_index_matches_reference() {
@@ -1456,9 +1489,8 @@ mod tests {
         }
     }
 
-    /// Every hint must be reachable by a distinct keystroke sequence, and all
-    /// labels of one batch must be the same width so that none is a prefix of
-    /// another (which would make filtering ambiguous).
+    /// Fixed width matters: without it one label would be a prefix of another,
+    /// which makes filtering ambiguous.
     #[test]
     fn test_hint_keys_labels_are_unique_and_fixed_width() {
         for raw in ["asdfjkl;", "jk", "0123456789", "ABCDEFGHIJKLMNOPQRSTUVWXYZ"] {

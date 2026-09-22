@@ -32,6 +32,8 @@ fn check_is_electron_app(app: &Retained<NSRunningApplication>) -> Option<bool> {
     )
 }
 
+/// System alert panels. They can be on screen without their app being frontmost,
+/// so they are checked before the frontmost application.
 const APPLE_ALARM_BUNDLE_IDS: [&str; 3] = [
     "com.apple.coreservices.uiagent",
     "com.apple.accessibility.universalAccessAuthWarn",
@@ -49,6 +51,9 @@ pub struct AppWindowInfo {
 }
 
 impl AppWindowInfo {
+    /// A sentinel covering every screen: the window is the *system-wide* element,
+    /// not a real window. Callers must not act on it before
+    /// [`get_focused_window`] has succeeded.
     pub fn default(screen_frame: Frame) -> Self {
         Self {
             window: AXUIElement::system_wide(),
@@ -101,8 +106,12 @@ fn get_system_alarm_window(screen_frame: Frame) -> Option<AppWindowInfo> {
         })
 }
 
-/// Get currently focused window element,
-/// along with information about its app
+/// The focused window and the app it belongs to.
+///
+/// Precedence is deliberate: a system alert panel first, then a popover (e.g.
+/// the Apple Music search field), then the focused window. `last_info` must be
+/// the previous result — an Electron app whose pid changed gets a short sleep so
+/// its UI tree can appear.
 pub fn get_focused_window(
     screen_frame: Frame,
     last_info: &AppWindowInfo,
@@ -155,6 +164,7 @@ pub fn get_focused_window(
     })
 }
 
+/// Prompts the user for permission when it has not been granted yet.
 pub fn check_accessibility_permissions() -> bool {
     unsafe {
         // Borrowed, not owned: the constant belongs to the framework.
@@ -165,7 +175,7 @@ pub fn check_accessibility_permissions() -> bool {
 }
 
 /// # Safety
-/// `base` must be a valid AXUIElement
+/// `base` must be a valid, non-null [`AXUIElementRef`].
 pub unsafe fn element_at_point(base: AXUIElementRef, x: f64, y: f64) -> Option<AXUIElement> {
     let mut target: AXUIElementRef = std::ptr::null_mut();
     unsafe {
