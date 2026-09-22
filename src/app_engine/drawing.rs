@@ -15,24 +15,20 @@ impl AppEngine {
         self.drawer.clear();
     }
 
-    /// Clear hint drawings
-    /// Should only be called on:
-    /// 1. Deactivation
-    /// 2. Only 1 matching remained while hint-based filtering
+    /// Remove the hint layers. Only safe on deactivation or when a single match
+    /// remains — both end hint filtering.
     pub(super) fn clear_hints(&self) {
         for hb in self.hint_boxes.iter() {
             hb.free();
         }
     }
 
-    /// Change selected element of interest
-    /// Draw/Update the frame box of selected element
+    /// Set the selected element and draw its frame box.
     pub(super) fn select(&mut self, eoi: ElementOfInterest) {
         self.drawer.draw_frame(&eoi.frame);
         self.selected = Some(eoi);
     }
 
-    /// Draw/Update hint boxes
     pub(super) fn draw_hints(&mut self) {
         autoreleasepool(|_| {
             for hb in self.hint_boxes.iter_mut() {
@@ -46,14 +42,40 @@ impl AppEngine {
         })
     }
 
+    /// Settle every label once the final hint count is known.
+    ///
+    /// The digit width grows mid-traversal (the 27th hint needs two characters).
+    /// This runs *after* collision resolution on purpose:
+    /// [`HintBox::set_label`](crate::user_interface::HintBox::set_label) re-lays
+    /// the box out, so relabelling earlier would set a layer frame once
+    /// here and again in [`Self::finalize_hints`]. Two frame changes in two
+    /// transactions means the second restarts the first's animation, and the box
+    /// jumps instead of growing smoothly.
+    ///
+    /// Comparing the label against the one already in place costs a `String` and
+    /// no measurement, so a traversal that never widens lays nothing out again.
+    pub(super) fn relabel_hints(&mut self) {
+        for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
+            let label = self
+                .config
+                .hint_keys
+                .label_for_index(i, Some(self.hint_width));
+            if label != hb.label {
+                hb.set_label(label, &self.overlay_frame, &self.config.theme);
+            }
+        }
+    }
+
+    /// Push the final positions and labels to the layers without clearing, so
+    /// nothing flickers.
     pub(super) fn finalize_hints(&self) {
         self.hint_boxes.iter().for_each(|hb| {
             hb.refresh(0, &self.overlay_frame, &self.config.theme);
         })
     }
 
-    /// Show/Hide hint_boxes/colored_frames, update hint text and positions.
-    /// Returns indices of visible hint boxes
+    /// Show or hide the hint boxes, refresh their text and positions, and return
+    /// the indices of the ones left visible.
     pub(super) fn update_hints(&mut self) -> Vec<usize> {
         let mut visible_indices = vec![];
         if self.hint_boxes.is_empty() {
@@ -95,12 +117,9 @@ impl AppEngine {
         visible_indices
     }
 
-    fn menu_format_helper(
-        key: &str,
-        display: &str,
-        prefix_len: usize,
-        max_key_len: usize,
-    ) -> String {
+    /// Render one `(key) display` menu row, padding the key so the columns line
+    /// up and blanking the already-typed prefix with underscores.
+    fn format_menu_line(key: &str, display: &str, prefix_len: usize, max_key_len: usize) -> String {
         let padding = " ".repeat(max_key_len - key.chars().count());
         let filling = "_".repeat(prefix_len);
         format!(
@@ -109,7 +128,9 @@ impl AppEngine {
         )
     }
 
-    fn menu_msg_alignment_helper(
+    /// Build the menu text for `key_prefix`, with the keys aligned on the
+    /// longest one that is still reachable.
+    fn build_menu_message(
         &self,
         head: &str,
         builtin_menu_items: &[MenuItem],
@@ -120,14 +141,14 @@ impl AppEngine {
     ) -> String {
         let prefix_len = key_prefix.chars().count();
         let mut max_key_len = 1;
-        let mut menu_itmes = Vec::new();
+        let mut menu_items = Vec::new();
 
         // Skip static single key menu items
         // when searching for multi-key actions
         for it in builtin_menu_items {
             if it.key.starts_with(key_prefix) {
                 max_key_len = max_key_len.max(it.key.chars().count());
-                menu_itmes.push((it.key, it.description));
+                menu_items.push((it.key, it.description));
             }
         }
 
@@ -137,7 +158,7 @@ impl AppEngine {
             && editor.key.starts_with(key_prefix)
         {
             max_key_len = max_key_len.max(editor.key.chars().count());
-            menu_itmes.push((&editor.key, &editor.display));
+            menu_items.push((&editor.key, &editor.display));
         }
 
         // TODO: refactor this if we introduce actions for elements other than text
@@ -145,7 +166,7 @@ impl AppEngine {
             for action in self.config.text_actions.iter() {
                 if action.key.starts_with(key_prefix) {
                     max_key_len = max_key_len.max(action.key.chars().count());
-                    menu_itmes.push((&action.key, &action.display));
+                    menu_items.push((&action.key, &action.display));
                 }
             }
         }
@@ -155,19 +176,19 @@ impl AppEngine {
             for workflow in self.config.workflows.iter() {
                 if workflow.key.starts_with(key_prefix) && self.is_workflow_valid(workflow) {
                     max_key_len = max_key_len.max(workflow.key.chars().count());
-                    menu_itmes.push((&workflow.key, &workflow.display));
+                    menu_items.push((&workflow.key, &workflow.display));
                 }
             }
         }
 
-        if menu_itmes.is_empty() {
+        if menu_items.is_empty() {
             return "Wrong key sequence\nPress 󰁮 to go back".to_string();
         }
 
         // Aligned
         let mut msg = head.to_string();
-        for (key, display) in menu_itmes {
-            msg.push_str(&Self::menu_format_helper(
+        for (key, display) in menu_items {
+            msg.push_str(&Self::format_menu_line(
                 key,
                 display,
                 prefix_len,
@@ -189,7 +210,7 @@ impl AppEngine {
             self.get_app_window_info();
         }
 
-        let msg = self.menu_msg_alignment_helper(
+        let msg = self.build_menu_message(
             "Pick a Target:",
             &DASH_BOARD_MENU_ITEMS,
             true,
@@ -202,7 +223,7 @@ impl AppEngine {
     }
 
     fn draw_image_action_menu(&self, key_prefix: &str) {
-        let msg = self.menu_msg_alignment_helper(
+        let msg = self.build_menu_message(
             "Pick an Action for Image:",
             &IMAGE_ACTION_MENU_ITEMS,
             false,
@@ -222,7 +243,7 @@ impl AppEngine {
             text
         };
         let header = format!("Pick an Action for Text:\n\n{}\n", text);
-        let msg = self.menu_msg_alignment_helper(
+        let msg = self.build_menu_message(
             &header,
             &TEXT_ACTION_MENU_ITEMS,
             true,
@@ -236,7 +257,7 @@ impl AppEngine {
 
     fn draw_scrolling_menu(&self, key_prefix: &str) {
         if !self.config.hide_scrolling_menu {
-            let msg = self.menu_msg_alignment_helper(
+            let msg = self.build_menu_message(
                 "Pick a Scrolling Action:",
                 &SCROLLBAR_MENU_ITEMS,
                 false,

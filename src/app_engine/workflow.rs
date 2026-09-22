@@ -9,13 +9,13 @@ use monio::Button;
 use std::time::Duration;
 
 impl AppEngine {
-    /// Check if a workflow is valid given currently selected element and app bundle id
+    /// Whether a workflow can run against the current selection and app.
     pub(super) fn is_workflow_valid(&self, wf: &WorkFlow) -> bool {
         self.workflow_invalid_reason(wf).is_none()
     }
 
-    /// Whether the workflow's `valid_app_ids` restriction (if any) admits the
-    /// currently focused app.
+    /// Whether the workflow's `valid_app_ids` restriction admits the focused app.
+    /// `None` means every app.
     fn app_id_allows(&self, wf: &WorkFlow) -> bool {
         !wf.valid_app_ids.as_ref().is_some_and(|ids| {
             ids.iter()
@@ -24,6 +24,7 @@ impl AppEngine {
     }
 
     /// Whether the current selection satisfies the workflow's `starting_role`.
+    /// See [`RoleOfInterest`] for what the sentinel roles mean.
     fn role_satisfied(&self, wf: &WorkFlow) -> bool {
         match wf.starting_role {
             RoleOfInterest::Any => true,
@@ -62,7 +63,7 @@ impl AppEngine {
         ))
     }
 
-    /// Returns true if there're pending actions to finish
+    /// Run one workflow action; returns `true` when the queue should stop.
     fn execute_workflow_action(&mut self, act: &WorkFlowAction) -> bool {
         // Actions don't need a selected element
         match act {

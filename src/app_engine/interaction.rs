@@ -33,6 +33,10 @@ impl AppEngine {
         }
     }
 
+    /// Move the cursor and click, with a ripple at the click point.
+    ///
+    /// Left click deliberately picks an out-of-range colour index, so it falls
+    /// back to the hint background colour.
     pub(super) fn simulate_click(&self, x: f64, y: f64, button: Button) {
         self.move_mouse_with_trail(x, y);
 
@@ -59,6 +63,8 @@ impl AppEngine {
         element.set_attribute_by_name(kAXFocusedAttribute, CFBoolean::true_value().as_CFType());
     }
 
+    /// Focus the element and press it, falling back to a synthetic click for
+    /// Electron apps and for cells.
     pub(super) fn press_on_element(
         &self,
         element: &AXUIElement,
@@ -92,6 +98,8 @@ impl AppEngine {
         };
     }
 
+    /// Show the element's context menu, or synthesize a right click for Electron
+    /// apps.
     pub(super) fn right_click_menu_on_element(&self, element: &AXUIElement, center: (f64, f64)) {
         let (x, y) = center;
 
@@ -113,7 +121,7 @@ impl AppEngine {
         };
     }
 
-    /// Select the parent of the currently selected element
+    /// Select the parent of the currently selected element.
     pub(super) fn select_parent(&mut self) -> bool {
         if let Some(parent_element) = self
             .selected
@@ -133,6 +141,11 @@ impl AppEngine {
         false
     }
 
+    /// Run a text action.
+    ///
+    /// The returned flag says whether the drawing must be kept: deactivating
+    /// would tear down the word picker or the dictionary view that the action
+    /// just built.
     pub(super) fn perform_text_action(&mut self, ta: TextAction) {
         let Some(ElementOfInterest {
             context: Some(text),
@@ -220,6 +233,8 @@ impl AppEngine {
         }
     }
 
+    /// Scroll a scroll bar by value, or synthesize wheel events for any other
+    /// element.
     pub(super) fn perform_scroll_action(&mut self, sa: ScrollAction) {
         let Some(selected) = self.selected.as_ref() else {
             return;
@@ -313,6 +328,9 @@ impl AppEngine {
         }
     }
 
+    /// Write `text` to the temp file and launch the editor on it.
+    ///
+    /// `{glyphlow_temp_file}` in the configured args is replaced with that path.
     pub(super) fn open_editor(&self, text: &str) -> Result<(), Box<dyn std::error::Error>> {
         let editor = self
             .config
@@ -345,6 +363,10 @@ impl AppEngine {
         Ok(())
     }
 
+    /// Run a user-defined text action.
+    ///
+    /// `{glyphlow_text}` in the args is replaced with the selection, and whatever
+    /// the command then writes to stdout replaces it in turn.
     fn take_external_action(&mut self, idx: usize, selected_text: &str) {
         let action = self
             .config

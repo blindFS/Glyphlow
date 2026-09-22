@@ -10,6 +10,8 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 const MIN_HEIGHT_THRESHOLD: f64 = 10.0;
 
+/// Measure `attr_string` within `size`, returning the suggested frame size and
+/// the number of characters that fit.
 pub fn estimate_frame_for_text(
     attr_string: &Retained<NSMutableAttributedString>,
     size: (f64, f64),
@@ -24,6 +26,9 @@ pub fn estimate_frame_for_text(
     (OCGSize::new(width, height), range.length)
 }
 
+/// An axis-aligned rectangle in AX screen coordinates (top-left origin). The
+/// layer coordinates the UI draws in are bottom-left, and
+/// [`crate::user_interface::calibrated_origin`] is the only place that converts.
 #[derive(Debug, Clone, PartialEq, Copy, Default)]
 pub struct Frame {
     pub top_left: CGPoint,
@@ -141,6 +146,8 @@ impl Frame {
     }
 }
 
+/// Guess the line height by dividing the frame height by the estimated number of
+/// wrapped lines.
 fn estimate_font_height(s: &str, frame: &Frame) -> f64 {
     let unicode_width = s.width();
     let (w, h) = frame.size();
@@ -151,10 +158,12 @@ fn estimate_font_height(s: &str, frame: &Frame) -> f64 {
     h / line_count
 }
 
-/// Heuristic of selecting a paragraph of texts,
-/// given 2 frames as the start and end
+/// The text between the words at `idx1` and `idx2`, treated as one paragraph.
+///
+/// A heuristic: elements too far left or right of the two anchors are dropped
+/// rather than included.
 // TODO: languages that read from right to left
-pub fn select_range_helper(
+pub fn select_text_range(
     choices: &[(&str, Frame, bool)],
     idx1: usize,
     idx2: usize,
@@ -295,10 +304,23 @@ pub fn search_regex(text: &str) -> Option<Regex> {
     Regex::new(&format!(".*{text_pattern}.*")).ok()
 }
 
+/// Folds `text` to lowercase ASCII, transliterating anything outside ASCII on
+/// the way (`Straße` -> `strasse`, `CAFÉ` -> `cafe`).
+///
+/// This is how search targets and word-picker words are compared, so it runs
+/// once per word while the user types.
 pub fn lower_ascii(text: &str) -> String {
+    // `any_ascii` pushes ASCII characters through unchanged, so for pure ASCII
+    // input it is the identity and only the lowercase pass is left. Most
+    // documents are ASCII, and this halves the allocations on that path.
+    if text.is_ascii() {
+        return text.to_ascii_lowercase();
+    }
     any_ascii::any_ascii(text).to_ascii_lowercase()
 }
 
+/// Truncate `input` to `fixed_length` display columns, keeping the tail and
+/// replacing what was dropped with a single `.`.
 pub fn format_fixed_width(input: &str, fixed_length: usize) -> Cow<'_, str> {
     if input.width() <= fixed_length {
         return Cow::Borrowed(input);
@@ -436,10 +458,8 @@ mod frame_tests {
         assert_eq!(frames[2].top_left.x, 100.0);
     }
 
-    /// Regression test: an earlier comparison was not a total order, so
-    /// `sort` could panic with "user-provided comparison function does not
-    /// correctly implement a total order". These three frames are the
-    /// counter-example that used to trigger it.
+    /// Regression: the comparison was not a total order, so `sort` could panic.
+    /// These frames are the counter-example that used to trigger it.
     #[test]
     fn test_total_order_is_consistent_for_sorting() {
         let a = Frame::new(10.0, 80.0, 20.0, 100.0);
@@ -496,7 +516,6 @@ mod frame_tests {
 mod select_range_tests {
     use super::*;
 
-    /// Helper function to quickly generate test data
     fn make_choice(
         text: &str,
         x: f64,
@@ -519,7 +538,7 @@ mod select_range_tests {
         ];
 
         // Select from "Hello " to "Rust."
-        let (text, frame) = select_range_helper(&choices, 0, 4).unwrap();
+        let (text, frame) = select_text_range(&choices, 0, 4).unwrap();
 
         // `last_y` logic expects a newline when `top_left.y > last_y - 3.0`
         assert_eq!(text, "Hello world.\nThis is Rust.");
@@ -547,7 +566,7 @@ mod select_range_tests {
 
         // Select start to end of Column 1
         // Indices 0 and 1
-        let (text, _) = select_range_helper(&choices, 0, 1).unwrap();
+        let (text, _) = select_text_range(&choices, 0, 1).unwrap();
 
         // Should completely ignore Column 2
         assert_eq!(text, "Col1_L1 \nCol1_L2");
@@ -566,7 +585,7 @@ mod select_range_tests {
 
         // Select start to end of Column 2
         // Indices 2 and 3
-        let (text, _) = select_range_helper(&choices, 2, 3).unwrap();
+        let (text, _) = select_text_range(&choices, 2, 3).unwrap();
 
         // Should completely ignore Column 1
         assert_eq!(text, "Col2_L1\nCol2_L2");
@@ -581,8 +600,8 @@ mod select_range_tests {
         ];
 
         // User dragged from "End" (idx 2) backwards to "Start" (idx 0)
-        let (text_reverse, frame_reverse) = select_range_helper(&choices, 2, 0).unwrap();
-        let (text_forward, frame_forward) = select_range_helper(&choices, 0, 2).unwrap();
+        let (text_reverse, frame_reverse) = select_text_range(&choices, 2, 0).unwrap();
+        let (text_forward, frame_forward) = select_text_range(&choices, 0, 2).unwrap();
 
         // The output should be identical regardless of selection direction
         assert_eq!(text_reverse, text_forward);
@@ -598,7 +617,7 @@ mod select_range_tests {
             make_choice("Keep2", 90.0, 0.0, 30.0, 10.0, true),
         ];
 
-        let (text, _) = select_range_helper(&choices, 0, 2).unwrap();
+        let (text, _) = select_text_range(&choices, 0, 2).unwrap();
 
         // The invisible element should be skipped during the `.filter(|(_, f, v)| *v ...)` step
         assert_eq!(text, "Keep1 Keep2");
@@ -615,7 +634,7 @@ mod select_range_tests {
         ];
 
         // Select from "Start " (idx 1) to "End " (idx 3)
-        let (text, frame) = select_range_helper(&choices, 1, 3).unwrap();
+        let (text, frame) = select_text_range(&choices, 1, 3).unwrap();
 
         // It should ONLY include "Start ", "Middle ", and "End "
         assert_eq!(text, "Start Middle End ");
@@ -632,7 +651,7 @@ mod select_range_tests {
         let choices = vec![make_choice("Only", 0.0, 0.0, 40.0, 10.0, true)];
 
         // Out of bounds index
-        assert!(select_range_helper(&choices, 0, 5).is_none());
+        assert!(select_text_range(&choices, 0, 5).is_none());
     }
 
     #[test]
@@ -727,8 +746,6 @@ mod search_tests {
         assert!(search_regex("").is_none());
     }
 
-    /// Stray separators collapse, so a query cannot be broken by an accidental
-    /// space at either end or by two in a row.
     #[rstest]
     #[case::leading("󱁐alpha", "alpha")]
     #[case::trailing("alpha󱁐", "alpha")]
@@ -742,10 +759,8 @@ mod search_tests {
     }
 
     /// A query made of separators alone collapses to the empty pattern, which
-    /// matches everything. That is the same *effect* as an empty query, but
-    /// reached by a different route: `None` versus a pattern that matches
-    /// anything. Both are "no filter" to the callers, which test with
-    /// `is_none_or`.
+    /// matches everything — the same effect as an empty query, by a different
+    /// route.
     #[test]
     fn a_query_of_separators_alone_matches_everything() {
         let re = search_regex("󱁐").expect("a non-empty query still yields a pattern");
@@ -773,7 +788,6 @@ mod search_tests {
         assert!(!re.is_match(miss), "{query:?} should not match {miss:?}");
     }
 
-    /// Every metacharacter the search box can type has to stay searchable.
     #[rstest]
     fn every_typable_metacharacter_is_literal(
         #[values(
@@ -786,13 +800,40 @@ mod search_tests {
         assert!(re.is_match(&format!("a{c}b")), "{c:?} should match itself");
     }
 
-    /// Search targets and word-picker words are compared case- and
-    /// accent-insensitively, so this folding happens once, up front.
     #[rstest]
     #[case::uppercase("ALPHA", "alpha")]
     #[case::accented("CAFÉ", "cafe")]
     #[case::sharp_s("Straße", "strasse")]
+    #[case::already_folded("alpha", "alpha")]
+    #[case::digits_and_punctuation("R2-D2 (v1.5)!", "r2-d2 (v1.5)!")]
     fn lower_ascii_folds_case_and_accents(#[case] input: &str, #[case] expected: &str) {
         assert_eq!(lower_ascii(input), expected);
+    }
+
+    /// The ASCII fast path skips transliteration; pin that skipping it is
+    /// unobservable, by comparing against `any_ascii` + lowercase.
+    #[rstest]
+    #[case::empty("")]
+    #[case::ascii_lower("alpha")]
+    #[case::ascii_upper("ALPHA")]
+    #[case::ascii_symbols("R2-D2 (v1.5)! \\[]{}~^")]
+    #[case::accented_upper("CAFÉ")]
+    #[case::ascii_mixed_with_accents("R2 Straße (CAFÉ)")]
+    #[case::cjk("深圳")]
+    #[case::greek("άνθρωποι")]
+    fn lower_ascii_agrees_with_transliterating_then_lowercasing(#[case] input: &str) {
+        let reference = any_ascii::any_ascii(input).to_ascii_lowercase();
+        assert_eq!(lower_ascii(input), reference);
+    }
+
+    /// The fast path covers *all* of ASCII — `is_ascii` is the whole condition —
+    /// so a control character or a symbol has to survive untouched, unlike a
+    /// naive `char::to_lowercase` pass.
+    #[test]
+    fn lower_ascii_is_a_plain_lowercase_pass_for_ascii() {
+        let every_ascii = (0u8..=127).map(char::from).collect::<String>();
+        assert!(every_ascii.is_ascii());
+        assert_eq!(lower_ascii(&every_ascii), every_ascii.to_ascii_lowercase());
+        assert!(lower_ascii(&every_ascii).is_ascii());
     }
 }

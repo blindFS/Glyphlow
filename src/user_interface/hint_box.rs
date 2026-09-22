@@ -9,6 +9,8 @@ use objc2_quartz_core::{CALayer, CAShapeLayer, CATextLayer, kCAAlignmentCenter};
 use rstar::{AABB, RTree, RTreeObject};
 use std::collections::{HashMap, VecDeque};
 
+/// One hint: the key label, the element frame it points at, and the layers that
+/// draw both.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HintBox {
     pub label: String,
@@ -74,6 +76,19 @@ impl HintBox {
         self.color.is_some()
     }
 
+    /// Replaces the label and lays the box out to match.
+    ///
+    /// This is the only way a box's size changes, so laying out here is what lets
+    /// every later [`Self::refresh`] skip the question entirely.
+    ///
+    /// Call it once the box's position is final — the layout moves the layer, and
+    /// a subsequent move would restart the animation it just started.
+    pub fn set_label(&mut self, label: String, overlay_frame: &Frame, theme: &GlyphlowTheme) {
+        self.label = label;
+        self.layout(overlay_frame, theme);
+    }
+
+    /// Size of the triangle pointing from the box at the element.
     fn geometry(theme: &GlyphlowTheme) -> (f64, f64) {
         let font_size = theme.hint_font.pointSize();
         (font_size / 2.0, font_size / 2.0) // (width, height)
@@ -93,6 +108,9 @@ impl HintBox {
         attr_string
     }
 
+    /// Where to put the box so it stays inside `overlay_frame`, plus how far it
+    /// had to be nudged to get there — the triangle needs that to keep pointing
+    /// at the element.
     fn calculate_origin(
         &self,
         box_size: CGSize,
@@ -143,7 +161,6 @@ impl HintBox {
         key_prefix_len: usize,
         overlay_frame: &Frame,
     ) {
-        let (tri_width, tri_height) = Self::geometry(theme);
         let bg_color = self.color.as_ref().unwrap_or(&theme.hint_bg_color);
 
         // Frame Layer
@@ -162,100 +179,82 @@ impl HintBox {
         }
 
         // Text & Box Layer
-        let attr_string = self.attributed_string(key_prefix_len, theme);
-        let (text_size, _) = estimate_frame_for_text(&attr_string, overlay_frame.size());
-        let margin = theme.hint_margin_size as f64;
-        let box_size = CGSize::new(
-            text_size.width + (margin * 2.0),
-            text_size.height + (margin * 2.0),
-        );
-
-        let (origin, x_offset, y_offset) =
-            self.calculate_origin(box_size, overlay_frame, tri_height);
-
-        self.box_layer.setFrame(NSRect::new(origin, box_size));
         self.box_layer.setBackgroundColor(Some(bg_color));
-        self.box_layer.setCornerRadius(margin);
-
-        self.text_layer
-            .setFrame(NSRect::new(NSPoint::new(margin, margin), text_size));
-        unsafe {
-            self.text_layer.setString(Some(&attr_string));
-        }
-
-        // Triangle Layer
-        let path = self.create_triangle_path(tri_width, tri_height, x_offset, y_offset);
-        self.tri_layer.setPath(Some(&path));
+        self.box_layer
+            .setCornerRadius(theme.hint_margin_size as f64);
         self.tri_layer.setFillColor(Some(bg_color));
-        self.tri_layer.setFrame(NSRect::new(
-            NSPoint::new((box_size.width - tri_width) / 2.0, box_size.height),
-            NSSize::new(tri_width, tri_height),
-        ));
+
+        self.render(key_prefix_len, theme);
+        self.layout(overlay_frame, theme);
 
         if self.box_layer.superlayer().is_none() {
             root_layer.addSublayer(&self.box_layer);
         }
     }
 
-    /// Updates the text and re-estimates the size, returns true if the size changed
-    fn update_text(&self, prefix_len: usize, theme: &GlyphlowTheme) -> bool {
-        let attr_string = self.attributed_string(prefix_len, theme);
-        unsafe {
-            self.text_layer.setString(Some(&attr_string));
-        }
-
-        // Re-estimate size if needed
+    /// The one place that measures the label.
+    ///
+    /// The size is a pure function of the label text — a `W` is wider than an
+    /// `I`, so it cannot be derived from the alphabet or the digit count — which
+    /// makes this the single answer to "how big is this hint". It therefore runs
+    /// where the label is created or replaced, and never on a redraw.
+    fn layout(&self, overlay_frame: &Frame, theme: &GlyphlowTheme) {
+        let attr_string = self.attributed_string(0, theme);
         let (text_size, _) = estimate_frame_for_text(
             &attr_string,
             (f64::MAX, f64::MAX), // No constraints for label
         );
 
-        let current_text_size = self.text_layer.frame().size;
-        if text_size == current_text_size {
-            return false;
-        }
-
         let margin = theme.hint_margin_size as f64;
-        let new_box_size = CGSize::new(
+        self.text_layer
+            .setFrame(NSRect::new(NSPoint::new(margin, margin), text_size));
+
+        let box_size = CGSize::new(
             text_size.width + (margin * 2.0),
             text_size.height + (margin * 2.0),
         );
-
-        let mut box_frame = self.box_layer.frame();
-        box_frame.size = new_box_size;
-        self.box_layer.setFrame(box_frame);
-
-        let mut text_frame = self.text_layer.frame();
-        text_frame.size = text_size;
-        self.text_layer.setFrame(text_frame);
-        true
+        self.place_box(box_size, overlay_frame, theme);
     }
 
-    fn update_position(&self, has_resized: bool, screen_frame: &Frame, theme: &GlyphlowTheme) {
-        if self.delta == (0.0, 0.0) && !has_resized {
-            return;
-        }
+    /// Puts the box at the origin `box_size` gives it, and redraws its triangle.
+    fn place_box(&self, box_size: CGSize, overlay_frame: &Frame, theme: &GlyphlowTheme) {
         let (tri_width, tri_height) = Self::geometry(theme);
-        let box_size = self.box_layer.frame().size;
         let (origin, x_offset, y_offset) =
-            self.calculate_origin(box_size, screen_frame, tri_height);
+            self.calculate_origin(box_size, overlay_frame, tri_height);
 
         self.box_layer.setFrame(NSRect::new(origin, box_size));
-
-        // Update triangle
-        let mut tri_frame = self.tri_layer.frame();
-        tri_frame.origin.x = (box_size.width - tri_width) / 2.0;
-        tri_frame.origin.y = box_size.height;
-        self.tri_layer.setFrame(tri_frame);
+        self.tri_layer.setFrame(NSRect::new(
+            NSPoint::new((box_size.width - tri_width) / 2.0, box_size.height),
+            NSSize::new(tri_width, tri_height),
+        ));
 
         let path = self.create_triangle_path(tri_width, tri_height, x_offset, y_offset);
         self.tri_layer.setPath(Some(&path));
     }
 
-    /// Update text, then refresh
+    /// The one place that builds the attributed string and hands it to the layer.
+    fn render(&self, prefix_len: usize, theme: &GlyphlowTheme) {
+        let attr_string = self.attributed_string(prefix_len, theme);
+        unsafe {
+            self.text_layer.setString(Some(&attr_string));
+        }
+    }
+
+    /// Follows the box when collision resolution has moved it.
+    ///
+    /// A resize needs no handling here: the label's size only changes through
+    /// [`Self::set_label`], which lays the box out again on the spot.
+    fn update_position(&self, screen_frame: &Frame, theme: &GlyphlowTheme) {
+        if self.delta == (0.0, 0.0) {
+            return;
+        }
+        self.place_box(self.box_layer.frame().size, screen_frame, theme);
+    }
+
+    /// Re-render the text at `prefix_len`, then follow the box if it moved.
     pub fn refresh(&self, prefix_len: usize, screen_frame: &Frame, theme: &GlyphlowTheme) {
-        let has_resized = self.update_text(prefix_len, theme);
-        self.update_position(has_resized, screen_frame, theme);
+        self.render(prefix_len, theme);
+        self.update_position(screen_frame, theme);
         if prefix_len > 0
             && let Some(frame_layer) = &self.frame_layer
         {
@@ -296,6 +295,7 @@ impl HintBox {
     }
 }
 
+/// Build hint boxes for `len` frames, labelled and collision-resolved.
 pub fn hint_boxes_from_frames(
     len: usize,
     frames: impl Iterator<Item = Frame>,
@@ -347,6 +347,10 @@ pub fn hint_boxes_from_frames(
 
 pub const MAX_COLLISION_OPS: usize = 150;
 
+/// Nudge overlapping boxes apart.
+///
+/// The thresholds are estimated from the font rather than measured, because this
+/// also runs before the boxes are laid out.
 pub fn resolve_collisions(boxes: &mut [HintBox], digits: u32, theme: &GlyphlowTheme) {
     // Estimate box size
     let x_thres =
@@ -355,6 +359,8 @@ pub fn resolve_collisions(boxes: &mut [HintBox], digits: u32, theme: &GlyphlowTh
     resolve_collisions_reactive(boxes, x_thres, y_thres, MAX_COLLISION_OPS);
 }
 
+/// The reactive part: a spatial grid to find neighbours cheaply, and a work
+/// queue so a box pushed into a new collision is checked again.
 fn resolve_collisions_reactive(boxes: &mut [HintBox], x_thres: f64, y_thres: f64, max_ops: usize) {
     if boxes.is_empty() {
         return;
@@ -465,6 +471,7 @@ fn resolve_collisions_reactive(boxes: &mut [HintBox], x_thres: f64, y_thres: f64
     }
 }
 
+/// Move `idx` to its new grid cell and queue it for another collision check.
 fn update_and_requeue(
     idx: usize,
     boxes: &[HintBox],
@@ -497,6 +504,10 @@ fn update_and_requeue(
     }
 }
 
+/// Colour the already-typed prefix differently from the rest, and set the font.
+///
+/// The ranges are byte offsets, which is only sound because hint labels are
+/// ASCII.
 fn update_hint_text_with_attr(
     attr_string: &Retained<NSMutableAttributedString>,
     label: &str,
@@ -561,7 +572,8 @@ fn find_overlaps_helper(boxes: Vec<IndexedFrame>, min_size: f64) -> Vec<(usize, 
             // Deduplication
             if item.idx < other.idx
                 && let Some(inter_frame) = item.frame.intersect(&other.frame)
-                // Exclude the cases where one contains the other
+                // Only count a real overlap: a sliver of contact thinner than
+                // `min_size` on either axis does not count.
                 && {
                     let (w, h) = inter_frame.size();
                     w >= min_size && h >= min_size
@@ -575,6 +587,8 @@ fn find_overlaps_helper(boxes: Vec<IndexedFrame>, min_size: f64) -> Vec<(usize, 
     overlaps
 }
 
+/// Pairs of hint boxes whose frames overlap by at least `min_size` on both axes,
+/// with the overlapping frame.
 pub fn find_overlaps(hint_boxes: &[HintBox], min_size: f64) -> Vec<(usize, usize, Frame)> {
     let frames = hint_boxes
         .iter()
@@ -619,10 +633,9 @@ mod collision_tests {
         }
     }
 
-    /// Every pair must be separated, whatever the arrangement: one overlapping
-    /// pair, a chain where fixing a pair pushes a box into the next one, or
-    /// boxes straddling a spatial-grid cell boundary (which must not hide the
-    /// overlap from the grid lookup).
+    /// Every pair must be separated. The cases are the arrangements that matter;
+    /// in `straddling_a_grid_cell` the cell boundary must not hide the overlap
+    /// from the grid lookup.
     #[rstest]
     #[case::simple_pair(vec![(0, 100.0, 100.0), (1, 105.0, 100.0)], 100)]
     #[case::chain_reaction(vec![(0, 100.0, 100.0), (1, 108.0, 100.0), (2, 116.0, 100.0)], 500)]
@@ -666,9 +679,8 @@ mod collision_tests {
         );
     }
 
-    /// Ten boxes stacked on a single point can never all be separated, so the
-    /// `max_ops` budget has to cut the loop short instead of spinning forever.
-    /// The result only needs to stay complete, finite and deterministic.
+    /// Ten boxes stacked on one point can never all be separated, so `max_ops`
+    /// has to cut the loop short instead of spinning forever.
     #[test]
     fn max_ops_budget_terminates_deterministically() {
         let stacked = || {
@@ -699,6 +711,7 @@ mod collision_tests {
 mod hint_label_tests {
     use super::*;
     use crate::config::HintKeys;
+    use rstest::rstest;
 
     fn screen() -> Frame {
         Frame::new(0.0, 0.0, 1000.0, 1000.0)
@@ -761,6 +774,53 @@ mod hint_label_tests {
         assert_eq!(boxes[9].label, "SS");
     }
 
+    /// Widening `C` -> `CA` re-lays the box out, and the settle pass that follows
+    /// must leave it exactly where the relabel put it. Pins the half of the
+    /// animation-restart contract that lives in `HintBox`.
+    #[rstest]
+    #[case::undisturbed(0.0, 0.0)]
+    #[case::shifted_by_collision_resolution(5.0, -3.0)]
+    fn relabelling_settles_the_box_where_the_settle_pass_expects_it(
+        #[case] dx: f64,
+        #[case] dy: f64,
+    ) {
+        let theme = GlyphlowTheme::default();
+        let screen = screen();
+        let mut hb = HintBox::new(
+            0,
+            "C".to_string(),
+            300.0,
+            300.0,
+            Frame::new(280.0, 280.0, 320.0, 320.0),
+            None,
+        );
+
+        hb.set_label("C".to_string(), &screen, &theme);
+        let narrow = hb.box_layer.frame();
+
+        // Collision resolution has already run, so the box's final position is in
+        // `x` / `y` / `delta` before the label widens.
+        hb.x += dx;
+        hb.y += dy;
+        hb.delta = (dx, dy);
+
+        hb.set_label("CA".to_string(), &screen, &theme);
+        let settled = hb.box_layer.frame();
+
+        // What `finalize_hints` -> `refresh` -> `update_position` does afterwards.
+        hb.update_position(&screen, &theme);
+
+        assert!(
+            settled.size.width > narrow.size.width,
+            "a two-character label must widen the box"
+        );
+        assert_eq!(
+            hb.box_layer.frame(),
+            settled,
+            "the settle pass moved a box the relabel had already placed"
+        );
+    }
+
     #[test]
     fn test_hint_boxes_empty_input() {
         let (digits, boxes) = hint_boxes_from_frames(
@@ -780,7 +840,6 @@ mod hint_label_tests {
 mod find_overlaps_tests {
     use super::*;
 
-    /// Auxiliary helper to verify float equality within a tight epsilon
     fn approx_eq(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-12
     }

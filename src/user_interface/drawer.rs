@@ -22,6 +22,21 @@ struct Menu {
     menu_string: Retained<NSMutableAttributedString>,
 }
 
+/// Runs `body` with Core Animation actions disabled, so the layer changes it
+/// makes take effect on the next frame instead of animating.
+///
+/// `begin` and `commit` have to be paired, and a stray `begin` leaves the
+/// transaction open for every later change on the thread. Keeping the pair
+/// inside one construct is the point.
+macro_rules! without_animations {
+    ($($body:tt)*) => {{
+        CATransaction::begin();
+        CATransaction::setDisableActions(true);
+        $($body)*
+        CATransaction::commit();
+    }};
+}
+
 const BORDER_WIDTH: f64 = 2.0;
 const MIN_FONT_SIZE: f64 = 10.0;
 const SEARCH_BAR_WIDTH: usize = 10;
@@ -97,6 +112,7 @@ impl Menu {
         }
     }
 
+    /// Shrink the font if the text does not fit `screen_frame`.
     fn estimate_text_size(
         &self,
         screen_frame: &Frame,
@@ -176,7 +192,7 @@ impl Menu {
         })
     }
 
-    /// Shrink font size on large estimated frame size if `auto_resize` is true
+    /// Draw `attr_string`, shrinking the font if `auto_resize` is set.
     fn draw_attributed_string(
         &self,
         attr_string: Retained<NSMutableAttributedString>,
@@ -294,23 +310,21 @@ impl UIDrawer {
         autoreleasepool(|_| {
             if init {
                 // Disable movement animations
-                CATransaction::begin();
-                CATransaction::setDisableActions(true);
-                self.reposition_search_bar();
-                CATransaction::commit();
+                without_animations! {
+                    self.reposition_search_bar();
+                }
                 self.search_bar.show();
             }
 
             // Disable animation to improve responsiveness
-            CATransaction::begin();
-            CATransaction::setDisableActions(true);
-            let ns_string = NSString::from_str(&msg);
-            self.search_bar
-                .menu_string
-                .mutableString()
-                .setString(&ns_string);
-            self.search_bar.refresh_text();
-            CATransaction::commit();
+            without_animations! {
+                let ns_string = NSString::from_str(&msg);
+                self.search_bar
+                    .menu_string
+                    .mutableString()
+                    .setString(&ns_string);
+                self.search_bar.refresh_text();
+            }
         });
     }
 
@@ -334,7 +348,8 @@ impl UIDrawer {
             .setFrame(NSRect::new(origin, search_frame.size));
     }
 
-    /// Shrink font size on large estimated frame size if `auto_resize` is true
+    /// Draw `attr_string` in the menu, shrinking the font if `auto_resize` is
+    /// set.
     pub fn draw_attributed_string(
         &self,
         theme: &GlyphlowTheme,
@@ -361,10 +376,9 @@ impl UIDrawer {
     }
 
     pub fn draw_frame_instant(&self, frame: &Frame) {
-        CATransaction::begin();
-        CATransaction::setDisableActions(true);
-        self.draw_frame(frame);
-        CATransaction::commit();
+        without_animations! {
+            self.draw_frame(frame);
+        }
     }
 
     pub fn notify(&mut self, theme: &GlyphlowTheme, msg: &str) -> usize {
@@ -399,23 +413,21 @@ impl UIDrawer {
     }
 
     pub fn clear_menus_instant(&mut self) {
-        CATransaction::begin();
-        CATransaction::setDisableActions(true);
-        self.menu.hide();
-        self.search_bar.hide();
-        self.clear_notifications();
-        CATransaction::commit();
+        without_animations! {
+            self.menu.hide();
+            self.search_bar.hide();
+            self.clear_notifications();
+        }
         CATransaction::flush();
     }
 
     pub fn clear(&mut self) {
-        CATransaction::begin();
-        CATransaction::setDisableActions(true);
-        self.menu.hide();
-        self.search_bar.hide();
-        self.selected_frame.setHidden(true);
-        self.clear_notifications();
-        CATransaction::commit();
+        without_animations! {
+            self.menu.hide();
+            self.search_bar.hide();
+            self.selected_frame.setHidden(true);
+            self.clear_notifications();
+        }
         CATransaction::flush();
     }
 
@@ -468,6 +480,7 @@ impl UIDrawer {
     }
 }
 
+/// The screens in AX coordinates (top-left origin).
 pub fn get_screen_frames(mtm: MainThreadMarker) -> Vec<Frame> {
     let screens = NSScreen::screens(mtm);
     if screens.len() > 1 && NSScreen::screensHaveSeparateSpaces(mtm) {
@@ -549,7 +562,9 @@ impl GlyphlowDrawingLayer for CALayer {
     }
 }
 
-/// Coordinate shift, top left -> bottom left
+/// Screen coordinates (top-left origin) into layer coordinates (bottom-left):
+/// shift by the overlay origin, then flip the y axis. The overlay is the union of
+/// every screen frame, so its origin is not necessarily `(0, 0)`.
 pub fn calibrated_origin(x: f64, y: f64, overlay_frame: &Frame) -> NSPoint {
     NSPoint::new(
         x - overlay_frame.top_left.x,

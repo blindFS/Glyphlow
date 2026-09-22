@@ -24,6 +24,8 @@ body {
 .d { color: {dim_color} }
 </style>"#;
 
+/// A token of the picked text: the original, its hint label, and the folded form
+/// searches are matched against.
 #[derive(Debug, Clone)]
 struct Word {
     text: String,
@@ -31,6 +33,7 @@ struct Word {
     ascii: String,
 }
 
+/// Splits a text into pickable words and draws them as a hint-labelled block.
 pub struct WordPicker {
     raw: String,
     words: Vec<Word>,
@@ -93,7 +96,8 @@ impl WordPicker {
         })
     }
 
-    /// Returns HTML string and matched indices
+    /// Render the picker as HTML, with the label prefix and the search match
+    /// highlighted, plus the indices of the words that matched.
     fn to_string(
         &self,
         width_height_ratio: f64,
@@ -178,11 +182,39 @@ impl WordPicker {
         (buffer, matched)
     }
 
-    pub fn matched_words(&self) -> Vec<(usize, &str)> {
+    /// The matches that still resolve to a word, in match order.
+    ///
+    /// Indices come from [`Self::to_string`], so a stale one should not happen;
+    /// skipping it rather than panicking keeps a bad index from taking down an
+    /// input handler.
+    fn live_matches(&self) -> impl Iterator<Item = (usize, &str)> + '_ {
         self.matched
             .iter()
             .filter_map(|idx| self.words.get(*idx).map(|w| (*idx, w.text.as_str())))
-            .collect()
+    }
+
+    /// How many words match the current prefix and search.
+    pub fn matched_count(&self) -> usize {
+        self.live_matches().count()
+    }
+
+    /// The first matching word, as `(index, text)`.
+    pub fn first_matched_word(&self) -> Option<(usize, &str)> {
+        self.live_matches().next()
+    }
+
+    /// Whether every match is the same word, which keeps the pick unambiguous
+    /// even though several copies of it matched.
+    ///
+    /// False when nothing matched: an empty match set is not a unique pick, and
+    /// saying so vacuously is exactly the kind of thing that turns into a bug at
+    /// the next call site.
+    pub fn all_matches_are_one_word(&self) -> bool {
+        let mut live = self.live_matches();
+        let Some((_, first)) = live.next() else {
+            return false;
+        };
+        live.all(|(_, word)| word == first)
     }
 
     pub fn select_range(&self, idx1: usize, idx2: usize) -> Option<String> {
@@ -265,6 +297,11 @@ fn replace_color_in_css(css: &str, theme: &GlyphlowTheme, dim_level: u8) -> Stri
         .replace("{dim_color}", &rgba_to_css_color(dim_rgba))
 }
 
+/// Split `input` into pickable tokens, with each token's byte offset in `input`.
+///
+/// Three levels, fallen through only as far as needed: whitespace and script
+/// boundaries, then punctuation, then ASCII/non-ASCII — so a URL stays one token
+/// while `Hello世界` splits into `Hello`, `世`, `界`.
 fn multilingual_split(input: &str) -> (Vec<String>, Vec<usize>) {
     let url_re = get_url_re();
     let segment_re = get_segment_re();
@@ -382,5 +419,59 @@ mod tests {
             offsets.to_vec(),
         );
         assert_eq!(multilingual_split(input), expected);
+    }
+
+    /// A picker over `words` whose `matched` list is set verbatim, so the match
+    /// queries can be exercised without a live `UIDrawer` (which is what
+    /// [`WordPicker::new`] needs and a headless test cannot build).
+    fn picker_with(words: &[&str], matched: &[usize]) -> WordPicker {
+        WordPicker {
+            raw: words.join(" "),
+            words: words
+                .iter()
+                .map(|w| Word {
+                    text: (*w).to_owned(),
+                    label: String::new(),
+                    ascii: lower_ascii(w),
+                })
+                .collect(),
+            offsets: Vec::new(),
+            screen_ratio: 1.0,
+            digits: 1,
+            matched: matched.to_vec(),
+        }
+    }
+
+    /// These three queries are what decides whether a word-picking keypress is
+    /// unambiguous, so pin each of them rather than only the combination the
+    /// caller happens to use today.
+    #[rstest]
+    // Nothing matched is not a unique pick, and must not claim to be one by
+    // vacuous truth.
+    #[case::nothing_matched(&["alpha"], &[], 0, false, None)]
+    // One match is unique, and trivially "all the same word".
+    #[case::one_match(&["alpha"], &[0], 1, true, Some((0, "alpha")))]
+    // Two copies of one word cannot be told apart, so the pick stays unique.
+    #[case::duplicates_of_one_word(&["alpha", "alpha"], &[0, 1], 2, true, Some((0, "alpha")))]
+    #[case::two_different_words(&["alpha", "beta"], &[0, 1], 2, false, Some((0, "alpha")))]
+    #[case::same_word_thrice(&["go", "go", "go"], &[0, 1, 2], 3, true, Some((0, "go")))]
+    // A stale index is skipped rather than panicking, and does not count.
+    #[case::stale_index_is_skipped(&["alpha"], &[0, 7], 1, true, Some((0, "alpha")))]
+    #[case::every_index_stale(&["alpha"], &[3, 4], 0, false, None)]
+    fn match_queries_agree_on_whether_the_pick_is_unambiguous(
+        #[case] words: &[&str],
+        #[case] matched: &[usize],
+        #[case] count: usize,
+        #[case] all_one_word: bool,
+        #[case] first: Option<(usize, &str)>,
+    ) {
+        let wp = picker_with(words, matched);
+        assert_eq!(wp.matched_count(), count, "matched_count");
+        assert_eq!(
+            wp.all_matches_are_one_word(),
+            all_one_word,
+            "all_matches_are_one_word"
+        );
+        assert_eq!(wp.first_matched_word(), first, "first_matched_word");
     }
 }

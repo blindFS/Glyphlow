@@ -1,6 +1,6 @@
 use crate::{
     config::{CustomTarget, GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
-    util::{Frame, lower_ascii, select_range_helper},
+    util::{Frame, lower_ascii, select_text_range},
 };
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
@@ -31,13 +31,34 @@ const BASIC_ATTRIBUTES: [&str; 4] = [
     kAXHiddenAttribute,
 ];
 
+thread_local! {
+    /// [`BASIC_ATTRIBUTES`] as CF objects, built once per thread.
+    ///
+    /// One traversal visits thousands of elements that all want the same four
+    /// attribute names. `CFArray` is not `Send`, which rules out a `static`.
+    static BASIC_ATTRIBUTES_CF: CFArray<CFString> = CFArray::from_CFTypes(
+        &BASIC_ATTRIBUTES
+            .iter()
+            .map(|&name| CFString::new(name))
+            .collect::<Vec<_>>(),
+    );
+
+    /// The two attributes [`GetAttribute::get_frame`] reads, cached for the same
+    /// reason: it runs once per ancestor step while walking up the tree.
+    static FRAME_ATTRIBUTES_CF: CFArray<CFString> = CFArray::from_CFTypes(&[
+        CFString::new(kAXPositionAttribute),
+        CFString::new(kAXSizeAttribute),
+    ]);
+}
+
 pub enum ElementSignal {
     // Traversal
     ElementFound(Option<ElementOfInterest>),
     TraversalFinished(Target),
 }
 
-pub(crate) fn match_helper(pattern: &str, value: &impl ToString) -> bool {
+/// Case-insensitive substring test, with `|` separating alternatives.
+pub(crate) fn matches_pattern(pattern: &str, value: &impl ToString) -> bool {
     let value = value.to_string().to_lowercase();
     pattern
         .to_lowercase()
@@ -77,24 +98,22 @@ impl ElementBasicAttributes {
     }
 
     fn from(element: &AXUIElement) -> Option<Self> {
-        let cf_attributes: Vec<CFString> =
-            BASIC_ATTRIBUTES.iter().map(|&s| CFString::new(s)).collect();
-        let cf_array_in = CFArray::from_CFTypes(&cf_attributes);
+        BASIC_ATTRIBUTES_CF.with(|cf_attributes| {
+            let mut values_ref: CFArrayRef = std::ptr::null();
+            let err = unsafe {
+                AXUIElementCopyMultipleAttributeValues(
+                    element.as_concrete_TypeRef(),
+                    cf_attributes.as_concrete_TypeRef(),
+                    // Don't stop on error
+                    0,
+                    &mut values_ref,
+                )
+            };
 
-        let mut values_ref: CFArrayRef = std::ptr::null();
-        let err = unsafe {
-            AXUIElementCopyMultipleAttributeValues(
-                element.as_concrete_TypeRef(),
-                cf_array_in.as_concrete_TypeRef(),
-                // Don't stop on error
-                0,
-                &mut values_ref,
-            )
-        };
+            if err != kAXErrorSuccess || values_ref.is_null() {
+                return None;
+            }
 
-        if err != kAXErrorSuccess || values_ref.is_null() {
-            None
-        } else {
             let values_array: CFArray<CFType> =
                 unsafe { CFArray::wrap_under_create_rule(values_ref) };
             let values = values_array.get_all_values();
@@ -126,7 +145,7 @@ impl ElementBasicAttributes {
                 frame,
                 hidden,
             })
-        }
+        })
     }
 
     fn match_custom_target(&self, target: &CompiledTarget) -> bool {
@@ -135,12 +154,14 @@ impl ElementBasicAttributes {
         {
             return false;
         }
-        match_helper(&target.role, &self.role)
+        matches_pattern(&target.role, &self.role)
     }
 }
 
-/// A [`CustomTarget`] with string fields pre-compiled into [`Regex`] objects.
-/// Build once per workflow search action; reuse across the entire element traversal.
+/// A [`CustomTarget`] with its string fields pre-compiled into [`Regex`]es.
+///
+/// Build once per workflow search action, then reuse across the whole element
+/// traversal.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompiledTarget {
     pub role: String,
@@ -191,6 +212,10 @@ impl CompiledTarget {
     }
 }
 
+/// An [`AXUIElement`] that may cross threads.
+///
+/// The wrapper is not `Send`, but the accessibility API accepts calls from any
+/// thread, so elements are handed to traversal threads wrapped in this.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ThreadSafeElement(pub AXUIElement);
 unsafe impl Send for ThreadSafeElement {}
@@ -201,6 +226,8 @@ pub enum ElementKind {
         element: ThreadSafeElement,
         role: RoleOfInterest,
     },
+    /// No accessibility element behind it — clipboard text or an OCR result. It
+    /// can be drawn and picked, but never pressed.
     Pseudo,
 }
 
@@ -263,6 +290,10 @@ impl ElementOfInterest {
         self.element().is_some_and(|this| this == other)
     }
 
+    /// Whether this element is an ancestor of `other`.
+    ///
+    /// `other` is walked upwards **in place**, so on return it holds whichever
+    /// ancestor was reached last rather than the element that was passed in.
     pub fn is_ancestor_of(&self, other: &mut AXUIElement) -> bool {
         let Some(this) = self.element() else {
             return false;
@@ -295,6 +326,11 @@ impl ElementOfInterest {
     }
 }
 
+/// Elements collected during one traversal.
+///
+/// De-duplication is by frame centre: DOM-based apps expose several nodes for
+/// one visual element, all reporting the same centre, and the later one replaces
+/// the earlier.
 #[derive(Default)]
 pub struct ElementCache {
     pub cache: Vec<ElementOfInterest>,
@@ -443,13 +479,13 @@ impl ElementCache {
                 )
             })
             .collect();
-        select_range_helper(&choices, idx1, idx2)
+        select_text_range(&choices, idx1, idx2)
     }
 }
 
 fn role_to_interest(role: &str) -> RoleOfInterest {
     #[allow(non_upper_case_globals)]
-    match role.to_string().as_str() {
+    match role {
         kAXImageRole => RoleOfInterest::Image,
         kAXTextFieldRole | kAXTextAreaRole | kAXComboBoxRole => RoleOfInterest::TextField,
         kAXMenuItemRole => RoleOfInterest::MenuItem,
@@ -465,6 +501,8 @@ pub trait GetAttribute {
     fn get_attribute(&self, attribute_name: &str) -> Option<CFType>;
     fn get_attribute_string(&self, attribute_name: &str) -> Option<String>;
     fn get_string_value_or_description(&self) -> Option<String>;
+    /// The element's frame clipped to `default_frame`, or `default_frame` itself
+    /// when its position or size is unavailable.
     fn get_frame(&self, default: Frame) -> Frame;
     fn get_dom_classes(&self) -> Option<Vec<String>>;
     fn inspect(&self) -> String;
@@ -496,25 +534,22 @@ impl GetAttribute for AXUIElement {
     }
 
     fn get_frame(&self, default_frame: Frame) -> Frame {
-        let cf_array_in = CFArray::from_CFTypes(&[
-            CFString::new(kAXPositionAttribute),
-            CFString::new(kAXSizeAttribute),
-        ]);
+        let frame = FRAME_ATTRIBUTES_CF.with(|cf_attributes| {
+            let mut values_ref: CFArrayRef = std::ptr::null();
+            let err = unsafe {
+                AXUIElementCopyMultipleAttributeValues(
+                    self.as_concrete_TypeRef(),
+                    cf_attributes.as_concrete_TypeRef(),
+                    // Don't stop on error
+                    0,
+                    &mut values_ref,
+                )
+            };
 
-        let mut values_ref: CFArrayRef = std::ptr::null();
-        let err = unsafe {
-            AXUIElementCopyMultipleAttributeValues(
-                self.as_concrete_TypeRef(),
-                cf_array_in.as_concrete_TypeRef(),
-                // Don't stop on error
-                0,
-                &mut values_ref,
-            )
-        };
+            if err != kAXErrorSuccess || values_ref.is_null() {
+                return None;
+            }
 
-        let frame = if err != kAXErrorSuccess || values_ref.is_null() {
-            None
-        } else {
             let values_array: CFArray<CFType> =
                 unsafe { CFArray::wrap_under_create_rule(values_ref) };
             let values = values_array.get_all_values();
@@ -533,7 +568,7 @@ impl GetAttribute for AXUIElement {
                 }
                 _ => None,
             }
-        };
+        });
         frame.unwrap_or(default_frame)
     }
 
@@ -632,7 +667,7 @@ impl GetAttribute for AXUIElement {
 
     fn match_custom_target(&self, target: &CompiledTarget) -> bool {
         if let Some(sr) = target.subrole.as_ref()
-            && !self.subrole().is_ok_and(|s| match_helper(sr, &s))
+            && !self.subrole().is_ok_and(|s| matches_pattern(sr, &s))
         {
             return false;
         }
@@ -667,7 +702,7 @@ impl GetAttribute for AXUIElement {
         if let Some(a) = target.action.as_ref()
             && !self
                 .action_names()
-                .is_ok_and(|names| names.iter().any(|n| match_helper(a, &*n)))
+                .is_ok_and(|names| names.iter().any(|n| matches_pattern(a, &*n)))
         {
             return false;
         }
@@ -729,7 +764,7 @@ impl SetAttribute for AXUIElement {
     }
 }
 
-/// A safe helper to extract C-structs from an AXValue stored inside a CFType.
+/// Reads a C struct out of an `AXValue`, or `None` when the cast fails.
 fn cftype_to_rust_type<T: Default>(cf_type: CFTypeRef, value_type: u32) -> Option<T> {
     if cf_type.is_null() {
         return None;
@@ -743,7 +778,8 @@ fn cftype_to_rust_type<T: Default>(cf_type: CFTypeRef, value_type: u32) -> Optio
     }
 }
 
-/// A helper for types have no impl Into<CFType>
+/// Wraps a C struct into an `AXValue`, for the types that have no
+/// `Into<CFType>`.
 fn rust_type_to_cftype<T>(value: T, value_type: u32) -> Option<CFType> {
     unsafe {
         let raw_value = AXValueCreate(value_type, &value as *const _ as *const std::ffi::c_void);
@@ -761,17 +797,30 @@ pub enum Target {
     #[default]
     Clickable,
     Image,
+    /// Run OCR on the picked image instead of pressing it.
     ImageOCR,
+    /// Focus the picked input.
     Editable,
+    /// Open the picked input's text in the external editor. Note this is not the
+    /// same as [`Target::Editable`].
     Edit,
     Text,
+    /// The element explorer: walk the raw tree, keeping duplicates.
     ChildElement,
     Scrollable,
+    /// Elements matching a compiled [`CustomTarget`] search.
     Custom(Box<CompiledTarget>),
 }
 
 const MAX_DEPTH: u8 = 200;
 
+/// Walks the tree under `ts_elem` depth-first, reporting every element that
+/// matches `target` on `result_tx`.
+///
+/// `parent_frame` is the frame children are clipped to and must shrink
+/// monotonically on the way down; `window_frame` narrows at window-ish nodes so
+/// that Electron content scrolled out of view can be told apart from content
+/// that is simply outside the window.
 fn traverse_elements(
     ts_elem: ThreadSafeElement,
     parent_frame: &Frame,
@@ -788,6 +837,24 @@ fn traverse_elements(
     let Some(ele_fp) = ElementBasicAttributes::from(element) else {
         return;
     };
+
+    // Every dispatch arm below reports an element the same way. The macro keeps
+    // the role/target table readable; the four-argument form is for the child
+    // walk, which reports a child it has already read rather than the element
+    // currently being visited.
+    macro_rules! found {
+        ($role:expr) => {
+            found!(element, ele_fp.frame, $role, None)
+        };
+        ($role:expr, $context:expr) => {
+            found!(element, ele_fp.frame, $role, $context)
+        };
+        ($element:expr, $frame:expr, $role:expr, $context:expr) => {{
+            let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
+                $element, $context, $role, $frame,
+            )));
+        }};
+    }
 
     // PERF: Performance critical! Exclude electron elements scrolled off y axis,
     if ele_fp.frame.is_some_and(|f| {
@@ -849,13 +916,12 @@ fn traverse_elements(
                         }
                         _ => None,
                     };
-                    let _ =
-                        result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                            &child,
-                            context,
-                            roi,
-                            child_fp.frame.and_then(|f| f.intersect(window_frame)),
-                        )));
+                    found!(
+                        &child,
+                        child_fp.frame.and_then(|f| f.intersect(window_frame)),
+                        roi,
+                        context
+                    );
                 }
             }
         }
@@ -894,12 +960,7 @@ fn traverse_elements(
         && ele_fp.match_custom_target(ct)
         && element.match_custom_target(ct)
     {
-        let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-            element,
-            None,
-            RoleOfInterest::CustomTarget,
-            ele_fp.frame,
-        )));
+        found!(RoleOfInterest::CustomTarget);
     };
 
     let mut window_frame = *window_frame;
@@ -908,14 +969,7 @@ fn traverse_elements(
     match ele_fp.role.as_str() {
         // TODO: DOM Class List based image searching for icon button
         kAXPopUpButtonRole | kAXButtonRole | "AXRadioButton" => match target {
-            Target::Clickable => {
-                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element,
-                    None,
-                    RoleOfInterest::Button,
-                    ele_fp.frame,
-                )));
-            }
+            Target::Clickable => found!(RoleOfInterest::Button),
             Target::Text => {
                 if let Ok(ctx) = element
                     .label_value()
@@ -923,25 +977,14 @@ fn traverse_elements(
                     .or_else(|_| element.description())
                     .map(|cf| cf.to_string())
                 {
-                    let _ =
-                        result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                            element,
-                            Some(ctx),
-                            RoleOfInterest::Button,
-                            ele_fp.frame,
-                        )));
+                    found!(RoleOfInterest::Button, Some(ctx));
                 }
             }
             _ => (),
         },
         kAXCellRole => {
             if *target == Target::Clickable {
-                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element,
-                    None,
-                    RoleOfInterest::Cell,
-                    ele_fp.frame,
-                )));
+                found!(RoleOfInterest::Cell);
             }
         }
         // NOTE: first found in Discord app
@@ -954,74 +997,31 @@ fn traverse_elements(
                         .any(|c| c.role().is_ok_and(|r| r == kAXCellRole))
                 })
             {
-                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element,
-                    None,
-                    RoleOfInterest::Cell,
-                    ele_fp.frame,
-                )));
+                found!(RoleOfInterest::Cell);
             }
         }
         kAXImageRole => match target {
-            Target::Image | Target::ImageOCR => {
-                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element,
-                    None,
-                    RoleOfInterest::Image,
-                    ele_fp.frame,
-                )));
-            }
-            Target::Clickable if element.is_clickable() => {
-                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element,
-                    None,
-                    RoleOfInterest::Button,
-                    ele_fp.frame,
-                )));
-            }
+            Target::Image | Target::ImageOCR => found!(RoleOfInterest::Image),
+            Target::Clickable if element.is_clickable() => found!(RoleOfInterest::Button),
             _ => (),
         },
         "AXLink" => match target {
-            Target::Text if !element.has_children() => {
-                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element,
-                    element
-                        .title()
-                        .or_else(|_| element.description())
-                        .map(|cs| cs.to_string())
-                        .ok(),
-                    RoleOfInterest::StaticText,
-                    ele_fp.frame,
-                )));
-            }
-            Target::Clickable if element.is_clickable() => {
-                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element,
-                    None,
-                    RoleOfInterest::StaticText,
-                    ele_fp.frame,
-                )));
-            }
+            Target::Text if !element.has_children() => found!(
+                RoleOfInterest::StaticText,
+                element
+                    .title()
+                    .or_else(|_| element.description())
+                    .map(|cs| cs.to_string())
+                    .ok()
+            ),
+            Target::Clickable if element.is_clickable() => found!(RoleOfInterest::StaticText),
             _ => (),
         },
         kAXStaticTextRole => match target {
-            Target::Clickable if element.is_clickable() => {
-                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element,
-                    None,
-                    RoleOfInterest::Button,
-                    ele_fp.frame,
-                )));
-            }
+            Target::Clickable if element.is_clickable() => found!(RoleOfInterest::Button),
             Target::Text => {
                 if let Some(value) = element.get_string_value_or_description() {
-                    let _ =
-                        result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                            element,
-                            Some(value),
-                            RoleOfInterest::StaticText,
-                            ele_fp.frame,
-                        )));
+                    found!(RoleOfInterest::StaticText, Some(value));
                 }
             }
             _ => (),
@@ -1037,55 +1037,27 @@ fn traverse_elements(
         }
         kAXComboBoxRole | kAXTextFieldRole | kAXTextAreaRole => match target {
             Target::Editable => {
-                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element,
-                    element.get_string_value_or_description(),
+                found!(
                     RoleOfInterest::TextField,
-                    ele_fp.frame,
-                )));
+                    element.get_string_value_or_description()
+                );
             }
             Target::Text => {
                 if let Some(value) = element.get_string_value_or_description()
                     && !value.is_empty()
                 {
-                    let _ =
-                        result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                            element,
-                            Some(value),
-                            RoleOfInterest::TextField,
-                            ele_fp.frame,
-                        )));
+                    found!(RoleOfInterest::TextField, Some(value));
                 }
             }
             // NOTE: Even if not clickable, still could be focused on click
-            Target::Clickable => {
-                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element,
-                    None,
-                    RoleOfInterest::TextField,
-                    ele_fp.frame,
-                )));
-            }
+            Target::Clickable => found!(RoleOfInterest::TextField),
             _ => (),
         },
         kAXCheckBoxRole => match target {
-            Target::Clickable => {
-                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element,
-                    None,
-                    RoleOfInterest::CheckBox,
-                    ele_fp.frame,
-                )));
-            }
+            Target::Clickable => found!(RoleOfInterest::CheckBox),
             Target::Text => {
                 if let Ok(value) = element.description().map(|v| v.to_string()) {
-                    let _ =
-                        result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                            element,
-                            Some(value),
-                            RoleOfInterest::CheckBox,
-                            ele_fp.frame,
-                        )));
+                    found!(RoleOfInterest::CheckBox, Some(value));
                 }
             }
             _ => (),
@@ -1097,75 +1069,31 @@ fn traverse_elements(
                     .or_else(|_| element.label_value())
                     .map(|v| v.to_string())
             {
-                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element,
-                    Some(value),
-                    RoleOfInterest::StaticText,
-                    ele_fp.frame,
-                )));
+                found!(RoleOfInterest::StaticText, Some(value));
             }
         }
         kAXGroupRole => match target {
-            Target::Clickable if element.is_clickable() => {
-                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element,
-                    None,
-                    RoleOfInterest::Button,
-                    ele_fp.frame,
-                )));
-            }
+            Target::Clickable if element.is_clickable() => found!(RoleOfInterest::Button),
             // NOTE: Potential texts in leaf AXGroup
-            Target::ImageOCR if !element.has_children() => {
-                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element,
-                    None,
-                    RoleOfInterest::Image,
-                    ele_fp.frame,
-                )));
-            }
+            Target::ImageOCR if !element.has_children() => found!(RoleOfInterest::Image),
             _ => (),
         },
         kAXMenuItemRole => match target {
             Target::Text => {
                 if let Some(title) = element.get_attribute_string(kAXTitleAttribute) {
-                    let _ =
-                        result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                            element,
-                            Some(title),
-                            RoleOfInterest::MenuItem,
-                            ele_fp.frame,
-                        )));
+                    found!(RoleOfInterest::MenuItem, Some(title));
                 }
             }
-            Target::Clickable => {
-                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element,
-                    None,
-                    RoleOfInterest::MenuItem,
-                    ele_fp.frame,
-                )));
-            }
+            Target::Clickable => found!(RoleOfInterest::MenuItem),
             _ => (),
         },
         kAXScrollBarRole => {
             if *target == Target::Scrollable {
-                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element,
-                    None,
-                    RoleOfInterest::ScrollBar,
-                    ele_fp.frame,
-                )));
+                found!(RoleOfInterest::ScrollBar);
             }
         }
         _ => match target {
-            Target::Clickable if element.is_clickable() => {
-                let _ = result_tx.send(ElementSignal::ElementFound(ElementOfInterest::try_new(
-                    element,
-                    None,
-                    RoleOfInterest::Button,
-                    ele_fp.frame,
-                )));
-            }
+            Target::Clickable if element.is_clickable() => found!(RoleOfInterest::Button),
             _ => (),
         },
     }
@@ -1191,6 +1119,8 @@ fn traverse_elements(
     }
 }
 
+/// `traverse_elements` inside one autorelease pool, followed by the
+/// terminating [`ElementSignal::TraversalFinished`].
 pub fn traverse(
     root: ThreadSafeElement,
     parent_frame: Frame,
@@ -1236,9 +1166,6 @@ mod tests {
         }
     }
 
-    /// `match_helper` is a case-insensitive substring test, with `|` separating
-    /// alternatives. An empty pattern is contained in everything, itself
-    /// included.
     #[rstest]
     #[case::exact_lowercase("Button", "button", true)]
     #[case::pattern_lowercase("BUTTON", "AXButton", true)]
@@ -1250,12 +1177,12 @@ mod tests {
     #[case::pipe_first_alternative("button|textfield", "AXButton", true)]
     #[case::pipe_second_alternative("button|textfield", "AXTextField", true)]
     #[case::pipe_tolerates_spaces("button | textfield", "AXTextField", true)]
-    fn match_helper_is_case_insensitive_substring_with_pipe_alternatives(
+    fn matches_pattern_is_case_insensitive_substring_with_pipe_alternatives(
         #[case] pattern: &str,
         #[case] value: &str,
         #[case] expected: bool,
     ) {
-        assert_eq!(match_helper(pattern, &value), expected);
+        assert_eq!(matches_pattern(pattern, &value), expected);
     }
 
     #[test]
@@ -1422,8 +1349,6 @@ mod tests {
         cache
     }
 
-    /// `select_range` turns the two picked hints into the text that gets copied.
-    /// Without a role reference every element between the two ends is fair game.
     #[test]
     fn a_range_without_a_role_reference_spans_every_element() {
         let cache = cache_of(&["alpha ", "beta ", "gamma"]);
@@ -1434,10 +1359,9 @@ mod tests {
         assert_eq!(frame, Frame::new(0.0, 0.0, 130.0, 10.0));
     }
 
-    /// A role reference restricts the range to elements of that role. When
-    /// nothing in between matches, the range is refused outright instead of
-    /// falling back to "ignore the filter" — otherwise a multi-selection across
-    /// two text fields would silently swallow the button sitting between them.
+    /// Refuses the range rather than falling back to "ignore the filter" —
+    /// otherwise a multi-selection across two text fields would silently swallow
+    /// the button sitting between them.
     #[test]
     fn a_role_reference_restricts_the_range_or_refuses_it() {
         let cache = cache_of(&["alpha ", "beta ", "gamma"]);
@@ -1455,9 +1379,8 @@ mod tests {
         );
     }
 
-    /// The element explorer walks the raw tree, so it bypasses every size and
-    /// content filter and keeps duplicates — the user asked to see all of it.
-    /// It also always reports the index it just added.
+    /// The explorer walks the raw tree, so it bypasses every size and content
+    /// filter and keeps duplicates — the user asked to see all of it.
     #[test]
     fn the_element_explorer_force_adds_anything() {
         let mut cache = ElementCache::new(10.0, 10.0, 20.0);
@@ -1478,9 +1401,9 @@ mod tests {
         assert_eq!(cache.cache.len(), 2, "the explorer keeps duplicates");
     }
 
-    /// Outside the explorer a pseudo element is never cached. A clipboard-backed
-    /// selection has no accessibility element, so there is nothing to draw a
-    /// hint box on and nothing to press later.
+    /// Outside the explorer a pseudo element is never cached: a clipboard-backed
+    /// selection has no accessibility element, so there is nothing to draw a hint
+    /// box on and nothing to press later.
     #[test]
     fn a_pseudo_element_is_never_cached_outside_the_element_explorer() {
         let mut cache = ElementCache::new(0.0, 0.0, 0.0);
@@ -1507,10 +1430,10 @@ mod tests {
         assert!(cache.seen_center.is_empty());
     }
 
-    /// A pseudo element carries its searchable text in `context` because it has no
+    /// A pseudo element carries its searchable text in `context`, since it has no
     /// accessibility element to read from. The folding itself is `lower_ascii`'s
-    /// business (covered in `util`), so all this pins is that the context is used
-    /// and that a missing context yields an empty target rather than a panic.
+    /// business; this pins that `context` is used and that a missing one yields an
+    /// empty target rather than a panic.
     #[rstest]
     #[case::lower_cased(Some("Mixed Case"), "mixed case")]
     #[case::no_context(None, "")]

@@ -57,7 +57,10 @@ pub enum AppSignal {
     // State signals
     Activate(Target),
     DeActivate,
+    /// A key was typed while filtering hints.
     HintFilter(char, FilterMode),
+    /// A key was typed while searching. A space arrives as
+    /// [`crate::util::SEARCH_TERM_SEPARATOR`], not as `' '`.
     SearchFilter(char, FilterMode),
     MenuRefresh(String),
     DashboardRefresh(String),
@@ -79,6 +82,8 @@ pub enum AppSignal {
     FrameOCR,
     StartSearch,
     FinishSearch(FilterMode),
+    /// A debounced search re-check. The id is the counter it was scheduled with,
+    /// so a timer that has been superseded can be ignored.
     SearchDebounce(usize, FilterMode),
     BackToTextActionMenu,
 }
@@ -185,8 +190,10 @@ pub enum Mode {
     TextActionMenu,
     ImageActionMenu,
     WordPicking,
+    /// A search is open, started from the given filtering mode.
     Searching(FilterMode),
     OCRResultFiltering,
+    /// A notification is on screen; any key dismisses everything.
     WaitAndDeactivate,
 }
 
@@ -213,7 +220,7 @@ impl KeyListener {
         items.into_iter().map(|it| (it.key.to_string(), it.action))
     }
 
-    fn menu_action_helper(
+    fn build_menu_actions(
         menu_type: MenuType,
         config: &GlyphlowConfig,
     ) -> (HashMap<String, AppSignal>, usize) {
@@ -287,7 +294,7 @@ impl KeyListener {
         ]
         .into_iter()
         {
-            let (items, max_key_len) = Self::menu_action_helper(menu_type, config);
+            let (items, max_key_len) = Self::build_menu_actions(menu_type, config);
             menu_actions.insert(menu_type, items);
             menu_action_max_key_len.insert(menu_type, max_key_len);
         }
@@ -306,7 +313,7 @@ impl KeyListener {
         }
     }
 
-    fn menu_helper(
+    fn handle_menu_key(
         &self,
         key: &Key,
         menu_type: MenuType,
@@ -343,7 +350,12 @@ impl KeyListener {
         true
     }
 
-    fn filter_helper(&self, key: &Key, mut state: MutexGuard<'_, Mode>, mode: FilterMode) -> bool {
+    fn handle_filter_key(
+        &self,
+        key: &Key,
+        mut state: MutexGuard<'_, Mode>,
+        mode: FilterMode,
+    ) -> bool {
         match key {
             Key::ShiftLeft | Key::ShiftRight => self.send(AppSignal::ToggleMultiSelection),
             Key::Slash => {
@@ -385,16 +397,18 @@ impl KeyListener {
                     false
                 }
             }
-            Mode::DashBoard => self.menu_helper(&key, MenuType::Dashboard, state, key_state),
-            Mode::WordPicking => self.filter_helper(&key, state, FilterMode::WordPicking),
-            Mode::Filtering => self.filter_helper(&key, state, FilterMode::Generic),
-            Mode::OCRResultFiltering => self.filter_helper(&key, state, FilterMode::OCR),
-            Mode::TextActionMenu => self.menu_helper(&key, MenuType::TextAction, state, key_state),
+            Mode::DashBoard => self.handle_menu_key(&key, MenuType::Dashboard, state, key_state),
+            Mode::WordPicking => self.handle_filter_key(&key, state, FilterMode::WordPicking),
+            Mode::Filtering => self.handle_filter_key(&key, state, FilterMode::Generic),
+            Mode::OCRResultFiltering => self.handle_filter_key(&key, state, FilterMode::OCR),
+            Mode::TextActionMenu => {
+                self.handle_menu_key(&key, MenuType::TextAction, state, key_state)
+            }
             Mode::ImageActionMenu => {
-                self.menu_helper(&key, MenuType::ImageAction, state, key_state)
+                self.handle_menu_key(&key, MenuType::ImageAction, state, key_state)
             }
             Mode::Scrolling | Mode::DictionaryScrolling => {
-                self.menu_helper(&key, MenuType::Scroll, state, key_state)
+                self.handle_menu_key(&key, MenuType::Scroll, state, key_state)
             }
             Mode::Searching(mode) => {
                 match key {
@@ -435,6 +449,8 @@ impl KeyListener {
 pub struct KeyState {
     pub pressed_keys: HashSet<Key>,
     pub prefix: String,
+    /// Set while Glyphlow is synthesizing keys itself, so the event tap does not
+    /// feed its own events back in.
     pub is_simulating: bool,
 }
 

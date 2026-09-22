@@ -1,26 +1,21 @@
-//! Inter-process communication between the `glyphlow` server and its clients.
+//! The Unix socket protocol between the `glyphlow` server and its clients.
 //!
-//! The server listens on a Unix domain socket inside the Glyphlow cache
-//! directory. Clients such as `glyphlow-cli` connect to it and send a single
-//! newline-terminated, JSON encoded [`AppSignal`], which the server decodes and
-//! feeds into [`crate::AppEngine::handle_signal`].
-//!
-//! Keeping the path resolution here (instead of duplicating it in every binary)
-//! guarantees the server and the client always agree on where the socket lives.
+//! A client sends one newline-terminated, JSON encoded [`AppSignal`] and gets no
+//! reply; the server feeds it into [`crate::AppEngine::handle_signal`]. Path
+//! resolution lives here rather than in each binary, so server and client always
+//! agree on where the socket is.
 
 use crate::AppSignal;
 use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 
-/// Name of the socket file inside [`cache_dir`].
 pub const SOCKET_FILE_NAME: &str = "glyphlow.socket";
 
-/// Directory holding Glyphlow runtime files (the socket and the temporary
-/// editing file).
+/// Directory holding the runtime files (socket, temporary editing file).
 ///
-/// Honours `XDG_CACHE_HOME`, falling back to `$HOME/.cache`. The directory is
-/// created if it does not exist yet.
+/// Honours `XDG_CACHE_HOME`, falling back to `$HOME/.cache`, and creates the
+/// directory if it is missing.
 pub fn cache_dir() -> Option<PathBuf> {
     let dir = cache_dir_path()?;
     if !dir.exists() {
@@ -29,10 +24,10 @@ pub fn cache_dir() -> Option<PathBuf> {
     Some(dir)
 }
 
-/// Path of the Unix socket the server listens on.
+/// Path of the Unix socket, or `None` when no cache directory can be resolved.
 ///
-/// Resolving this never touches the filesystem, so a client probing for a
-/// server that is not running leaves nothing behind.
+/// Unlike [`cache_dir`] this never touches the filesystem, so a client probing
+/// for a server that is not running leaves nothing behind.
 pub fn socket_path() -> Option<PathBuf> {
     cache_dir_path().map(|dir| dir.join(SOCKET_FILE_NAME))
 }
@@ -44,8 +39,8 @@ fn cache_dir_path() -> Option<PathBuf> {
     cache_dir_from(xdg_cache_home.as_deref(), home.as_deref())
 }
 
-/// The pure part of [`cache_dir_path`], split out so the precedence rule can be
-/// tested without mutating the process environment.
+/// The pure part of [`cache_dir_path`], split out so the precedence rule is
+/// testable without mutating the process environment.
 fn cache_dir_from(xdg_cache_home: Option<&str>, home: Option<&str>) -> Option<PathBuf> {
     xdg_cache_home
         .map(PathBuf::from)
@@ -53,19 +48,15 @@ fn cache_dir_from(xdg_cache_home: Option<&str>, home: Option<&str>) -> Option<Pa
         .map(|base| base.join("glyphlow"))
 }
 
-/// Errors that can occur while talking to the server.
 #[derive(Debug)]
 pub enum IpcError {
     /// Neither `HOME` nor `XDG_CACHE_HOME` is set.
     MissingSocketPath,
-    /// The server is not listening on the socket.
     Connect {
         path: PathBuf,
         source: std::io::Error,
     },
-    /// The signal could not be encoded as JSON.
     Serialize(serde_json::Error),
-    /// The request could not be written to the socket.
     Write(std::io::Error),
 }
 
@@ -100,10 +91,8 @@ impl std::error::Error for IpcError {
     }
 }
 
-/// Send a single [`AppSignal`] to the running server.
-///
-/// This is fire-and-forget: the server acknowledges nothing, so a successful
-/// return only means the request was handed to the socket.
+/// Fire-and-forget: the server never acknowledges, so `Ok` only means the
+/// request reached the socket.
 pub async fn send_signal(signal: &AppSignal) -> Result<(), IpcError> {
     let path = socket_path().ok_or(IpcError::MissingSocketPath)?;
     let mut stream = UnixStream::connect(&path)
@@ -147,8 +136,6 @@ mod tests {
         );
     }
 
-    /// A failed connect has to name the socket it could not reach, or the user
-    /// has no way to tell which server is missing.
     #[test]
     fn the_connect_error_names_the_socket_it_could_not_reach() {
         let connect = IpcError::Connect {
