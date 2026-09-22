@@ -1114,12 +1114,36 @@ mod tests {
         let (got, want) = (&config.theme, GlyphlowTheme::default());
         let rgba = |c: &CFRetained<CGColor>| cgcolor_to_rgba(c);
 
-        assert_eq!(rgba(&got.hint_bg_color), rgba(&want.hint_bg_color), "hint_bg_color");
-        assert_eq!(rgba(&got.hint_fg_color), rgba(&want.hint_fg_color), "hint_fg_color");
-        assert_eq!(rgba(&got.hint_hl_color), rgba(&want.hint_hl_color), "hint_hl_color");
-        assert_eq!(rgba(&got.menu_bg_color), rgba(&want.menu_bg_color), "menu_bg_color");
-        assert_eq!(rgba(&got.menu_fg_color), rgba(&want.menu_fg_color), "menu_fg_color");
-        assert_eq!(rgba(&got.menu_hl_color), rgba(&want.menu_hl_color), "menu_hl_color");
+        assert_eq!(
+            rgba(&got.hint_bg_color),
+            rgba(&want.hint_bg_color),
+            "hint_bg_color"
+        );
+        assert_eq!(
+            rgba(&got.hint_fg_color),
+            rgba(&want.hint_fg_color),
+            "hint_fg_color"
+        );
+        assert_eq!(
+            rgba(&got.hint_hl_color),
+            rgba(&want.hint_hl_color),
+            "hint_hl_color"
+        );
+        assert_eq!(
+            rgba(&got.menu_bg_color),
+            rgba(&want.menu_bg_color),
+            "menu_bg_color"
+        );
+        assert_eq!(
+            rgba(&got.menu_fg_color),
+            rgba(&want.menu_fg_color),
+            "menu_fg_color"
+        );
+        assert_eq!(
+            rgba(&got.menu_hl_color),
+            rgba(&want.menu_hl_color),
+            "menu_hl_color"
+        );
         assert_eq!(
             got.frame_colors.iter().map(rgba).collect::<Vec<_>>(),
             want.frame_colors.iter().map(rgba).collect::<Vec<_>>(),

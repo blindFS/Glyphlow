@@ -776,7 +776,9 @@ mod search_tests {
     /// Every metacharacter the search box can type has to stay searchable.
     #[rstest]
     fn every_typable_metacharacter_is_literal(
-        #[values('(', ')', '[', ']', '{', '}', '*', '+', '?', '|', '^', '$', '\\', '.', '-')]
+        #[values(
+            '(', ')', '[', ']', '{', '}', '*', '+', '?', '|', '^', '$', '\\', '.', '-'
+        )]
         c: char,
     ) {
         let query = c.to_string();
