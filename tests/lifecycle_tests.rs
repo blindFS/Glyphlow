@@ -345,6 +345,47 @@ fn main() {
             TestEvent::ExpectMode(Mode::WordPicking),
         ])
         .await;
+
+        println!("Running Scenario 16: An unmatched key is routed per menu kind");
+        run_test_scenario(vec![
+            // No selection behind the dashboard, so it must be refreshed through
+            // its own signal — `MenuRefresh` is resolved from a selection and
+            // would draw nothing, leaving the key without an answer.
+            TestEvent::SetMode(Mode::DashBoard),
+            TestEvent::ClearSignals,
+            TestEvent::PressKey(Key::KeyX),
+            TestEvent::ExpectSignal(AppSignal::DashboardRefresh("X".into())),
+            TestEvent::ReleaseKey(Key::KeyX),
+            // A menu that does have a selection keeps using `MenuRefresh`.
+            TestEvent::SetMode(Mode::TextActionMenu),
+            TestEvent::ClearSignals,
+            TestEvent::PressKey(Key::KeyX),
+            TestEvent::ExpectSignal(AppSignal::MenuRefresh("X".into())),
+            TestEvent::ReleaseKey(Key::KeyX),
+        ])
+        .await;
+
+        println!("Running Scenario 17: Backspace recovers the dashboard from an unmatched key");
+        run_test_scenario(vec![
+            TestEvent::SetMode(Mode::DashBoard),
+            TestEvent::ClearSignals,
+            // An unmatched key is answered by rebuilding the dashboard around it ...
+            TestEvent::PressKey(Key::KeyX),
+            TestEvent::ExpectSignal(AppSignal::DashboardRefresh("X".into())),
+            TestEvent::ReleaseKey(Key::KeyX),
+            TestEvent::ClearSignals,
+            // ... and backspace pops that prefix, which is what the answer asks
+            // the user to do.
+            TestEvent::PressKey(Key::Backspace),
+            TestEvent::ExpectSignal(AppSignal::DashboardRefresh("".into())),
+            TestEvent::ReleaseKey(Key::Backspace),
+            TestEvent::ClearSignals,
+            // The menu is usable again: the next key is not swallowed by the typo.
+            TestEvent::PressKey(Key::KeyC),
+            TestEvent::ExpectSignal(AppSignal::ReadClipboard),
+            TestEvent::ReleaseKey(Key::KeyC),
+        ])
+        .await;
     });
 
     println!("All lifecycle integration tests passed!");
