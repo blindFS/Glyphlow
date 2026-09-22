@@ -344,7 +344,11 @@ impl KeyListener {
             key_state.clear_prefix();
         } else {
             if *state != Mode::DictionaryScrolling {
-                self.send(AppSignal::MenuRefresh(key_state.prefix.clone()));
+                let signal = match menu_type {
+                    MenuType::Dashboard => AppSignal::DashboardRefresh(key_state.prefix.clone()),
+                    _ => AppSignal::MenuRefresh(key_state.prefix.clone()),
+                };
+                self.send(signal);
             }
         }
         true
