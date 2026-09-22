@@ -157,7 +157,8 @@ pub fn get_focused_window(
 
 pub fn check_accessibility_permissions() -> bool {
     unsafe {
-        let key = CFString::wrap_under_create_rule(kAXTrustedCheckOptionPrompt);
+        // Borrowed, not owned: the constant belongs to the framework.
+        let key = CFString::wrap_under_get_rule(kAXTrustedCheckOptionPrompt);
         let options = CFDictionary::from_CFType_pairs(&[(key, CFBoolean::true_value())]);
         AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef())
     }

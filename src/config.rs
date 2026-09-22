@@ -198,7 +198,7 @@ impl Default for GlyphlowTheme {
             menu_margin_size: default_menu_margin(),
             menu_bg_color: default_menu_bg(),
             menu_fg_color: default_menu_fg(),
-            menu_hl_color: default_hint_hl(),
+            menu_hl_color: default_menu_hl(),
             frame_colors: default_frame_colors(),
             enable_animation: default_enable_animation(),
         }
@@ -1099,6 +1099,40 @@ mod tests {
         // Verify the font name survived
         let font_name = NSFont::fontName(&decoded.hint_font).to_string();
         assert_eq!(font_name, "AndaleMono"); // NSFont often strips spaces in fontName
+    }
+
+    /// A config that says nothing about the theme — or only mentions it — must
+    /// give `GlyphlowTheme::default()`. With no `[theme]` table the `Default`
+    /// impl is used, with an empty one the per-field serde defaults are, and the
+    /// two had drifted on `menu_hl_color`.
+    #[rstest]
+    #[case::no_theme_table("")]
+    #[case::empty_theme_table("[theme]\n")]
+    #[case::other_settings_only("scroll_distance = 0.3\n")]
+    fn omitting_the_theme_gives_the_default_theme(#[case] config_toml: &str) {
+        let config: GlyphlowConfig = toml::from_str(config_toml).expect("config should parse");
+        let (got, want) = (&config.theme, GlyphlowTheme::default());
+        let rgba = |c: &CFRetained<CGColor>| cgcolor_to_rgba(c);
+
+        assert_eq!(rgba(&got.hint_bg_color), rgba(&want.hint_bg_color), "hint_bg_color");
+        assert_eq!(rgba(&got.hint_fg_color), rgba(&want.hint_fg_color), "hint_fg_color");
+        assert_eq!(rgba(&got.hint_hl_color), rgba(&want.hint_hl_color), "hint_hl_color");
+        assert_eq!(rgba(&got.menu_bg_color), rgba(&want.menu_bg_color), "menu_bg_color");
+        assert_eq!(rgba(&got.menu_fg_color), rgba(&want.menu_fg_color), "menu_fg_color");
+        assert_eq!(rgba(&got.menu_hl_color), rgba(&want.menu_hl_color), "menu_hl_color");
+        assert_eq!(
+            got.frame_colors.iter().map(rgba).collect::<Vec<_>>(),
+            want.frame_colors.iter().map(rgba).collect::<Vec<_>>(),
+            "frame_colors"
+        );
+
+        let font = |f: &NSFont| (NSFont::fontName(f).to_string(), NSFont::pointSize(f));
+        assert_eq!(font(&got.hint_font), font(&want.hint_font), "hint_font");
+        assert_eq!(font(&got.menu_font), font(&want.menu_font), "menu_font");
+
+        assert_eq!(got.hint_margin_size, want.hint_margin_size);
+        assert_eq!(got.menu_margin_size, want.menu_margin_size);
+        assert_eq!(got.enable_animation, want.enable_animation);
     }
 
     #[test]

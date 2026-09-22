@@ -12,6 +12,7 @@ use tokio::sync::mpsc::Sender;
 use crate::{
     ax_element::Target,
     config::{AlphabeticKey, GlyphlowConfig, KeyBinding},
+    util::SEARCH_TERM_SEPARATOR,
 };
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -411,7 +412,11 @@ impl KeyListener {
                         } else {
                             key.to_char()
                         };
-                        let key_char = if key_char == ' ' { '󱁐' } else { key_char };
+                        let key_char = if key_char == ' ' {
+                            SEARCH_TERM_SEPARATOR
+                        } else {
+                            key_char
+                        };
                         self.send(AppSignal::SearchFilter(key_char, mode));
                     }
                 };
