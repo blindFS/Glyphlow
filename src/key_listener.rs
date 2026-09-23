@@ -500,6 +500,19 @@ mod tests {
                 r#"{"Activate":"Image"}"#,
             ),
             (
+                AppSignal::Activate(Target::Editable),
+                r#"{"Activate":"Editable"}"#,
+            ),
+            (AppSignal::Activate(Target::Edit), r#"{"Activate":"Edit"}"#),
+            (
+                AppSignal::Activate(Target::ChildElement),
+                r#"{"Activate":"ChildElement"}"#,
+            ),
+            (
+                AppSignal::Activate(Target::Scrollable),
+                r#"{"Activate":"Scrollable"}"#,
+            ),
+            (
                 AppSignal::RunWorkFlowByName("ProofRead".into()),
                 r#"{"RunWorkFlowByName":"ProofRead"}"#,
             ),

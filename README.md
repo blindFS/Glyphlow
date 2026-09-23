@@ -304,15 +304,16 @@ you can install it only when you want it:
 
 - **Nix**: set `programs.glyphlow.cli.enable = true` (see the Nix section above),
   or install the `glyphlow-cli` flake package directly.
+- **Homebrew**: `brew install glyphlow-cli`
 - **Release archive**: `glyphlow-cli.tar.gz` from the
   [releases page](https://github.com/blindFS/Glyphlow/releases).
 
 ```bash
 # Activate elements of a kind, then pick one from the overlay hints
-glyphlow-cli activate clickable   # buttons, menu items, ...
-glyphlow-cli activate text        # static text
-glyphlow-cli activate image       # images
-glyphlow-cli activate ocr         # text recognised in images
+glyphlow-cli activate clickable # buttons, menu items, ...
+glyphlow-cli activate text      # static text
+glyphlow-cli activate image     # images
+...
 
 # Inspect the configured workflows
 glyphlow-cli workflow list
