@@ -67,6 +67,7 @@ pub(super) struct ClickModifiers {
     shift: bool,
     ctrl: bool,
     alt: bool,
+    meta: bool,
 }
 
 impl ClickModifiers {
@@ -76,6 +77,7 @@ impl ClickModifiers {
             ModifierKey::Shift => &mut self.shift,
             ModifierKey::Ctrl => &mut self.ctrl,
             ModifierKey::Alt => &mut self.alt,
+            ModifierKey::Meta => &mut self.meta,
         };
         *slot = !*slot;
     }
@@ -90,6 +92,7 @@ impl ClickModifiers {
             (self.shift, ModifierKey::Shift),
             (self.ctrl, ModifierKey::Ctrl),
             (self.alt, ModifierKey::Alt),
+            (self.meta, ModifierKey::Meta),
         ]
         .into_iter()
         .filter(|(on, _)| *on)
@@ -103,6 +106,7 @@ impl ClickModifiers {
             self.shift.then_some("Shift"),
             self.ctrl.then_some("Ctrl"),
             self.alt.then_some("Alt"),
+            self.meta.then_some("Meta"),
         ]
         .into_iter()
         .flatten()
