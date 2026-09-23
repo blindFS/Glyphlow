@@ -8,8 +8,8 @@ use crate::{
     util::Frame,
 };
 use log::Level;
+use monio::Key;
 use objc2::MainThreadMarker;
-use objc2_core_graphics::CGEventFlags;
 use std::{
     collections::VecDeque,
     path::PathBuf,
@@ -84,19 +84,17 @@ impl ClickModifiers {
         *self = Self::default();
     }
 
-    /// The flags a click has to carry to hold them down.
-    pub(super) fn flags(&self) -> CGEventFlags {
-        let mut flags = CGEventFlags(0);
-        if self.shift {
-            flags |= CGEventFlags::MaskShift;
-        }
-        if self.ctrl {
-            flags |= CGEventFlags::MaskControl;
-        }
-        if self.alt {
-            flags |= CGEventFlags::MaskAlternate;
-        }
-        flags
+    /// The keys to hold down around a click, in the order they are written.
+    pub(super) fn keys(&self) -> Vec<Key> {
+        [
+            (self.shift, ModifierKey::Shift),
+            (self.ctrl, ModifierKey::Ctrl),
+            (self.alt, ModifierKey::Alt),
+        ]
+        .into_iter()
+        .filter(|(on, _)| *on)
+        .map(|(_, key)| key.key())
+        .collect()
     }
 
     /// The combination as it is written, or `none`.

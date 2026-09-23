@@ -70,6 +70,15 @@ impl ModifierKey {
             _ => None,
         }
     }
+
+    /// The key to hold down to produce it.
+    pub fn key(self) -> Key {
+        match self {
+            Self::Shift => Key::ShiftLeft,
+            Self::Ctrl => Key::ControlLeft,
+            Self::Alt => Key::AltLeft,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
