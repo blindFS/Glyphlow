@@ -403,19 +403,16 @@ impl AppEngine {
         }
     }
 
-    /// Shift keeps its released meaning — multi-selection — wherever there is
-    /// text to select. Everywhere else, and for Ctrl and Alt, a tap is a sticky
-    /// click modifier.
+    /// A tap means multi-selection wherever there is text to select, a sticky
+    /// click modifier on a clickable target, and nothing anywhere else.
     pub(super) fn toggle_modifier(&mut self, key: ModifierKey) {
-        let text_at_hand = self.target == Target::Text || self.word_picker.is_some();
-        if key == ModifierKey::Shift && text_at_hand {
+        if self.target == Target::Text || self.word_picker.is_some() {
             self.toggle_multiselection();
-            return;
+        } else if self.target == Target::Clickable {
+            self.click_modifiers.toggle(key);
+            let held = self.click_modifiers.label();
+            self.notify(&format!("Click modifiers: {held}"), Level::Info);
         }
-
-        self.click_modifiers.toggle(key);
-        let held = self.click_modifiers.label();
-        self.notify(&format!("Click modifiers: {held}"), Level::Info);
     }
 
     pub(super) fn toggle_multiselection(&mut self) {

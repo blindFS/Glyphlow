@@ -2,6 +2,7 @@ use glyphlow::{
     AppEngine, AppSignal, FilterMode, KeyListener, KeyState, Mode, ModifierKey, ScrollAction,
     TextAction,
     action::text_to_clipboard,
+    ax_element::Target,
     config::{GlyphlowConfig, RoleOfInterest, WorkFlow},
 };
 use monio::Key;
@@ -16,6 +17,30 @@ use tokio::sync::mpsc;
 /// Five words, so the default alphabet gives every word a single-key label:
 /// `alpha` = `A`, `beta` = `B`, `gamma` = `C`, `delta` = `D`, `zeta` = `E`.
 const FIVE_WORDS: &str = "alpha beta gamma delta zeta";
+
+/// Notifications the engine showed, in order.
+///
+/// What a modifier tap did is not visible on the signal channel — it shows up
+/// only as a notification — so the log is where a test can read it back.
+static MESSAGES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+struct MessageLog;
+
+impl log::Log for MessageLog {
+    fn enabled(&self, _: &log::Metadata) -> bool {
+        true
+    }
+
+    fn log(&self, record: &log::Record) {
+        if let Ok(mut messages) = MESSAGES.lock() {
+            messages.push(record.args().to_string());
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+static MESSAGE_LOG: MessageLog = MessageLog;
 
 /// A single step the simulator thread performs.
 ///
@@ -33,10 +58,19 @@ enum TestEvent {
     SetClipboard(String),
     /// Sends a raw signal, the way the CLI would over its socket.
     SendSignal(AppSignal),
+    /// Drops the notifications captured so far.
+    ClearMessages,
+    /// Waits for a notification whose text is exactly this.
+    ExpectMessage(String),
+    /// Waits as long, and fails if anything was notified at all.
+    ExpectNoMessage,
 }
 
 fn main() {
     let _mtm = MainThreadMarker::new().expect("This test must run on the main thread");
+
+    log::set_logger(&MESSAGE_LOG).expect("the test binary owns the logger");
+    log::set_max_level(log::LevelFilter::Info);
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -395,6 +429,55 @@ fn main() {
             TestEvent::ReleaseKey(Key::KeyC),
         ])
         .await;
+
+        println!("Running Scenario 18: A tap on a clickable target is a sticky modifier");
+        run_test_scenario(vec![
+            // The default target is clickable, so a tap becomes a click modifier.
+            TestEvent::SetMode(Mode::Filtering),
+            TestEvent::ClearMessages,
+            TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Shift)),
+            TestEvent::ExpectMessage("Click modifiers: Shift".into()),
+            // Each key toggles on its own, in a fixed written order ...
+            TestEvent::ClearMessages,
+            TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Meta)),
+            TestEvent::ExpectMessage("Click modifiers: Shift+Meta".into()),
+            // ... and a second tap rolls that one back off.
+            TestEvent::ClearMessages,
+            TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Shift)),
+            TestEvent::ExpectMessage("Click modifiers: Meta".into()),
+            TestEvent::ClearMessages,
+            TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Meta)),
+            TestEvent::ExpectMessage("Click modifiers: none".into()),
+        ])
+        .await;
+
+        println!("Running Scenario 19: Text at hand takes the tap, whatever the key");
+        run_test_scenario(vec![
+            TestEvent::SetClipboard(FIVE_WORDS.to_string()),
+            TestEvent::SendSignal(AppSignal::ReadClipboard),
+            TestEvent::ExpectMode(Mode::TextActionMenu),
+            TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
+            TestEvent::ExpectMode(Mode::WordPicking),
+            // The target is still the default clickable one, so this pins the
+            // order: the open word picker wins over it.
+            TestEvent::ClearMessages,
+            TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Ctrl)),
+            TestEvent::ExpectMessage("Multi-selection is now on.".into()),
+            TestEvent::ClearMessages,
+            TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Ctrl)),
+            TestEvent::ExpectMessage("Multi-selection is now off.".into()),
+        ])
+        .await;
+
+        println!("Running Scenario 20: A tap with nothing to carry is silent");
+        run_test_scenario(vec![
+            TestEvent::SendSignal(AppSignal::Activate(Target::Image)),
+            TestEvent::SetMode(Mode::Filtering),
+            TestEvent::ClearMessages,
+            TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Shift)),
+            TestEvent::ExpectNoMessage,
+        ])
+        .await;
     });
 
     println!("All lifecycle integration tests passed!");
@@ -486,6 +569,33 @@ async fn run_test_scenario_with_config(events: Vec<TestEvent>, config: GlyphlowC
                 }
                 TestEvent::ClearSignals => {
                     sim_processed_signals.lock().unwrap().clear();
+                }
+                TestEvent::ClearMessages => {
+                    MESSAGES.lock().unwrap().clear();
+                }
+                TestEvent::ExpectMessage(expected) => {
+                    let start = std::time::Instant::now();
+                    let mut found = false;
+                    while start.elapsed() < wait_timeout {
+                        if MESSAGES.lock().unwrap().contains(&expected) {
+                            found = true;
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    assert!(
+                        found,
+                        "step {step}: expected notification {expected:?}. Captured: {:?}",
+                        *MESSAGES.lock().unwrap()
+                    );
+                }
+                TestEvent::ExpectNoMessage => {
+                    std::thread::sleep(wait_timeout / 5);
+                    let messages = MESSAGES.lock().unwrap();
+                    assert!(
+                        messages.is_empty(),
+                        "step {step}: expected no notification, got {messages:?}"
+                    );
                 }
                 TestEvent::SetClipboard(text) => {
                     text_to_clipboard(&text);
