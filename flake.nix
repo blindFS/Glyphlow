@@ -13,7 +13,7 @@
       flake-utils,
     }:
     let
-      version = "0.4.0";
+      version = "0.4.1";
       systems = [ "aarch64-darwin" ];
       forEachSystem = flake-utils.lib.eachSystem systems;
     in
@@ -102,7 +102,7 @@
           '';
           src = pkgs.fetchurl {
             url = "https://github.com/blindFS/Glyphlow/releases/download/v${version}/glyphlow.tar.gz";
-            hash = "sha256-lByQ9V2s/mvFk8IqV2A6qfM34flrmICTVpqbo7sud3g=";
+            hash = "sha256-gSmf30Va7ZSIc30xOsVNfnOF787mV5OYpS8bli10ga0=";
           };
         };
 
@@ -124,7 +124,7 @@
           completions = true;
           src = pkgs.fetchurl {
             url = "https://github.com/blindFS/Glyphlow/releases/download/v${version}/glyphlow-cli.tar.gz";
-            hash = "sha256-b4P3+uAVcmI9tQlHy1BfTNr72Kb/IiS539TQOXx4DHA=";
+            hash = "sha256-SOoJrQRCPhO/bkzFaBvI6r998Skr9IsqfJts3LT8Cz8=";
           };
         };
       in
