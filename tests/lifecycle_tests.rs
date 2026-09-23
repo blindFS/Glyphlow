@@ -1,5 +1,6 @@
 use glyphlow::{
-    AppEngine, AppSignal, FilterMode, KeyListener, KeyState, Mode, ScrollAction, TextAction,
+    AppEngine, AppSignal, FilterMode, KeyListener, KeyState, Mode, ModifierKey, ScrollAction,
+    TextAction,
     action::text_to_clipboard,
     config::{GlyphlowConfig, RoleOfInterest, WorkFlow},
 };
@@ -62,8 +63,16 @@ fn main() {
             TestEvent::SetMode(Mode::Filtering),
             TestEvent::ClearSignals,
             TestEvent::PressKey(Key::ShiftLeft),
-            TestEvent::ExpectSignal(AppSignal::ToggleMultiSelection),
+            TestEvent::ExpectSignal(AppSignal::ToggleModifier(ModifierKey::Shift)),
             TestEvent::ReleaseKey(Key::ShiftLeft),
+            TestEvent::ClearSignals,
+            TestEvent::PressKey(Key::ControlLeft),
+            TestEvent::ExpectSignal(AppSignal::ToggleModifier(ModifierKey::Ctrl)),
+            TestEvent::ReleaseKey(Key::ControlLeft),
+            TestEvent::ClearSignals,
+            TestEvent::PressKey(Key::AltLeft),
+            TestEvent::ExpectSignal(AppSignal::ToggleModifier(ModifierKey::Alt)),
+            TestEvent::ReleaseKey(Key::AltLeft),
             TestEvent::ClearSignals,
             TestEvent::PressKey(Key::KeyA),
             TestEvent::ExpectSignal(AppSignal::HintFilter('A', FilterMode::Generic)),
@@ -302,7 +311,7 @@ fn main() {
             TestEvent::ExpectMode(Mode::TextActionMenu),
             TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
             TestEvent::ExpectMode(Mode::WordPicking),
-            TestEvent::SendSignal(AppSignal::ToggleMultiSelection),
+            TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Shift)),
             // `A` anchors the range at alpha rather than leaving word picking:
             // the first pick of a range only marks one end.
             TestEvent::PressKey(Key::KeyA),

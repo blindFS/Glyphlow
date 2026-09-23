@@ -52,6 +52,26 @@ impl FilterMode {
     }
 }
 
+/// A modifier key Glyphlow can hold down on the user's behalf.
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
+pub enum ModifierKey {
+    Shift,
+    Ctrl,
+    Alt,
+}
+
+impl ModifierKey {
+    /// Which modifier a physical key stands for, if it is one at all.
+    fn of(key: &Key) -> Option<Self> {
+        match key {
+            Key::ShiftLeft | Key::ShiftRight => Some(Self::Shift),
+            Key::ControlLeft | Key::ControlRight => Some(Self::Ctrl),
+            Key::AltLeft | Key::AltRight => Some(Self::Alt),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum AppSignal {
     // State signals
@@ -68,7 +88,8 @@ pub enum AppSignal {
     // Sub state signals
     FileUpdate(PathBuf),
     ClearNotification(usize),
-    ToggleMultiSelection,
+    /// A modifier key was tapped while filtering hints.
+    ToggleModifier(ModifierKey),
     // Menu specific
     TextAction(TextAction),
     ScrollAction(ScrollAction),
@@ -360,8 +381,14 @@ impl KeyListener {
         mut state: MutexGuard<'_, Mode>,
         mode: FilterMode,
     ) -> bool {
+        // Modifiers never type anything, so they are claimed before the
+        // catch-all below can read them as a space and deactivate.
+        if let Some(modifier) = ModifierKey::of(key) {
+            self.send(AppSignal::ToggleModifier(modifier));
+            return true;
+        }
+
         match key {
-            Key::ShiftLeft | Key::ShiftRight => self.send(AppSignal::ToggleMultiSelection),
             Key::Slash => {
                 self.send(AppSignal::StartSearch);
                 *state = Mode::Searching(mode)

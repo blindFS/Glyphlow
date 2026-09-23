@@ -1,6 +1,6 @@
 use super::AppEngine;
 use crate::{
-    AppSignal, FilterMode, Mode,
+    AppSignal, FilterMode, Mode, ModifierKey,
     action::perform_ocr,
     app_engine::lifecycle::delay,
     ax_element::{ElementOfInterest, Target},
@@ -401,6 +401,21 @@ impl AppEngine {
         if let Some(nt) = new_text {
             self.update_selected_text_and_show_menu(nt);
         }
+    }
+
+    /// Shift keeps its released meaning — multi-selection — wherever there is
+    /// text to select. Everywhere else, and for Ctrl and Alt, a tap is a sticky
+    /// click modifier.
+    pub(super) fn toggle_modifier(&mut self, key: ModifierKey) {
+        let text_at_hand = self.target == Target::Text || self.word_picker.is_some();
+        if key == ModifierKey::Shift && text_at_hand {
+            self.toggle_multiselection();
+            return;
+        }
+
+        self.click_modifiers.toggle(key);
+        let held = self.click_modifiers.label();
+        self.notify(&format!("Click modifiers: {held}"), Level::Info);
     }
 
     pub(super) fn toggle_multiselection(&mut self) {

@@ -12,6 +12,11 @@ use accessibility_sys::{
 use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber, string::CFString};
 use log::Level;
 use monio::{Button, Event, ScrollDirection};
+use objc2_core_foundation::CGPoint;
+use objc2_core_graphics::{
+    CGEvent, CGEventFlags, CGEventSource, CGEventSourceStateID, CGEventTapLocation, CGEventType,
+    CGMouseButton,
+};
 
 impl AppEngine {
     /// Move the mouse to `(end_x, end_y)` with a fading triangle cursor trail animation.
@@ -34,10 +39,22 @@ impl AppEngine {
     }
 
     /// Move the cursor and click, with a ripple at the click point.
+    pub(super) fn simulate_click(&self, x: f64, y: f64, button: Button) {
+        self.simulate_click_holding(x, y, button, CGEventFlags(0));
+    }
+
+    /// [`Self::simulate_click`] with `flags` held for the click itself.
     ///
     /// Left click deliberately picks an out-of-range colour index, so it falls
-    /// back to the hint background colour.
-    pub(super) fn simulate_click(&self, x: f64, y: f64, button: Button) {
+    /// back to the hint background colour. A synthetic click inherits nothing
+    /// from the keyboard, so modifiers have to ride on the mouse event.
+    pub(super) fn simulate_click_holding(
+        &self,
+        x: f64,
+        y: f64,
+        button: Button,
+        flags: CGEventFlags,
+    ) {
         self.move_mouse_with_trail(x, y);
 
         if self.config.theme.enable_animation {
@@ -54,7 +71,12 @@ impl AppEngine {
             self.drawer.draw_ripple(x, y, color);
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
-        if let Err(e) = monio::mouse_click(button) {
+
+        let clicked = match (button, flags.is_empty()) {
+            (Button::Left, false) => post_left_click(x, y, flags),
+            _ => monio::mouse_click(button).map_err(|e| e.to_string()),
+        };
+        if let Err(e) = clicked {
             log::error!("Failed to click mouse button {button:?}: {e}");
         }
     }
@@ -74,8 +96,14 @@ impl AppEngine {
         let (x, y) = center;
         self.focus_on_element(element);
 
-        if self.last_app_window_info.is_electron || *role == RoleOfInterest::Cell {
-            self.simulate_click(x, y, Button::Left);
+        // An accessibility press cannot hold a modifier, so a sticky one sends
+        // the pick through a synthetic click instead.
+        let modifiers = self.click_modifiers.flags();
+        if self.last_app_window_info.is_electron
+            || *role == RoleOfInterest::Cell
+            || !modifiers.is_empty()
+        {
+            self.simulate_click_holding(x, y, Button::Left, modifiers);
         } else if let Err(e) = element.press() {
             log::warn!("Failed to do UI press on element: {e}");
             match e {
@@ -416,4 +444,23 @@ impl AppEngine {
             }
         }
     }
+}
+
+/// Left click at `(x, y)` reporting `flags` as held, the way the hardware would.
+///
+/// `monio::mouse_click` has no way to carry modifiers, and an event posted
+/// without them reaches the app as an unmodified click however the keyboard
+/// looks.
+fn post_left_click(x: f64, y: f64, flags: CGEventFlags) -> Result<(), String> {
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .ok_or("Failed to create an event source.")?;
+    let point = CGPoint { x, y };
+
+    for kind in [CGEventType::LeftMouseDown, CGEventType::LeftMouseUp] {
+        let event = CGEvent::new_mouse_event(Some(&source), kind, point, CGMouseButton::Left)
+            .ok_or("Failed to create a mouse event.")?;
+        CGEvent::set_flags(Some(&event), flags);
+        CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&event));
+    }
+    Ok(())
 }

@@ -62,6 +62,14 @@ you can
 
 <img src="./assets/recordings/word-picker.png" width="300">
 
+### Sticky modifiers
+
+While picking a hint, tapping `Shift`, `Ctrl` or `Alt` toggles that modifier on
+for the pick, so a button can be reached the way `Shift + click`, `Ctrl + click`
+or `Ctrl + Alt + click` would. Tapping the key again rolls its modifier back
+off, and a notification shows the combination in effect. On a text target
+`Shift` keeps its multi-selection meaning instead.
+
 ### Workflow
 
 Users can define their own workflows in terms of sequences
