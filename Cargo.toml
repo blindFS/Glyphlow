@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 monio = "0.1.1"
-toml = "1.1.4"
+toml = "1.1.6"
 serde = { version = "1.0.229", features = ["derive"] }
 accessibility = "0.2.0"
 accessibility-sys = "0.2.0"
