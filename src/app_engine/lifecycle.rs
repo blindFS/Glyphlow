@@ -60,6 +60,7 @@ impl AppEngine {
         self.search_debounce_counter = 0;
         self.is_searching = false;
         self.multi_selection.reset();
+        self.click_modifiers.reset();
     }
 
     pub(super) fn notify_then_deactivate(&mut self, msg: &str, log_level: Level) {

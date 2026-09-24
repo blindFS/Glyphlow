@@ -1,5 +1,5 @@
 use crate::{
-    AppSignal, KeyState, Mode, ScrollAction,
+    AppSignal, KeyState, Mode, ModifierKey, ScrollAction,
     action::{OCRResult, WordPicker, screen_shot, text_from_clipboard},
     ax_element::{ElementCache, ElementOfInterest, Target},
     config::{GlyphlowConfig, RoleOfInterest, WorkFlowAction},
@@ -8,6 +8,7 @@ use crate::{
     util::Frame,
 };
 use log::Level;
+use monio::Key;
 use objc2::MainThreadMarker;
 use std::{
     collections::VecDeque,
@@ -58,6 +59,67 @@ impl MultiSelectionState {
     }
 }
 
+/// The modifier keys the user has tapped while filtering. Each toggles on its
+/// own, and whatever is on is held for the click that picks a hint — a tap has
+/// no way to reach an accessibility press, so the pick has to carry it.
+#[derive(Debug, Default, Clone, Copy)]
+pub(super) struct ClickModifiers {
+    shift: bool,
+    ctrl: bool,
+    alt: bool,
+    meta: bool,
+}
+
+impl ClickModifiers {
+    /// Flip `key`, the way tapping it a second time does.
+    pub(super) fn toggle(&mut self, key: ModifierKey) {
+        let slot = match key {
+            ModifierKey::Shift => &mut self.shift,
+            ModifierKey::Ctrl => &mut self.ctrl,
+            ModifierKey::Alt => &mut self.alt,
+            ModifierKey::Meta => &mut self.meta,
+        };
+        *slot = !*slot;
+    }
+
+    pub(super) fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    /// The keys to hold down around a click, in the order they are written.
+    pub(super) fn keys(&self) -> Vec<Key> {
+        [
+            (self.shift, ModifierKey::Shift),
+            (self.ctrl, ModifierKey::Ctrl),
+            (self.alt, ModifierKey::Alt),
+            (self.meta, ModifierKey::Meta),
+        ]
+        .into_iter()
+        .filter(|(on, _)| *on)
+        .map(|(_, key)| key.key())
+        .collect()
+    }
+
+    /// The combination as it is written, or `none`.
+    pub(super) fn label(&self) -> String {
+        let held = [
+            self.shift.then_some("Shift"),
+            self.ctrl.then_some("Ctrl"),
+            self.alt.then_some("Alt"),
+            self.meta.then_some("Meta"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+
+        if held.is_empty() {
+            "none".to_string()
+        } else {
+            held.join("+")
+        }
+    }
+}
+
 /// The server's whole runtime state: the picked element, the drawing layers, the
 /// loaded config and everything derived from the last traversal.
 pub struct AppEngine {
@@ -90,6 +152,7 @@ pub struct AppEngine {
     /// Like simulate mouse clicking instead of `element.press()`
     pub(super) last_app_window_info: AppWindowInfo,
     pub(super) multi_selection: MultiSelectionState,
+    pub(super) click_modifiers: ClickModifiers,
     /// Actions of a workflow that is waiting for the user to pick an element.
     pub(super) pending_workflow_actions: VecDeque<WorkFlowAction>,
 }
@@ -134,6 +197,7 @@ impl AppEngine {
             temp_file,
             last_app_window_info: AppWindowInfo::default(overlay_frame),
             multi_selection: MultiSelectionState::default(),
+            click_modifiers: ClickModifiers::default(),
             pending_workflow_actions: VecDeque::new(),
         }
     }
@@ -188,17 +252,7 @@ impl AppEngine {
                 self.set_mode(Mode::TextActionMenu);
                 self.menu_refresh("", false);
             }
-            AppSignal::ToggleMultiSelection => match self.target {
-                Target::Text => {
-                    self.toggle_multiselection();
-                }
-                _ if self.word_picker.is_some() => {
-                    self.toggle_multiselection();
-                }
-                _ => {
-                    self.notify("Multi selection only works for text.", Level::Warn);
-                }
-            },
+            AppSignal::ToggleModifier(key) => self.toggle_modifier(key),
             AppSignal::HintFilter(key_char, mode) => {
                 self.filter_by_hint(key_char, mode).await;
             }

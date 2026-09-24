@@ -11,9 +11,10 @@ use accessibility_sys::{
 };
 use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber, string::CFString};
 use log::Level;
-use monio::{Button, Event, ScrollDirection};
+use monio::{Button, Event, Key, ScrollDirection};
 
 impl AppEngine {
+    pub(super) const KEY_OP_INTERVAL_IN_MS: u64 = 20;
     /// Move the mouse to `(end_x, end_y)` with a fading triangle cursor trail animation.
     pub(super) fn move_mouse_with_trail(&self, end_x: f64, end_y: f64) {
         // Get current mouse position (Cocoa bottom-left origin)
@@ -34,10 +35,15 @@ impl AppEngine {
     }
 
     /// Move the cursor and click, with a ripple at the click point.
+    pub(super) fn simulate_click(&self, x: f64, y: f64, button: Button) {
+        self.simulate_click_holding(x, y, button, &[]);
+    }
+
+    /// [`Self::simulate_click`] with `keys` held down for the click itself.
     ///
     /// Left click deliberately picks an out-of-range colour index, so it falls
     /// back to the hint background colour.
-    pub(super) fn simulate_click(&self, x: f64, y: f64, button: Button) {
+    pub(super) fn simulate_click_holding(&self, x: f64, y: f64, button: Button, keys: &[Key]) {
         self.move_mouse_with_trail(x, y);
 
         if self.config.theme.enable_animation {
@@ -53,10 +59,33 @@ impl AppEngine {
             let color = frame_colors.get(color_idx).unwrap_or(default_color);
             self.drawer.draw_ripple(x, y, color);
         }
-        std::thread::sleep(std::time::Duration::from_millis(20));
-        if let Err(e) = monio::mouse_click(button) {
+        if let Err(e) = self.holding(keys, || monio::mouse_click(button)) {
             log::error!("Failed to click mouse button {button:?}: {e}");
         }
+    }
+
+    /// Press `keys`, run `action`, then release them in reverse.
+    ///
+    /// The presses are marked as simulated so the event tap passes them on
+    /// instead of reading them back as user input. The action waits a beat, so
+    /// the cursor and the held keys have both settled by the time it runs.
+    fn holding<T>(&self, keys: &[Key], action: impl FnOnce() -> T) -> T {
+        self.set_simulating_key(true);
+        for key in keys {
+            let _ = monio::key_press(*key);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(
+            Self::KEY_OP_INTERVAL_IN_MS,
+        ));
+
+        let result = action();
+
+        for key in keys.iter().rev() {
+            let _ = monio::key_release(*key);
+        }
+        self.set_simulating_key(false);
+
+        result
     }
 
     pub(super) fn focus_on_element(&self, element: &AXUIElement) {
@@ -74,8 +103,14 @@ impl AppEngine {
         let (x, y) = center;
         self.focus_on_element(element);
 
-        if self.last_app_window_info.is_electron || *role == RoleOfInterest::Cell {
-            self.simulate_click(x, y, Button::Left);
+        // An accessibility press cannot hold a modifier, so a sticky one sends
+        // the pick through a synthetic click instead.
+        let modifiers = self.click_modifiers.keys();
+        if self.last_app_window_info.is_electron
+            || *role == RoleOfInterest::Cell
+            || !modifiers.is_empty()
+        {
+            self.simulate_click_holding(x, y, Button::Left, &modifiers);
         } else if let Err(e) = element.press() {
             log::warn!("Failed to do UI press on element: {e}");
             match e {
