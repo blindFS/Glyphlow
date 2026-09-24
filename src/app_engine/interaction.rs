@@ -14,6 +14,7 @@ use log::Level;
 use monio::{Button, Event, Key, ScrollDirection};
 
 impl AppEngine {
+    pub(super) const KEY_OP_INTERVAL_IN_MS: u64 = 20;
     /// Move the mouse to `(end_x, end_y)` with a fading triangle cursor trail animation.
     pub(super) fn move_mouse_with_trail(&self, end_x: f64, end_y: f64) {
         // Get current mouse position (Cocoa bottom-left origin)
@@ -73,7 +74,9 @@ impl AppEngine {
         for key in keys {
             let _ = monio::key_press(*key);
         }
-        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::thread::sleep(std::time::Duration::from_millis(
+            Self::KEY_OP_INTERVAL_IN_MS,
+        ));
 
         let result = action();
 

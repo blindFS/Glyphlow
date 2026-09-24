@@ -2,7 +2,7 @@ use super::AppEngine;
 use crate::{
     Mode,
     ax_element::{CompiledTarget, GetAttribute, SetAttribute, Target},
-    config::{CustomTarget, RoleOfInterest, WorkFlow, WorkFlowAction},
+    config::{CustomTarget, KeyBinding, RoleOfInterest, WorkFlow, WorkFlowAction},
 };
 use log::Level;
 use monio::Button;
@@ -63,8 +63,26 @@ impl AppEngine {
         ))
     }
 
+    fn simulate_key(&self, action: impl FnOnce()) {
+        self.set_simulating_key(true);
+        action();
+        self.set_simulating_key(false);
+    }
+
     /// Run one workflow action; returns `true` when the queue should stop.
     fn execute_workflow_action(&mut self, act: &WorkFlowAction) -> bool {
+        let key_down = |kb: &KeyBinding| {
+            for k in kb.keys.iter() {
+                let _ = monio::key_press(*k);
+                std::thread::sleep(Duration::from_millis(Self::KEY_OP_INTERVAL_IN_MS));
+            }
+        };
+
+        let key_up = |kb: &KeyBinding| {
+            for k in kb.keys.iter().rev() {
+                let _ = monio::key_release(*k);
+            }
+        };
         // Actions don't need a selected element
         match act {
             WorkFlowAction::GlyphlowMenu => {
@@ -106,15 +124,18 @@ impl AppEngine {
                 return false;
             }
             WorkFlowAction::KeyCombo(kb) => {
-                self.set_simulating_key(true);
-                for k in kb.keys.iter() {
-                    let _ = monio::key_press(*k);
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-                for k in kb.keys.iter().rev() {
-                    let _ = monio::key_release(*k);
-                }
-                self.set_simulating_key(false);
+                self.simulate_key(|| {
+                    key_down(kb);
+                    key_up(kb);
+                });
+                return false;
+            }
+            WorkFlowAction::KeyDown(kb) => {
+                self.simulate_key(|| key_down(kb));
+                return false;
+            }
+            WorkFlowAction::KeyUp(kb) => {
+                self.simulate_key(|| key_up(kb));
                 return false;
             }
             _ => (),

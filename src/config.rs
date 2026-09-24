@@ -71,6 +71,8 @@ pub enum WorkFlowAction {
     /// Open the action menu for the current selection.
     GlyphlowMenu,
     KeyCombo(KeyBinding),
+    KeyDown(KeyBinding),
+    KeyUp(KeyBinding),
     /// Search for a [`CustomTarget`] and continue with whatever it finds.
     SearchFor(CustomTarget),
     Sleep(u64),
