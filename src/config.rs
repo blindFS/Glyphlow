@@ -611,18 +611,15 @@ pub enum VisibilityCheckingLevel {
 /// The settings one app overrides, written as an `[apps."<bundle id>"]` table.
 ///
 /// Every field is optional and falls back to the global value, and only
-/// settings the engine re-reads can appear here. A `theme` replaces the whole
-/// theme, so repeat anything you want to keep.
+/// settings the engine re-reads can appear here.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct AppOverride {
-    pub theme: Option<GlyphlowTheme>,
     pub scroll_distance: Option<f64>,
     pub hide_covered_elements: Option<bool>,
     pub element_min_width: Option<u16>,
     pub element_min_height: Option<u16>,
     pub image_min_size: Option<u16>,
     pub colored_frame_min_size: Option<u16>,
-    pub ocr_languages: Option<Vec<String>>,
     pub visibility_checking_level: Option<VisibilityCheckingLevel>,
 }
 
@@ -722,7 +719,6 @@ impl GlyphlowConfig {
     /// focused app's overrides come off.
     pub fn apply_overrides(&mut self, overrides: &AppOverride) -> AppOverride {
         AppOverride {
-            theme: displace(&mut self.theme, overrides.theme.clone()),
             scroll_distance: displace(&mut self.scroll_distance, overrides.scroll_distance),
             hide_covered_elements: displace(
                 &mut self.hide_covered_elements,
@@ -738,7 +734,6 @@ impl GlyphlowConfig {
                 &mut self.colored_frame_min_size,
                 overrides.colored_frame_min_size,
             ),
-            ocr_languages: displace(&mut self.ocr_languages, overrides.ocr_languages.clone()),
             visibility_checking_level: displace(
                 &mut self.visibility_checking_level,
                 overrides.visibility_checking_level,
@@ -1396,12 +1391,10 @@ mod tests {
         let before = toml::to_string_pretty(&config).expect("should serialize");
 
         let overrides: AppOverride =
-            toml::from_str("scroll_distance = 0.05\n[theme]\nhint_margin_size = 1\n")
-                .expect("override table should parse");
+            toml::from_str("scroll_distance = 0.05\n").expect("override table should parse");
 
         let displaced = config.apply_overrides(&overrides);
         assert_eq!(config.scroll_distance, 0.05, "the table wins");
-        assert_eq!(config.theme.hint_margin_size, 1);
         assert_eq!(
             config.hint_keys, hint_keys,
             "a field the table omits is not displaced"
