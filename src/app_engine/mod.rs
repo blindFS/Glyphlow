@@ -2,7 +2,7 @@ use crate::{
     AppSignal, KeyState, Mode, ModifierKey, ScrollAction,
     action::{OCRResult, WordPicker, screen_shot, text_from_clipboard},
     ax_element::{ElementCache, ElementOfInterest, Target},
-    config::{GlyphlowConfig, RoleOfInterest, WorkFlowAction},
+    config::{AppOverride, GlyphlowConfig, RoleOfInterest, WorkFlowAction},
     os_util::AppWindowInfo,
     user_interface::{HintBox, UIDrawer, get_screen_frames},
     util::Frame,
@@ -140,6 +140,8 @@ pub struct AppEngine {
     /// Which elements of interest to look for
     pub(super) target: Target,
     pub(super) config: GlyphlowConfig,
+    /// The global values the focused app displaced, to be put back on switch.
+    pub(super) config_displaced: Option<AppOverride>,
     pub(super) hint_width: u32,
     pub(super) selected: Option<ElementOfInterest>,
     /// Keep track of editing element,
@@ -189,6 +191,7 @@ impl AppEngine {
             hint_width: 0,
             overlay_frame,
             drawer,
+            config_displaced: None,
             config,
             signal_sender,
             search_debounce_counter: 0,

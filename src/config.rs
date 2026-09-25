@@ -5,6 +5,7 @@ use objc2_core_foundation::CFRetained;
 use objc2_core_graphics::CGColor;
 use objc2_foundation::{NSString, ns_string};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use tabled::Tabled;
@@ -607,6 +608,24 @@ pub enum VisibilityCheckingLevel {
     Strict,
 }
 
+/// The settings one app overrides, written as an `[apps."<bundle id>"]` table.
+///
+/// Every field is optional and falls back to the global value, and only
+/// settings the engine re-reads can appear here. A `theme` replaces the whole
+/// theme, so repeat anything you want to keep.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct AppOverride {
+    pub theme: Option<GlyphlowTheme>,
+    pub scroll_distance: Option<f64>,
+    pub hide_covered_elements: Option<bool>,
+    pub element_min_width: Option<u16>,
+    pub element_min_height: Option<u16>,
+    pub image_min_size: Option<u16>,
+    pub colored_frame_min_size: Option<u16>,
+    pub ocr_languages: Option<Vec<String>>,
+    pub visibility_checking_level: Option<VisibilityCheckingLevel>,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GlyphlowConfig {
     #[serde(default = "default_global_keybinding")]
@@ -642,6 +661,9 @@ pub struct GlyphlowConfig {
     pub electron_initial_wait_ms: u64,
     #[serde(default = "default_hint_keys")]
     pub hint_keys: HintKeys,
+    /// Per-app overrides, keyed by bundle id — see [`AppOverride`].
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub apps: HashMap<String, AppOverride>,
 }
 
 impl GlyphlowConfig {
@@ -694,6 +716,41 @@ impl GlyphlowConfig {
         }
         compatible
     }
+
+    /// Write every field `overrides` sets into `self`, returning the values it
+    /// displaced. Passing that record back undoes the write, which is how the
+    /// focused app's overrides come off.
+    pub fn apply_overrides(&mut self, overrides: &AppOverride) -> AppOverride {
+        AppOverride {
+            theme: displace(&mut self.theme, overrides.theme.clone()),
+            scroll_distance: displace(&mut self.scroll_distance, overrides.scroll_distance),
+            hide_covered_elements: displace(
+                &mut self.hide_covered_elements,
+                overrides.hide_covered_elements,
+            ),
+            element_min_width: displace(&mut self.element_min_width, overrides.element_min_width),
+            element_min_height: displace(
+                &mut self.element_min_height,
+                overrides.element_min_height,
+            ),
+            image_min_size: displace(&mut self.image_min_size, overrides.image_min_size),
+            colored_frame_min_size: displace(
+                &mut self.colored_frame_min_size,
+                overrides.colored_frame_min_size,
+            ),
+            ocr_languages: displace(&mut self.ocr_languages, overrides.ocr_languages.clone()),
+            visibility_checking_level: displace(
+                &mut self.visibility_checking_level,
+                overrides.visibility_checking_level,
+            ),
+        }
+    }
+}
+
+/// Write `value` over `slot` when set, handing back what was there.
+fn displace<T>(slot: &mut T, value: Option<T>) -> Option<T> {
+    let value = value?;
+    Some(std::mem::replace(slot, value))
 }
 
 fn default_theme() -> GlyphlowTheme {
@@ -841,6 +898,7 @@ impl Default for GlyphlowConfig {
             visibility_checking_level: default_vis_level(),
             electron_initial_wait_ms: default_wait_ms(),
             hint_keys: default_hint_keys(),
+            apps: HashMap::new(),
         }
     }
 }

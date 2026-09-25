@@ -101,8 +101,36 @@ impl AppEngine {
 
         self.drawer.select_screen_frame(&app_win_info.frame);
         self.drawer.draw_frame_instant(&app_win_info.frame);
+        // Only an app change can alter the overrides; this runs on every refresh.
+        let app_changed = app_win_info.bundle_id != self.last_app_window_info.bundle_id;
         self.last_app_window_info = app_win_info;
+        if app_changed {
+            self.apply_app_override();
+        }
         true
+    }
+
+    /// Point the live config at the focused app, undoing the previous one first.
+    pub(super) fn apply_app_override(&mut self) {
+        self.clear_app_override();
+
+        let overrides = self
+            .config
+            .apps
+            .get(&self.last_app_window_info.bundle_id)
+            .cloned();
+        let displaced = overrides.map(|over| self.config.apply_overrides(&over));
+        self.config_displaced = displaced;
+
+        self.element_cache.reload_config(&self.config);
+        self.drawer.reload_theme(&self.config.theme);
+    }
+
+    /// Put the global values back, undoing whatever the focused app displaced.
+    pub(super) fn clear_app_override(&mut self) {
+        if let Some(displaced) = self.config_displaced.take() {
+            self.config.apply_overrides(&displaced);
+        }
     }
 
     /// Select the focused window as the default element of interest, so that
@@ -410,10 +438,12 @@ impl AppEngine {
         } else if pb != self.temp_file {
             match GlyphlowConfig::load_config(&pb) {
                 Ok(mut new_config) => {
-                    self.element_cache.reload_config(&new_config);
+                    // Clear first so `safe_reload` and the assignment see the
+                    // global config; `apply_app_override` puts them back.
+                    self.clear_app_override();
                     let need_warning = !self.config.safe_reload(&mut new_config);
-                    self.drawer.reload_theme(&new_config.theme);
                     self.config = new_config;
+                    self.apply_app_override();
 
                     if need_warning {
                         self.notify_then_deactivate(
