@@ -1384,6 +1384,37 @@ mod tests {
         assert_eq!(old_config.text_actions.len(), 1);
     }
 
+    /// The record `apply_overrides` returns is the inverse of the write, and a
+    /// field the table omits is left alone.
+    #[test]
+    fn apply_overrides_is_its_own_inverse() {
+        let mut config: GlyphlowConfig = toml::from_str(
+            "scroll_distance = 0.5\nhint_keys = \"asdf\"\n[theme]\nhint_margin_size = 9\n",
+        )
+        .expect("config should parse");
+        let hint_keys = config.hint_keys.clone();
+        let before = toml::to_string_pretty(&config).expect("should serialize");
+
+        let overrides: AppOverride =
+            toml::from_str("scroll_distance = 0.05\n[theme]\nhint_margin_size = 1\n")
+                .expect("override table should parse");
+
+        let displaced = config.apply_overrides(&overrides);
+        assert_eq!(config.scroll_distance, 0.05, "the table wins");
+        assert_eq!(config.theme.hint_margin_size, 1);
+        assert_eq!(
+            config.hint_keys, hint_keys,
+            "a field the table omits is not displaced"
+        );
+
+        config.apply_overrides(&displaced);
+        assert_eq!(
+            toml::to_string_pretty(&config).expect("should serialize"),
+            before,
+            "undo restores the whole config"
+        );
+    }
+
     /// Sanitizing is lenient on purpose: case is normalized, duplicates keep
     /// their first occurrence, and anything the key listener cannot report is
     /// dropped rather than rejected.
