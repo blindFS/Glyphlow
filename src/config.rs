@@ -5,6 +5,7 @@ use objc2_core_foundation::CFRetained;
 use objc2_core_graphics::CGColor;
 use objc2_foundation::{NSString, ns_string};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use tabled::Tabled;
@@ -607,6 +608,21 @@ pub enum VisibilityCheckingLevel {
     Strict,
 }
 
+/// The settings one app overrides, written as an `[apps."<bundle id>"]` table.
+///
+/// Every field is optional and falls back to the global value, and only
+/// settings the engine re-reads can appear here.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct AppOverride {
+    pub scroll_distance: Option<f64>,
+    pub hide_covered_elements: Option<bool>,
+    pub element_min_width: Option<u16>,
+    pub element_min_height: Option<u16>,
+    pub image_min_size: Option<u16>,
+    pub colored_frame_min_size: Option<u16>,
+    pub visibility_checking_level: Option<VisibilityCheckingLevel>,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GlyphlowConfig {
     #[serde(default = "default_global_keybinding")]
@@ -642,6 +658,9 @@ pub struct GlyphlowConfig {
     pub electron_initial_wait_ms: u64,
     #[serde(default = "default_hint_keys")]
     pub hint_keys: HintKeys,
+    /// Per-app overrides, keyed by bundle id — see [`AppOverride`].
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub apps: HashMap<String, AppOverride>,
 }
 
 impl GlyphlowConfig {
@@ -694,6 +713,39 @@ impl GlyphlowConfig {
         }
         compatible
     }
+
+    /// Write every field `overrides` sets into `self`, returning the values it
+    /// displaced. Passing that record back undoes the write, which is how the
+    /// focused app's overrides come off.
+    pub fn apply_overrides(&mut self, overrides: &AppOverride) -> AppOverride {
+        AppOverride {
+            scroll_distance: displace(&mut self.scroll_distance, overrides.scroll_distance),
+            hide_covered_elements: displace(
+                &mut self.hide_covered_elements,
+                overrides.hide_covered_elements,
+            ),
+            element_min_width: displace(&mut self.element_min_width, overrides.element_min_width),
+            element_min_height: displace(
+                &mut self.element_min_height,
+                overrides.element_min_height,
+            ),
+            image_min_size: displace(&mut self.image_min_size, overrides.image_min_size),
+            colored_frame_min_size: displace(
+                &mut self.colored_frame_min_size,
+                overrides.colored_frame_min_size,
+            ),
+            visibility_checking_level: displace(
+                &mut self.visibility_checking_level,
+                overrides.visibility_checking_level,
+            ),
+        }
+    }
+}
+
+/// Write `value` over `slot` when set, handing back what was there.
+fn displace<T>(slot: &mut T, value: Option<T>) -> Option<T> {
+    let value = value?;
+    Some(std::mem::replace(slot, value))
 }
 
 fn default_theme() -> GlyphlowTheme {
@@ -841,6 +893,7 @@ impl Default for GlyphlowConfig {
             visibility_checking_level: default_vis_level(),
             electron_initial_wait_ms: default_wait_ms(),
             hint_keys: default_hint_keys(),
+            apps: HashMap::new(),
         }
     }
 }
@@ -1324,6 +1377,35 @@ mod tests {
             "New text action should be incompatible"
         );
         assert_eq!(old_config.text_actions.len(), 1);
+    }
+
+    /// The record `apply_overrides` returns is the inverse of the write, and a
+    /// field the table omits is left alone.
+    #[test]
+    fn apply_overrides_is_its_own_inverse() {
+        let mut config: GlyphlowConfig = toml::from_str(
+            "scroll_distance = 0.5\nhint_keys = \"asdf\"\n[theme]\nhint_margin_size = 9\n",
+        )
+        .expect("config should parse");
+        let hint_keys = config.hint_keys.clone();
+        let before = toml::to_string_pretty(&config).expect("should serialize");
+
+        let overrides: AppOverride =
+            toml::from_str("scroll_distance = 0.05\n").expect("override table should parse");
+
+        let displaced = config.apply_overrides(&overrides);
+        assert_eq!(config.scroll_distance, 0.05, "the table wins");
+        assert_eq!(
+            config.hint_keys, hint_keys,
+            "a field the table omits is not displaced"
+        );
+
+        config.apply_overrides(&displaced);
+        assert_eq!(
+            toml::to_string_pretty(&config).expect("should serialize"),
+            before,
+            "undo restores the whole config"
+        );
     }
 
     /// Sanitizing is lenient on purpose: case is normalized, duplicates keep
