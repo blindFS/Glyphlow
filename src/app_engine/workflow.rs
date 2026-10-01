@@ -206,7 +206,12 @@ impl AppEngine {
                 }
             }
             WorkFlowAction::Debug => {
-                self.notify(&element.inspect(), Level::Debug);
+                let info = format!(
+                    "App Bundle ID: {}\n{}",
+                    self.last_app_window_info.bundle_id,
+                    element.inspect()
+                );
+                self.notify(&info, Level::Debug);
                 // HACK: break the loop so the notification will be kept,
                 // basically `Debug` should be a terminal op
                 self.pending_workflow_actions.clear();
