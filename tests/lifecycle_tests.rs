@@ -390,16 +390,22 @@ fn main() {
         .await;
 
         println!("Running Scenario 16: An unmatched key is routed per menu kind");
+        // No selection behind the dashboard, so it must be refreshed through
+        // its own signal — `MenuRefresh` is resolved from a selection and
+        // would draw nothing, leaving the key without an answer.
         run_test_scenario(vec![
-            // No selection behind the dashboard, so it must be refreshed through
-            // its own signal — `MenuRefresh` is resolved from a selection and
-            // would draw nothing, leaving the key without an answer.
             TestEvent::SetMode(Mode::DashBoard),
             TestEvent::ClearSignals,
             TestEvent::PressKey(Key::KeyX),
             TestEvent::ExpectSignal(AppSignal::DashboardRefresh("X".into())),
             TestEvent::ReleaseKey(Key::KeyX),
-            // A menu that does have a selection keeps using `MenuRefresh`.
+        ])
+        .await;
+
+        // A menu that does have a selection keeps using `MenuRefresh`. Its own
+        // scenario, because an unmatched key stays in `KeyState::prefix`: sharing
+        // one would prepend the dashboard's `X` to this one's.
+        run_test_scenario(vec![
             TestEvent::SetMode(Mode::TextActionMenu),
             TestEvent::ClearSignals,
             TestEvent::PressKey(Key::KeyX),

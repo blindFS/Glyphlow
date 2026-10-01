@@ -439,7 +439,8 @@ impl AlphabeticKey for Key {
 ///
 /// Mirrors the non-modifier branches of `Key::to_char()`. `/` is deliberately
 /// absent: `KeyListener::handle_filter_key` intercepts it to start a text search, so
-/// a hint labelled with it could never be typed.
+/// a hint labelled with it could never be typed. [`GridKeys`] takes the same set
+/// plus `/`.
 const TYPABLE_HINT_CHARS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789`-=[]\\;',.";
 
 /// Bit for `c` in a 128-bit bitmap indexed by ASCII code point, or `0` for
@@ -461,26 +462,36 @@ const TYPABLE_HINT_MASK: u128 = {
     mask
 };
 
+/// [`TYPABLE_HINT_MASK`] plus `/`, which the hint modes reserve for search but
+/// the recursive grid has no binding for.
+const TYPABLE_GRID_MASK: u128 = TYPABLE_HINT_MASK | ascii_bit('/');
+
+/// Fallback alphabet when a configured one leaves too few usable keys.
+const FALLBACK_ALPHABET: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+/// Below this many distinct keys a mode cannot address its labels unambiguously.
+const MIN_LEN: usize = 2;
+
 /// The ordered set of keys used to label hints.
 ///
-/// Normalized on construction: upper-cased, de-duplicated, and restricted to
-/// `TYPABLE_HINT_CHARS`. An input that leaves fewer than two usable keys is
-/// rejected in favour of [`HintKeys::DEFAULT_ALPHABET`], because a single key
-/// cannot tell hints apart.
-///
-/// Always ASCII, which is what lets the label builders index it as bytes.
+/// Normalized on construction: upper-cased, de-duplicated, and restricted to what
+/// `MASK` can deliver. The mask is a type parameter rather than an argument, so
+/// serde picks it from the field's type alone — the hint modes intercept `/` to
+/// start a search, while the grid has no such binding.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
-pub struct HintKeys(String);
+pub struct HintKeys<const MASK: u128 = TYPABLE_HINT_MASK>(String);
 
-impl HintKeys {
-    /// Plain uppercase ASCII letters.
-    pub const DEFAULT_ALPHABET: &'static str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+/// The keys labelling the cells of a recursive grid, in reading order.
+pub type GridKeys = HintKeys<TYPABLE_GRID_MASK>;
 
-    /// Below this many distinct keys hints cannot be addressed unambiguously.
-    const MIN_LEN: usize = 2;
-
-    pub fn new(raw: &str) -> Self {
+impl<const MASK: u128> HintKeys<MASK> {
+    /// Upper-cases `raw` and drops what `MASK` cannot deliver, de-duplicating and
+    /// warning about anything dropped; falls back to [`FALLBACK_ALPHABET`] when fewer
+    /// than [`MIN_LEN`] keys remain.
+    ///
+    /// Always ASCII, which is what lets the label builders index the result as bytes.
+    fn sanitize(raw: &str) -> String {
         // `seen` replaces a scan of the alphabet for every input character, and
         // `ignored` stays allocation-free unless something actually is dropped.
         let mut seen = 0u128;
@@ -489,7 +500,7 @@ impl HintKeys {
 
         for c in raw.chars() {
             let c = c.to_ascii_uppercase();
-            let bit = ascii_bit(c) & TYPABLE_HINT_MASK;
+            let bit = ascii_bit(c) & MASK;
 
             if bit == 0 {
                 if !ignored.contains(c) {
@@ -502,23 +513,18 @@ impl HintKeys {
         }
 
         if !ignored.is_empty() {
-            log::warn!(
-                "Ignoring {ignored:?} in `hint_keys` = {raw:?}: not usable as a single \
-                 keystroke hint key."
-            );
+            log::warn!("Ignoring {ignored:?} in {raw:?}: not usable as a single keystroke key.");
         }
 
-        if sanitized.len() < Self::MIN_LEN {
+        if sanitized.len() < MIN_LEN {
             log::warn!(
-                "`hint_keys` = {raw:?} does not provide at least {} distinct usable keys, \
-                 falling back to {:?}.",
-                Self::MIN_LEN,
-                Self::DEFAULT_ALPHABET
+                "{raw:?} does not provide at least {MIN_LEN} distinct usable keys, \
+                 falling back to {FALLBACK_ALPHABET:?}."
             );
-            return Self::default();
+            return FALLBACK_ALPHABET.to_string();
         }
 
-        Self(sanitized)
+        sanitized
     }
 
     pub fn as_str(&self) -> &str {
@@ -577,20 +583,38 @@ impl HintKeys {
     }
 }
 
-impl Default for HintKeys {
+/// `new` and the default alphabet sit on the concrete instantiation rather than the
+/// generic impl: a bare `HintKeys::new` cannot infer `MASK`, because a defaulted
+/// const parameter is not applied to a path in expression position.
+impl HintKeys<TYPABLE_HINT_MASK> {
+    /// Plain uppercase ASCII letters.
+    pub const DEFAULT_ALPHABET: &'static str = FALLBACK_ALPHABET;
+
+    pub fn new(raw: &str) -> Self {
+        Self(Self::sanitize(raw))
+    }
+}
+
+impl Default for HintKeys<TYPABLE_HINT_MASK> {
     fn default() -> Self {
         Self(Self::DEFAULT_ALPHABET.to_string())
     }
 }
 
-impl From<String> for HintKeys {
-    fn from(raw: String) -> Self {
-        Self::new(&raw)
+impl<const MASK: u128> From<&str> for HintKeys<MASK> {
+    fn from(raw: &str) -> Self {
+        Self(Self::sanitize(raw))
     }
 }
 
-impl From<HintKeys> for String {
-    fn from(keys: HintKeys) -> Self {
+impl<const MASK: u128> From<String> for HintKeys<MASK> {
+    fn from(raw: String) -> Self {
+        Self::from(raw.as_str())
+    }
+}
+
+impl<const MASK: u128> From<HintKeys<MASK>> for String {
+    fn from(keys: HintKeys<MASK>) -> Self {
         keys.0
     }
 }
@@ -608,7 +632,8 @@ pub struct GridConfig {
     pub rows: u8,
     pub cols: u8,
     /// Keys labelling the cells, in reading order.
-    pub keys: HintKeys,
+    #[serde(default = "default_grid_keys")]
+    pub keys: GridKeys,
     #[serde(with = "nsfont_format", default = "default_grid_font")]
     pub font: Retained<NSFont>,
     #[serde(with = "cgcolor_format", default = "default_grid_bg")]
@@ -618,6 +643,10 @@ pub struct GridConfig {
 }
 
 impl GridConfig {
+    /// A homerow block: `uio` / `jkl` / `nm/`, which reads as a 3x3 grid on the
+    /// keyboard it is typed on.
+    pub const DEFAULT_KEYS: &'static str = "UIOJKLNM/";
+
     /// The grid as it will be drawn. One key addresses one cell, so a grid
     /// needing more cells than the alphabet has keys is trimmed.
     pub fn dims(&self) -> (usize, usize) {
@@ -648,7 +677,7 @@ impl Default for GridConfig {
         Self {
             rows: 3,
             cols: 3,
-            keys: HintKeys::default(),
+            keys: default_grid_keys(),
             font: default_grid_font(),
             bg_color: default_grid_bg(),
             fg_color: default_grid_fg(),
@@ -898,11 +927,18 @@ fn default_workflows() -> Vec<WorkFlow> {
             ],
         },
         WorkFlow {
-            key: "G".into(),
-            display: "󰋳 Grid Click".into(),
+            key: "G[".into(),
+            display: "󰋁 Grid Click".into(),
             starting_role: RoleOfInterest::Window,
             valid_app_ids: None,
             actions: vec![WorkFlowAction::GridMove, WorkFlowAction::Click],
+        },
+        WorkFlow {
+            key: "G]".into(),
+            display: "󰋁 Grid Right Click".into(),
+            starting_role: RoleOfInterest::Window,
+            valid_app_ids: None,
+            actions: vec![WorkFlowAction::GridMove, WorkFlowAction::RightClick],
         },
     ]
 }
@@ -945,11 +981,14 @@ fn default_hint_keys() -> HintKeys {
 fn default_grid() -> GridConfig {
     GridConfig::default()
 }
+fn default_grid_keys() -> GridKeys {
+    GridKeys::from(GridConfig::DEFAULT_KEYS)
+}
 fn default_grid_font() -> Retained<NSFont> {
     NSFont::fontWithName_size(ns_string!("Andale Mono"), 14.0).expect("Default font should exist.")
 }
 fn default_grid_bg() -> CFRetained<CGColor> {
-    color_from_hex("#769ff0d0")
+    color_from_hex("#769ff060")
 }
 fn default_grid_fg() -> CFRetained<CGColor> {
     color_from_hex("#111726ff")
@@ -1549,7 +1588,7 @@ mod tests {
             HintKeys::new(HintKeys::DEFAULT_ALPHABET),
             HintKeys::default()
         );
-        assert!(HintKeys::default().base() >= HintKeys::MIN_LEN);
+        assert!(HintKeys::default().base() >= MIN_LEN);
     }
 
     #[test]
