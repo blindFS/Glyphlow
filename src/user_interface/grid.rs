@@ -20,7 +20,8 @@ pub struct GridOverlay {
 }
 
 impl GridOverlay {
-    /// Draw `labels` over `region`, one label per cell, in reading order.
+    /// Draw `labels` over `region`, one label per cell, in reading order. A grid too
+    /// small to hold a badge drops the labels and keeps only the frames.
     pub fn draw(
         region: &Frame,
         labels: &[char],
@@ -30,6 +31,14 @@ impl GridOverlay {
     ) -> Self {
         let (rows, cols) = grid.dims();
         let margin = grid.font.pointSize() / 3.0;
+
+        // Every cell is the same size, so one label decides for all of them: if its
+        // badge does not fit, no cell gets one.
+        let (cell_w, cell_h) = cell_frame(region, rows, cols, 0).size();
+        let labelled = labels.first().is_some_and(|label| {
+            let (_, badge_size) = measure_badge(&attributed_label(*label, grid), margin);
+            badge_size.width <= cell_w && badge_size.height <= cell_h
+        });
 
         let container = autoreleasepool(|_| {
             let container = CALayer::new();
@@ -44,12 +53,12 @@ impl GridOverlay {
                 border.setBorderColor(Some(&grid.bg_color));
                 container.addSublayer(&border);
 
+                if !labelled {
+                    continue;
+                }
+
                 let attr_string = attributed_label(*label, grid);
-                let (text_size, _) = estimate_frame_for_text(&attr_string, (f64::MAX, f64::MAX));
-                let badge_size = CGSize::new(
-                    text_size.width + margin * 2.0,
-                    text_size.height + margin * 2.0,
-                );
+                let (text_size, badge_size) = measure_badge(&attr_string, margin);
 
                 let badge = CALayer::new();
                 badge.setFrame(NSRect::new(
@@ -107,4 +116,14 @@ fn attributed_label(label: char, grid: &GridConfig) -> Retained<NSMutableAttribu
         );
     }
     attr_string
+}
+
+/// The text size of `text`, and the badge wrapping it.
+fn measure_badge(text: &Retained<NSMutableAttributedString>, margin: f64) -> (CGSize, CGSize) {
+    let (text_size, _) = estimate_frame_for_text(text, (f64::MAX, f64::MAX));
+    let badge_size = CGSize::new(
+        text_size.width + margin * 2.0,
+        text_size.height + margin * 2.0,
+    );
+    (text_size, badge_size)
 }
