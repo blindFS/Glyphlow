@@ -98,6 +98,8 @@ pub enum AppSignal {
     GridKey(char),
     /// Enter while the recursive grid was up: keep the cell and carry on.
     GridAccept,
+    /// Backspace while the recursive grid was up: widen to the level above.
+    GridBack,
     MenuRefresh(String),
     DashboardRefresh(String),
     ActOnEnter,
@@ -230,7 +232,7 @@ pub enum Mode {
     /// A search is open, started from the given filtering mode.
     Searching(FilterMode),
     OCRResultFiltering,
-    /// The recursive grid is up, waiting for a cell key, Enter or Esc.
+    /// The recursive grid is up, waiting for a cell key, Enter, Backspace or Esc.
     Grid,
     /// A notification is on screen; any key dismisses everything.
     WaitAndDeactivate,
@@ -488,6 +490,7 @@ impl KeyListener {
             Mode::Grid => {
                 match key {
                     Key::Enter => self.send(AppSignal::GridAccept),
+                    Key::Backspace | Key::Delete => self.send(AppSignal::GridBack),
                     Key::Escape => {
                         self.send(AppSignal::DeActivate);
                         *state = Mode::Idle;

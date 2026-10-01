@@ -665,10 +665,20 @@ impl GridConfig {
         (trimmed_rows, trimmed_cols)
     }
 
+    /// The configured keys, trimmed to one per cell, in reading order.
+    fn cell_keys(&self) -> impl Iterator<Item = char> + '_ {
+        let (rows, cols) = self.dims();
+        self.keys.as_str().chars().take(rows * cols)
+    }
+
     /// One label per cell, in reading order.
     pub fn labels(&self) -> Vec<char> {
-        let (rows, cols) = self.dims();
-        self.keys.as_str().chars().take(rows * cols).collect()
+        self.cell_keys().collect()
+    }
+
+    /// The index of the cell `key` labels, if it labels one.
+    pub fn label_index(&self, key: char) -> Option<usize> {
+        self.cell_keys().position(|c| c == key)
     }
 }
 
