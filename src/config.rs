@@ -38,6 +38,9 @@ pub enum RoleOfInterest {
     /// Text with no accessibility element behind it (clipboard, OCR).
     PseudoText,
     Cell,
+    /// The focused window. Satisfied by a window selection, or by no selection
+    /// at all — the dashboard is already on a window before anything is picked.
+    Window,
     /// Result of a `SearchFor` action.
     CustomTarget,
 }
@@ -65,6 +68,9 @@ pub enum WorkFlowAction {
     Press,
     Hover,
     Move(f64, f64),
+    /// Narrow the cursor down through a recursive grid of labelled cells, until
+    /// Esc. See [`GridConfig`].
+    GridMove,
     Click,
     RightClick,
     MiddleClick,
@@ -595,6 +601,61 @@ pub struct KeyBinding {
     pub keys: Vec<Key>,
 }
 
+/// The look and the size of the recursive grid used by
+/// [`WorkFlowAction::GridMove`].
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GridConfig {
+    pub rows: u8,
+    pub cols: u8,
+    /// Keys labelling the cells, in reading order.
+    pub keys: HintKeys,
+    #[serde(with = "nsfont_format", default = "default_grid_font")]
+    pub font: Retained<NSFont>,
+    #[serde(with = "cgcolor_format", default = "default_grid_bg")]
+    pub bg_color: CFRetained<CGColor>,
+    #[serde(with = "cgcolor_format", default = "default_grid_fg")]
+    pub fg_color: CFRetained<CGColor>,
+}
+
+impl GridConfig {
+    /// The grid as it will be drawn. One key addresses one cell, so a grid
+    /// needing more cells than the alphabet has keys is trimmed.
+    pub fn dims(&self) -> (usize, usize) {
+        let (rows, cols) = (self.rows.max(1) as usize, self.cols.max(1) as usize);
+        let base = self.keys.base();
+        if rows * cols <= base {
+            return (rows, cols);
+        }
+        let trimmed_rows = rows.min(base);
+        let trimmed_cols = (base / trimmed_rows).max(1);
+        log::warn!(
+            "grid: {rows}x{cols} needs {} keys but only {base} are configured, \
+             using {trimmed_rows}x{trimmed_cols}",
+            rows * cols
+        );
+        (trimmed_rows, trimmed_cols)
+    }
+
+    /// One label per cell, in reading order.
+    pub fn labels(&self) -> Vec<char> {
+        let (rows, cols) = self.dims();
+        self.keys.as_str().chars().take(rows * cols).collect()
+    }
+}
+
+impl Default for GridConfig {
+    fn default() -> Self {
+        Self {
+            rows: 3,
+            cols: 3,
+            keys: HintKeys::default(),
+            font: default_grid_font(),
+            bg_color: default_grid_bg(),
+            fg_color: default_grid_fg(),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Copy)]
 pub enum VisibilityCheckingLevel {
     /// The frame only has to intersect the whole screen. Reserved for limited
@@ -658,6 +719,8 @@ pub struct GlyphlowConfig {
     pub electron_initial_wait_ms: u64,
     #[serde(default = "default_hint_keys")]
     pub hint_keys: HintKeys,
+    #[serde(default = "default_grid")]
+    pub grid: GridConfig,
     /// Per-app overrides, keyed by bundle id — see [`AppOverride`].
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub apps: HashMap<String, AppOverride>,
@@ -834,6 +897,13 @@ fn default_workflows() -> Vec<WorkFlow> {
                 WorkFlowAction::Press,
             ],
         },
+        WorkFlow {
+            key: "G".into(),
+            display: "󰋳 Grid Click".into(),
+            starting_role: RoleOfInterest::Window,
+            valid_app_ids: None,
+            actions: vec![WorkFlowAction::GridMove, WorkFlowAction::Click],
+        },
     ]
 }
 fn default_scroll_distance() -> f64 {
@@ -872,6 +942,18 @@ fn default_wait_ms() -> u64 {
 fn default_hint_keys() -> HintKeys {
     HintKeys::default()
 }
+fn default_grid() -> GridConfig {
+    GridConfig::default()
+}
+fn default_grid_font() -> Retained<NSFont> {
+    NSFont::fontWithName_size(ns_string!("Andale Mono"), 14.0).expect("Default font should exist.")
+}
+fn default_grid_bg() -> CFRetained<CGColor> {
+    color_from_hex("#769ff0d0")
+}
+fn default_grid_fg() -> CFRetained<CGColor> {
+    color_from_hex("#111726ff")
+}
 
 impl Default for GlyphlowConfig {
     fn default() -> Self {
@@ -893,6 +975,7 @@ impl Default for GlyphlowConfig {
             visibility_checking_level: default_vis_level(),
             electron_initial_wait_ms: default_wait_ms(),
             hint_keys: default_hint_keys(),
+            grid: default_grid(),
             apps: HashMap::new(),
         }
     }

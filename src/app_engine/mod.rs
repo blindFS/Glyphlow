@@ -17,8 +17,11 @@ use std::{
 };
 use tokio::sync::mpsc::Sender;
 
+use grid::GridSession;
+
 mod drawing;
 mod filtering;
+mod grid;
 mod interaction;
 mod lifecycle;
 mod workflow;
@@ -157,6 +160,8 @@ pub struct AppEngine {
     pub(super) click_modifiers: ClickModifiers,
     /// Actions of a workflow that is waiting for the user to pick an element.
     pub(super) pending_workflow_actions: VecDeque<WorkFlowAction>,
+    /// The recursive grid, while one is up.
+    pub(super) grid: Option<GridSession>,
 }
 
 impl AppEngine {
@@ -202,6 +207,7 @@ impl AppEngine {
             multi_selection: MultiSelectionState::default(),
             click_modifiers: ClickModifiers::default(),
             pending_workflow_actions: VecDeque::new(),
+            grid: None,
         }
     }
 
@@ -256,6 +262,8 @@ impl AppEngine {
                 self.menu_refresh("", false);
             }
             AppSignal::ToggleModifier(key) => self.toggle_modifier(key),
+            AppSignal::GridKey(key) => self.grid_step(key),
+            AppSignal::GridStop => self.finish_grid(),
             AppSignal::HintFilter(key_char, mode) => {
                 self.filter_by_hint(key_char, mode).await;
             }

@@ -94,6 +94,10 @@ pub enum AppSignal {
     /// A key was typed while searching. A space arrives as
     /// [`crate::util::SEARCH_TERM_SEPARATOR`], not as `' '`.
     SearchFilter(char, FilterMode),
+    /// A key was typed while the recursive grid was up.
+    GridKey(char),
+    /// Esc while the recursive grid was up.
+    GridStop,
     MenuRefresh(String),
     DashboardRefresh(String),
     ActOnEnter,
@@ -226,6 +230,8 @@ pub enum Mode {
     /// A search is open, started from the given filtering mode.
     Searching(FilterMode),
     OCRResultFiltering,
+    /// The recursive grid is up, waiting for a cell key or Esc.
+    Grid,
     /// A notification is on screen; any key dismisses everything.
     WaitAndDeactivate,
 }
@@ -477,6 +483,19 @@ impl KeyListener {
                         self.send(AppSignal::SearchFilter(key_char, mode));
                     }
                 };
+                true
+            }
+            Mode::Grid => {
+                if key == Key::Escape {
+                    self.send(AppSignal::GridStop);
+                } else {
+                    // Keys that type nothing cannot label a cell, so they are
+                    // ignored rather than closing the grid.
+                    let key_char = key.to_char();
+                    if key_char != ' ' {
+                        self.send(AppSignal::GridKey(key_char));
+                    }
+                }
                 true
             }
             Mode::WaitAndDeactivate => {

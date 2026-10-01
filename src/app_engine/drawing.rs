@@ -12,6 +12,7 @@ const MAX_TEXT_DISPLAY_LEN: usize = 30;
 
 impl AppEngine {
     pub(super) fn clear_drawing(&mut self) {
+        self.clear_grid();
         self.drawer.clear();
     }
 
