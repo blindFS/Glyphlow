@@ -156,3 +156,69 @@ impl AppEngine {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The window is a 900 px square, which the 3x3 default divides exactly — and
+    /// the result divides exactly again — so the regions below compare exactly
+    /// rather than within a tolerance.
+    fn window_and_grid() -> (GridConfig, GridLevel) {
+        let region = Frame::new(100.0, 200.0, 1000.0, 1100.0);
+        (
+            GridConfig::default(),
+            GridLevel {
+                outer: region,
+                region,
+                depth: 0,
+            },
+        )
+    }
+
+    /// Widening undoes narrowing even though the parent is recomputed from the
+    /// current frame rather than popped off a stack, and every level stays aligned
+    /// to the window because `outer` is never rebound. Those two are what keep
+    /// Backspace from walking the grid off the window as the user presses it.
+    #[test]
+    fn widening_undoes_narrowing_back_to_the_window() {
+        let (grid, root) = window_and_grid();
+
+        // The middle cell, then its top-left cell: two levels down, so widening
+        // has to rebuild a parent that is not the window itself.
+        let once = root
+            .narrowed('K', &grid)
+            .expect("`K` labels the middle cell");
+        let twice = once
+            .narrowed('U', &grid)
+            .expect("`U` labels the first cell");
+        assert_eq!(
+            (twice.region, twice.depth),
+            (Frame::new(400.0, 500.0, 500.0, 600.0), 2)
+        );
+        assert_eq!(twice.outer, root.outer, "a level never rebinds `outer`");
+
+        let back = twice
+            .widened(&grid)
+            .expect("the middle cell is one level up");
+        assert_eq!((back.region, back.depth), (once.region, 1));
+
+        let out = back.widened(&grid).expect("the window is still a level");
+        assert_eq!((out.region, out.depth), (root.region, 0));
+
+        // Nothing sits above the window, so Backspace there is a no-op.
+        assert!(out.widened(&grid).is_none());
+    }
+
+    /// `label_index` decides whether a key names a cell at all, so a key outside
+    /// the grid leaves the run where it is rather than opening a bogus region.
+    #[test]
+    fn narrowing_ignores_a_key_that_labels_no_cell() {
+        let (grid, root) = window_and_grid();
+
+        assert!(root.narrowed('Z', &grid).is_none());
+        // `/` labels the last cell of the default layout — the grid's own key,
+        // which the hint modes reserve for search.
+        assert!(root.narrowed('/', &grid).is_some());
+    }
+}

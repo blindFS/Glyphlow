@@ -629,7 +629,9 @@ pub struct KeyBinding {
 /// [`WorkFlowAction::GridMove`].
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GridConfig {
+    #[serde(default = "default_grid_rows")]
     pub rows: u8,
+    #[serde(default = "default_grid_cols")]
     pub cols: u8,
     /// Keys labelling the cells, in reading order.
     #[serde(default = "default_grid_keys")]
@@ -647,22 +649,21 @@ impl GridConfig {
     /// keyboard it is typed on.
     pub const DEFAULT_KEYS: &'static str = "UIOJKLNM/";
 
+    /// The size the config asks for, before trimming to the keys available.
+    fn wanted(&self) -> (usize, usize) {
+        (self.rows.max(1) as usize, self.cols.max(1) as usize)
+    }
+
     /// The grid as it will be drawn. One key addresses one cell, so a grid
     /// needing more cells than the alphabet has keys is trimmed.
     pub fn dims(&self) -> (usize, usize) {
-        let (rows, cols) = (self.rows.max(1) as usize, self.cols.max(1) as usize);
+        let (rows, cols) = self.wanted();
         let base = self.keys.base();
         if rows * cols <= base {
             return (rows, cols);
         }
         let trimmed_rows = rows.min(base);
-        let trimmed_cols = (base / trimmed_rows).max(1);
-        log::warn!(
-            "grid: {rows}x{cols} needs {} keys but only {base} are configured, \
-             using {trimmed_rows}x{trimmed_cols}",
-            rows * cols
-        );
-        (trimmed_rows, trimmed_cols)
+        (trimmed_rows, (base / trimmed_rows).max(1))
     }
 
     /// The configured keys, trimmed to one per cell, in reading order.
@@ -672,8 +673,22 @@ impl GridConfig {
     }
 
     /// One label per cell, in reading order.
+    ///
+    /// Short of the grid's size means the keys ran out; that is reported here
+    /// rather than in [`Self::dims`], which a run reads on every key.
     pub fn labels(&self) -> Vec<char> {
-        self.cell_keys().collect()
+        let labels: Vec<char> = self.cell_keys().collect();
+        let (rows, cols) = self.wanted();
+        if labels.len() < rows * cols {
+            let (trimmed_rows, trimmed_cols) = self.dims();
+            log::warn!(
+                "grid: {rows}x{cols} needs {} keys but only {} are configured, \
+                 using {trimmed_rows}x{trimmed_cols}",
+                rows * cols,
+                self.keys.base()
+            );
+        }
+        labels
     }
 
     /// The index of the cell `key` labels, if it labels one.
@@ -685,8 +700,8 @@ impl GridConfig {
 impl Default for GridConfig {
     fn default() -> Self {
         Self {
-            rows: 3,
-            cols: 3,
+            rows: default_grid_rows(),
+            cols: default_grid_cols(),
             keys: default_grid_keys(),
             font: default_grid_font(),
             bg_color: default_grid_bg(),
@@ -990,6 +1005,12 @@ fn default_hint_keys() -> HintKeys {
 }
 fn default_grid() -> GridConfig {
     GridConfig::default()
+}
+fn default_grid_rows() -> u8 {
+    3
+}
+fn default_grid_cols() -> u8 {
+    3
 }
 fn default_grid_keys() -> GridKeys {
     GridKeys::from(GridConfig::DEFAULT_KEYS)
@@ -1767,6 +1788,95 @@ mod tests {
                 .hint_keys,
             config.hint_keys
         );
+    }
+
+    /// One key addresses one cell, so a grid asking for more cells than the
+    /// alphabet has keys is trimmed: whole rows are kept and columns are dropped.
+    /// Every case here is over the default nine keys.
+    #[rstest]
+    #[case::exactly_fits(3, 3, (3, 3))]
+    #[case::one_row_past_the_alphabet(4, 4, (4, 2))]
+    #[case::wide_keeps_a_single_row(1, 20, (1, 9))]
+    #[case::tall_keeps_a_single_column(5, 5, (5, 1))]
+    #[case::nothing_configured_is_one_cell(0, 0, (1, 1))]
+    fn grid_dims_trim_to_the_keys_available(
+        #[case] rows: u8,
+        #[case] cols: u8,
+        #[case] expected: (usize, usize),
+    ) {
+        let grid = GridConfig {
+            rows,
+            cols,
+            ..Default::default()
+        };
+        assert_eq!(grid.dims(), expected);
+
+        // Whatever it settles on, the grid is drawable: it never needs more keys
+        // than there are, and it labels every cell it does draw.
+        let (rows, cols) = grid.dims();
+        assert!(rows * cols <= grid.keys.base());
+        assert_eq!(grid.labels().len(), rows * cols);
+    }
+
+    /// The overlay draws `labels` and a keystroke is resolved through
+    /// `label_index`, so the two must describe the same grid: every label is
+    /// addressable at its own index, and a key the trim left over addresses
+    /// nothing — pressing it must not narrow the grid.
+    #[test]
+    fn grid_labels_and_label_index_agree() {
+        // 4x4 over nine keys trims to 4x2, which leaves a key unused.
+        let grid = GridConfig {
+            rows: 4,
+            cols: 4,
+            ..Default::default()
+        };
+
+        let labels = grid.labels();
+        let keys = grid.keys.as_str().chars().collect::<Vec<_>>();
+        let unused = &keys[labels.len()..];
+        assert!(!unused.is_empty(), "the trim should leave a key over");
+
+        for (idx, label) in labels.iter().enumerate() {
+            assert_eq!(grid.label_index(*label), Some(idx));
+        }
+        for key in unused {
+            assert_eq!(grid.label_index(*key), None, "{key:?} labels no cell");
+        }
+    }
+
+    /// `/` starts a search in the hint modes, so it cannot be a hint key — but
+    /// the grid has no search binding, and its default layout uses `/` for the
+    /// last cell. That one difference is why `HintKeys` carries its usable set as
+    /// a const parameter: serde picks the set from the field's type alone, so the
+    /// two alphabets cannot be swapped for each other.
+    #[test]
+    fn grid_keys_keep_the_slash_that_hint_keys_drop() {
+        assert!(
+            GridKeys::from(GridConfig::DEFAULT_KEYS)
+                .as_str()
+                .contains('/')
+        );
+        assert!(
+            !HintKeys::new(GridConfig::DEFAULT_KEYS)
+                .as_str()
+                .contains('/')
+        );
+
+        // The slash survives TOML both ways, including as a written value, and a
+        // partial table is enough: every field of `[grid]` falls back on its own,
+        // so a user writes only the one they mean to change.
+        let config: GlyphlowConfig = toml::from_str("[grid]\nkeys = \"uio/jkl\"").unwrap();
+        assert_eq!(config.grid.keys.as_str(), "UIO/JKL");
+        assert_eq!((config.grid.rows, config.grid.cols), (3, 3));
+
+        let config: GlyphlowConfig = toml::from_str("[grid]\nrows = 4").unwrap();
+        assert_eq!((config.grid.rows, config.grid.cols), (4, 3));
+
+        let default = GlyphlowConfig::default();
+        let toml_str = toml::to_string(&default).unwrap();
+        let reloaded: GlyphlowConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(reloaded.grid.keys, default.grid.keys);
+        assert!(reloaded.grid.keys.as_str().contains('/'));
     }
 
     fn workflow_with_display(display: &str) -> WorkFlow {

@@ -54,6 +54,8 @@ enum TestEvent {
     SetMode(Mode),
     ExpectMode(Mode),
     ExpectSignal(AppSignal),
+    /// Waits as long, and fails if the engine was given anything at all.
+    ExpectNoSignal,
     ClearSignals,
     SetClipboard(String),
     /// Sends a raw signal, the way the CLI would over its socket.
@@ -484,6 +486,44 @@ fn main() {
             TestEvent::ExpectNoMessage,
         ])
         .await;
+
+        println!("Running Scenario 21: Grid Mode Keys");
+        run_test_scenario(vec![
+            TestEvent::SetMode(Mode::Grid),
+            TestEvent::ClearSignals,
+            // A cell key reaches the engine as the character it types ...
+            TestEvent::PressKey(Key::KeyK),
+            TestEvent::ExpectSignal(AppSignal::GridKey('K')),
+            TestEvent::ReleaseKey(Key::KeyK),
+            TestEvent::ClearSignals,
+            // ... enter keeps the cell and lets the rest of the workflow run ...
+            TestEvent::PressKey(Key::Enter),
+            TestEvent::ExpectSignal(AppSignal::GridAccept),
+            TestEvent::ReleaseKey(Key::Enter),
+            TestEvent::ClearSignals,
+            // ... and either delete key widens by one level.
+            TestEvent::PressKey(Key::Backspace),
+            TestEvent::ExpectSignal(AppSignal::GridBack),
+            TestEvent::ReleaseKey(Key::Backspace),
+            TestEvent::ClearSignals,
+            TestEvent::PressKey(Key::Delete),
+            TestEvent::ExpectSignal(AppSignal::GridBack),
+            TestEvent::ReleaseKey(Key::Delete),
+            TestEvent::ClearSignals,
+            // A key that types nothing is ignored rather than closing the grid.
+            // Every menu mode reads a space as "deactivate"; here that would
+            // throw the run away on a mistyped cell key.
+            TestEvent::PressKey(Key::Space),
+            TestEvent::ExpectNoSignal,
+            TestEvent::ReleaseKey(Key::Space),
+            TestEvent::ClearSignals,
+            // Esc abandons the run, so the mode has to come back to Idle with it.
+            TestEvent::PressKey(Key::Escape),
+            TestEvent::ExpectSignal(AppSignal::DeActivate),
+            TestEvent::ExpectMode(Mode::Idle),
+            TestEvent::ReleaseKey(Key::Escape),
+        ])
+        .await;
     });
 
     println!("All lifecycle integration tests passed!");
@@ -571,6 +611,14 @@ async fn run_test_scenario_with_config(events: Vec<TestEvent>, config: GlyphlowC
                         "step {step}: expected signal {expected_signal:?} was not processed. \
                          Processed signals: {:?}",
                         *sim_processed_signals.lock().unwrap()
+                    );
+                }
+                TestEvent::ExpectNoSignal => {
+                    std::thread::sleep(wait_timeout / 5);
+                    let signals = sim_processed_signals.lock().unwrap();
+                    assert!(
+                        signals.is_empty(),
+                        "step {step}: expected no signal, got {signals:?}"
                     );
                 }
                 TestEvent::ClearSignals => {
