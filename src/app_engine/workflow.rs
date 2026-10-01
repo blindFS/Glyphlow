@@ -131,7 +131,7 @@ impl AppEngine {
             }
             WorkFlowAction::GridMove => {
                 self.start_grid();
-                // The queue resumes once the grid is closed with Esc.
+                // The queue resumes when Enter accepts a cell.
                 return true;
             }
             WorkFlowAction::KeyCombo(kb) => {

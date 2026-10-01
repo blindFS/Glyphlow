@@ -69,7 +69,7 @@ pub enum WorkFlowAction {
     Hover,
     Move(f64, f64),
     /// Narrow the cursor down through a recursive grid of labelled cells, until
-    /// Esc. See [`GridConfig`].
+    /// Enter accepts the cell or Esc abandons the workflow. See [`GridConfig`].
     GridMove,
     Click,
     RightClick,

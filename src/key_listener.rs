@@ -96,8 +96,8 @@ pub enum AppSignal {
     SearchFilter(char, FilterMode),
     /// A key was typed while the recursive grid was up.
     GridKey(char),
-    /// Esc while the recursive grid was up.
-    GridStop,
+    /// Enter while the recursive grid was up: keep the cell and carry on.
+    GridAccept,
     MenuRefresh(String),
     DashboardRefresh(String),
     ActOnEnter,
@@ -230,7 +230,7 @@ pub enum Mode {
     /// A search is open, started from the given filtering mode.
     Searching(FilterMode),
     OCRResultFiltering,
-    /// The recursive grid is up, waiting for a cell key or Esc.
+    /// The recursive grid is up, waiting for a cell key, Enter or Esc.
     Grid,
     /// A notification is on screen; any key dismisses everything.
     WaitAndDeactivate,
@@ -486,14 +486,19 @@ impl KeyListener {
                 true
             }
             Mode::Grid => {
-                if key == Key::Escape {
-                    self.send(AppSignal::GridStop);
-                } else {
-                    // Keys that type nothing cannot label a cell, so they are
-                    // ignored rather than closing the grid.
-                    let key_char = key.to_char();
-                    if key_char != ' ' {
-                        self.send(AppSignal::GridKey(key_char));
+                match key {
+                    Key::Enter => self.send(AppSignal::GridAccept),
+                    Key::Escape => {
+                        self.send(AppSignal::DeActivate);
+                        *state = Mode::Idle;
+                    }
+                    _ => {
+                        // Keys that type nothing cannot label a cell, so they
+                        // are ignored rather than closing the grid.
+                        let key_char = key.to_char();
+                        if key_char != ' ' {
+                            self.send(AppSignal::GridKey(key_char));
+                        }
                     }
                 }
                 true

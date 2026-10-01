@@ -263,7 +263,7 @@ impl AppEngine {
             }
             AppSignal::ToggleModifier(key) => self.toggle_modifier(key),
             AppSignal::GridKey(key) => self.grid_step(key),
-            AppSignal::GridStop => self.finish_grid(),
+            AppSignal::GridAccept => self.accept_grid(),
             AppSignal::HintFilter(key_char, mode) => {
                 self.filter_by_hint(key_char, mode).await;
             }

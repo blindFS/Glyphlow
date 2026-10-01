@@ -53,8 +53,8 @@ impl AppEngine {
         self.draw_grid(cell, prev_mode);
     }
 
-    /// Close the grid where the user left it and run the rest of the workflow.
-    pub(super) fn finish_grid(&mut self) {
+    /// Keep the cell the user settled on and run the rest of the workflow.
+    pub(super) fn accept_grid(&mut self) {
         let Some(GridSession {
             region,
             overlay,
