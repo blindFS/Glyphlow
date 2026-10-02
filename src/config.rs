@@ -636,12 +636,14 @@ pub struct GridConfig {
     /// Keys labelling the cells, in reading order.
     #[serde(default = "default_grid_keys")]
     pub keys: GridKeys,
-    #[serde(with = "nsfont_format", default = "default_grid_font")]
+    #[serde(with = "nsfont_format", default = "default_hint_font")]
     pub font: Retained<NSFont>,
     #[serde(with = "cgcolor_format", default = "default_grid_bg")]
-    pub bg_color: CFRetained<CGColor>,
-    #[serde(with = "cgcolor_format", default = "default_grid_fg")]
-    pub fg_color: CFRetained<CGColor>,
+    pub grid_color: CFRetained<CGColor>,
+    #[serde(with = "cgcolor_format", default = "default_hint_bg")]
+    pub badge_bg_color: CFRetained<CGColor>,
+    #[serde(with = "cgcolor_format", default = "default_hint_fg")]
+    pub badge_fg_color: CFRetained<CGColor>,
 }
 
 impl GridConfig {
@@ -701,9 +703,10 @@ impl Default for GridConfig {
             rows: default_grid_rows(),
             cols: default_grid_cols(),
             keys: default_grid_keys(),
-            font: default_grid_font(),
-            bg_color: default_grid_bg(),
-            fg_color: default_grid_fg(),
+            font: default_hint_font(),
+            grid_color: default_grid_bg(),
+            badge_bg_color: default_hint_bg(),
+            badge_fg_color: default_hint_fg(),
         }
     }
 }
@@ -771,7 +774,7 @@ pub struct GlyphlowConfig {
     pub electron_initial_wait_ms: u64,
     #[serde(default = "default_hint_keys")]
     pub hint_keys: HintKeys,
-    #[serde(default = "default_grid")]
+    #[serde(default = "default_grid_config")]
     pub grid: GridConfig,
     /// Per-app overrides, keyed by bundle id — see [`AppOverride`].
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -994,9 +997,6 @@ fn default_wait_ms() -> u64 {
 fn default_hint_keys() -> HintKeys {
     HintKeys::default()
 }
-fn default_grid() -> GridConfig {
-    GridConfig::default()
-}
 fn default_grid_rows() -> u8 {
     3
 }
@@ -1006,14 +1006,11 @@ fn default_grid_cols() -> u8 {
 fn default_grid_keys() -> GridKeys {
     GridKeys::from(GridConfig::DEFAULT_KEYS)
 }
-fn default_grid_font() -> Retained<NSFont> {
-    NSFont::fontWithName_size(ns_string!("Andale Mono"), 14.0).expect("Default font should exist.")
-}
 fn default_grid_bg() -> CFRetained<CGColor> {
-    color_from_hex("#769ff060")
+    color_from_hex("#c0caf560")
 }
-fn default_grid_fg() -> CFRetained<CGColor> {
-    color_from_hex("#111726ff")
+fn default_grid_config() -> GridConfig {
+    GridConfig::default()
 }
 
 impl Default for GlyphlowConfig {
@@ -1036,7 +1033,7 @@ impl Default for GlyphlowConfig {
             visibility_checking_level: default_vis_level(),
             electron_initial_wait_ms: default_wait_ms(),
             hint_keys: default_hint_keys(),
-            grid: default_grid(),
+            grid: default_grid_config(),
             apps: HashMap::new(),
         }
     }

@@ -103,11 +103,11 @@ impl CellLayers {
 
         let border = CALayer::new();
         border.setBorderWidth(BORDER_WIDTH);
-        border.setBorderColor(Some(&grid.bg_color));
+        border.setBorderColor(Some(&grid.grid_color));
 
         let badge = CALayer::new();
         badge.setBounds(NSRect::new(NSPoint::new(0.0, 0.0), badge_size));
-        badge.setBackgroundColor(Some(&grid.bg_color));
+        badge.setBackgroundColor(Some(&grid.badge_bg_color));
         badge.setCornerRadius(margin);
 
         let text_layer = CATextLayer::new();
@@ -182,7 +182,7 @@ fn attributed_label(label: char, grid: &GridConfig) -> Retained<NSMutableAttribu
         attr_string.addAttribute_value_range(NSFontAttributeName, &grid.font, full_range);
         attr_string.addAttribute_value_range(
             NSForegroundColorAttributeName,
-            grid.fg_color.as_ref(),
+            grid.badge_fg_color.as_ref(),
             full_range,
         );
     }
