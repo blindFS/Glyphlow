@@ -950,18 +950,11 @@ fn default_workflows() -> Vec<WorkFlow> {
             ],
         },
         WorkFlow {
-            key: "G[".into(),
+            key: "G".into(),
             display: "󰋁 Grid Click".into(),
             starting_role: RoleOfInterest::Window,
             valid_app_ids: None,
             actions: vec![WorkFlowAction::GridMove, WorkFlowAction::Click],
-        },
-        WorkFlow {
-            key: "G]".into(),
-            display: "󰋁 Grid Right Click".into(),
-            starting_role: RoleOfInterest::Window,
-            valid_app_ids: None,
-            actions: vec![WorkFlowAction::GridMove, WorkFlowAction::RightClick],
         },
     ]
 }
