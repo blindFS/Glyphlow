@@ -496,7 +496,7 @@ fn main() {
             TestEvent::ExpectSignal(AppSignal::GridKey('K')),
             TestEvent::ReleaseKey(Key::KeyK),
             TestEvent::ClearSignals,
-            // ... enter keeps the cell and lets the rest of the workflow run ...
+            // ... enter keeps the cell and runs the rest of the workflow ...
             TestEvent::PressKey(Key::Enter),
             TestEvent::ExpectSignal(AppSignal::GridAccept),
             TestEvent::ReleaseKey(Key::Enter),
@@ -510,14 +510,13 @@ fn main() {
             TestEvent::ExpectSignal(AppSignal::GridBack),
             TestEvent::ReleaseKey(Key::Delete),
             TestEvent::ClearSignals,
-            // A key that types nothing is ignored rather than closing the grid.
-            // Every menu mode reads a space as "deactivate"; here that would
-            // throw the run away on a mistyped cell key.
+            // A space is ignored rather than closing the grid, unlike every menu
+            // mode — here that would throw the run away on a mistyped cell key.
             TestEvent::PressKey(Key::Space),
             TestEvent::ExpectNoSignal,
             TestEvent::ReleaseKey(Key::Space),
             TestEvent::ClearSignals,
-            // Esc abandons the run, so the mode has to come back to Idle with it.
+            // Esc abandons the run, so the mode comes back to Idle with it.
             TestEvent::PressKey(Key::Escape),
             TestEvent::ExpectSignal(AppSignal::DeActivate),
             TestEvent::ExpectMode(Mode::Idle),

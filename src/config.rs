@@ -649,7 +649,7 @@ impl GridConfig {
     /// keyboard it is typed on.
     pub const DEFAULT_KEYS: &'static str = "UIOJKLNM/";
 
-    /// The size the config asks for, before trimming to the keys available.
+    /// The size the config asks for, before [`Self::dims`] trims it.
     fn wanted(&self) -> (usize, usize) {
         (self.rows.max(1) as usize, self.cols.max(1) as usize)
     }
@@ -672,10 +672,8 @@ impl GridConfig {
         self.keys.as_str().chars().take(rows * cols)
     }
 
-    /// One label per cell, in reading order.
-    ///
-    /// Short of the grid's size means the keys ran out; that is reported here
-    /// rather than in [`Self::dims`], which a run reads on every key.
+    /// One label per cell, in reading order. The trim is reported here rather
+    /// than in [`Self::dims`], which a run reads on every key.
     pub fn labels(&self) -> Vec<char> {
         let labels: Vec<char> = self.cell_keys().collect();
         let (rows, cols) = self.wanted();
@@ -1790,9 +1788,8 @@ mod tests {
         );
     }
 
-    /// One key addresses one cell, so a grid asking for more cells than the
-    /// alphabet has keys is trimmed: whole rows are kept and columns are dropped.
-    /// Every case here is over the default nine keys.
+    /// A grid needing more cells than the alphabet has keys is trimmed: whole rows
+    /// are kept, columns are dropped. Every case is over the default nine keys.
     #[rstest]
     #[case::exactly_fits(3, 3, (3, 3))]
     #[case::one_row_past_the_alphabet(4, 4, (4, 2))]
@@ -1811,17 +1808,14 @@ mod tests {
         };
         assert_eq!(grid.dims(), expected);
 
-        // Whatever it settles on, the grid is drawable: it never needs more keys
-        // than there are, and it labels every cell it does draw.
+        // Whatever it settles on, the grid must stay drawable.
         let (rows, cols) = grid.dims();
         assert!(rows * cols <= grid.keys.base());
         assert_eq!(grid.labels().len(), rows * cols);
     }
 
-    /// The overlay draws `labels` and a keystroke is resolved through
-    /// `label_index`, so the two must describe the same grid: every label is
-    /// addressable at its own index, and a key the trim left over addresses
-    /// nothing — pressing it must not narrow the grid.
+    /// `labels` is what the overlay draws and `label_index` is what a keystroke
+    /// looks up: a key the trim left over must address nothing.
     #[test]
     fn grid_labels_and_label_index_agree() {
         // 4x4 over nine keys trims to 4x2, which leaves a key unused.
@@ -1844,11 +1838,8 @@ mod tests {
         }
     }
 
-    /// `/` starts a search in the hint modes, so it cannot be a hint key — but
-    /// the grid has no search binding, and its default layout uses `/` for the
-    /// last cell. That one difference is why `HintKeys` carries its usable set as
-    /// a const parameter: serde picks the set from the field's type alone, so the
-    /// two alphabets cannot be swapped for each other.
+    /// `/` starts a search in the hint modes but means nothing to the grid, which
+    /// is why `HintKeys` carries its usable set as a const parameter.
     #[test]
     fn grid_keys_keep_the_slash_that_hint_keys_drop() {
         assert!(
@@ -1862,9 +1853,7 @@ mod tests {
                 .contains('/')
         );
 
-        // The slash survives TOML both ways, including as a written value, and a
-        // partial table is enough: every field of `[grid]` falls back on its own,
-        // so a user writes only the one they mean to change.
+        // A partial table is enough, and the slash survives the round trip.
         let config: GlyphlowConfig = toml::from_str("[grid]\nkeys = \"uio/jkl\"").unwrap();
         assert_eq!(config.grid.keys.as_str(), "UIO/JKL");
         assert_eq!((config.grid.rows, config.grid.cols), (3, 3));

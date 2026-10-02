@@ -161,9 +161,8 @@ impl AppEngine {
 mod tests {
     use super::*;
 
-    /// The window is a 900 px square, which the 3x3 default divides exactly — and
-    /// the result divides exactly again — so the regions below compare exactly
-    /// rather than within a tolerance.
+    /// A 900 px window: the 3x3 default divides it exactly, twice over, so the
+    /// regions below compare exactly instead of within a tolerance.
     fn window_and_grid() -> (GridConfig, GridLevel) {
         let region = Frame::new(100.0, 200.0, 1000.0, 1100.0);
         (
@@ -176,16 +175,13 @@ mod tests {
         )
     }
 
-    /// Widening undoes narrowing even though the parent is recomputed from the
-    /// current frame rather than popped off a stack, and every level stays aligned
-    /// to the window because `outer` is never rebound. Those two are what keep
-    /// Backspace from walking the grid off the window as the user presses it.
+    /// Widening undoes narrowing even though the parent is recomputed, not popped:
+    /// the levels stay aligned to the window because `outer` is never rebound.
     #[test]
     fn widening_undoes_narrowing_back_to_the_window() {
         let (grid, root) = window_and_grid();
 
-        // The middle cell, then its top-left cell: two levels down, so widening
-        // has to rebuild a parent that is not the window itself.
+        // Two levels down, so widening rebuilds a parent that is not the window.
         let once = root
             .narrowed('K', &grid)
             .expect("`K` labels the middle cell");
@@ -210,15 +206,13 @@ mod tests {
         assert!(out.widened(&grid).is_none());
     }
 
-    /// `label_index` decides whether a key names a cell at all, so a key outside
-    /// the grid leaves the run where it is rather than opening a bogus region.
+    /// A key that names no cell leaves the run where it is.
     #[test]
     fn narrowing_ignores_a_key_that_labels_no_cell() {
         let (grid, root) = window_and_grid();
 
         assert!(root.narrowed('Z', &grid).is_none());
-        // `/` labels the last cell of the default layout — the grid's own key,
-        // which the hint modes reserve for search.
+        // `/` is the grid's own key; the hint modes reserve it for search.
         assert!(root.narrowed('/', &grid).is_some());
     }
 }
