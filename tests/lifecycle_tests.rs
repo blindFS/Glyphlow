@@ -54,6 +54,8 @@ enum TestEvent {
     SetMode(Mode),
     ExpectMode(Mode),
     ExpectSignal(AppSignal),
+    /// Waits as long, and fails if the engine was given anything at all.
+    ExpectNoSignal,
     ClearSignals,
     SetClipboard(String),
     /// Sends a raw signal, the way the CLI would over its socket.
@@ -390,16 +392,22 @@ fn main() {
         .await;
 
         println!("Running Scenario 16: An unmatched key is routed per menu kind");
+        // No selection behind the dashboard, so it must be refreshed through
+        // its own signal — `MenuRefresh` is resolved from a selection and
+        // would draw nothing, leaving the key without an answer.
         run_test_scenario(vec![
-            // No selection behind the dashboard, so it must be refreshed through
-            // its own signal — `MenuRefresh` is resolved from a selection and
-            // would draw nothing, leaving the key without an answer.
             TestEvent::SetMode(Mode::DashBoard),
             TestEvent::ClearSignals,
             TestEvent::PressKey(Key::KeyX),
             TestEvent::ExpectSignal(AppSignal::DashboardRefresh("X".into())),
             TestEvent::ReleaseKey(Key::KeyX),
-            // A menu that does have a selection keeps using `MenuRefresh`.
+        ])
+        .await;
+
+        // A menu that does have a selection keeps using `MenuRefresh`. Its own
+        // scenario, because an unmatched key stays in `KeyState::prefix`: sharing
+        // one would prepend the dashboard's `X` to this one's.
+        run_test_scenario(vec![
             TestEvent::SetMode(Mode::TextActionMenu),
             TestEvent::ClearSignals,
             TestEvent::PressKey(Key::KeyX),
@@ -476,6 +484,43 @@ fn main() {
             TestEvent::ClearMessages,
             TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Shift)),
             TestEvent::ExpectNoMessage,
+        ])
+        .await;
+
+        println!("Running Scenario 21: Grid Mode Keys");
+        run_test_scenario(vec![
+            TestEvent::SetMode(Mode::Grid),
+            TestEvent::ClearSignals,
+            // A cell key reaches the engine as the character it types ...
+            TestEvent::PressKey(Key::KeyK),
+            TestEvent::ExpectSignal(AppSignal::GridKey('K')),
+            TestEvent::ReleaseKey(Key::KeyK),
+            TestEvent::ClearSignals,
+            // ... enter keeps the cell and runs the rest of the workflow ...
+            TestEvent::PressKey(Key::Enter),
+            TestEvent::ExpectSignal(AppSignal::GridAccept),
+            TestEvent::ReleaseKey(Key::Enter),
+            TestEvent::ClearSignals,
+            // ... and either delete key widens by one level.
+            TestEvent::PressKey(Key::Backspace),
+            TestEvent::ExpectSignal(AppSignal::GridBack),
+            TestEvent::ReleaseKey(Key::Backspace),
+            TestEvent::ClearSignals,
+            TestEvent::PressKey(Key::Delete),
+            TestEvent::ExpectSignal(AppSignal::GridBack),
+            TestEvent::ReleaseKey(Key::Delete),
+            TestEvent::ClearSignals,
+            // A space is ignored rather than closing the grid, unlike every menu
+            // mode — here that would throw the run away on a mistyped cell key.
+            TestEvent::PressKey(Key::Space),
+            TestEvent::ExpectNoSignal,
+            TestEvent::ReleaseKey(Key::Space),
+            TestEvent::ClearSignals,
+            // Esc abandons the run, so the mode comes back to Idle with it.
+            TestEvent::PressKey(Key::Escape),
+            TestEvent::ExpectSignal(AppSignal::DeActivate),
+            TestEvent::ExpectMode(Mode::Idle),
+            TestEvent::ReleaseKey(Key::Escape),
         ])
         .await;
     });
@@ -565,6 +610,14 @@ async fn run_test_scenario_with_config(events: Vec<TestEvent>, config: GlyphlowC
                         "step {step}: expected signal {expected_signal:?} was not processed. \
                          Processed signals: {:?}",
                         *sim_processed_signals.lock().unwrap()
+                    );
+                }
+                TestEvent::ExpectNoSignal => {
+                    std::thread::sleep(wait_timeout / 5);
+                    let signals = sim_processed_signals.lock().unwrap();
+                    assert!(
+                        signals.is_empty(),
+                        "step {step}: expected no signal, got {signals:?}"
                     );
                 }
                 TestEvent::ClearSignals => {

@@ -38,6 +38,9 @@ pub enum RoleOfInterest {
     /// Text with no accessibility element behind it (clipboard, OCR).
     PseudoText,
     Cell,
+    /// The focused window. Satisfied by a window selection, or by no selection
+    /// at all — the dashboard is already on a window before anything is picked.
+    Window,
     /// Result of a `SearchFor` action.
     CustomTarget,
 }
@@ -65,6 +68,9 @@ pub enum WorkFlowAction {
     Press,
     Hover,
     Move(f64, f64),
+    /// Narrow the cursor down through a recursive grid of labelled cells, until
+    /// Enter accepts the cell or Esc abandons the workflow. See [`GridConfig`].
+    GridMove,
     Click,
     RightClick,
     MiddleClick,
@@ -433,7 +439,8 @@ impl AlphabeticKey for Key {
 ///
 /// Mirrors the non-modifier branches of `Key::to_char()`. `/` is deliberately
 /// absent: `KeyListener::handle_filter_key` intercepts it to start a text search, so
-/// a hint labelled with it could never be typed.
+/// a hint labelled with it could never be typed. [`GridKeys`] takes the same set
+/// plus `/`.
 const TYPABLE_HINT_CHARS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789`-=[]\\;',.";
 
 /// Bit for `c` in a 128-bit bitmap indexed by ASCII code point, or `0` for
@@ -455,26 +462,36 @@ const TYPABLE_HINT_MASK: u128 = {
     mask
 };
 
+/// [`TYPABLE_HINT_MASK`] plus `/`, which the hint modes reserve for search but
+/// the recursive grid has no binding for.
+const TYPABLE_GRID_MASK: u128 = TYPABLE_HINT_MASK | ascii_bit('/');
+
+/// Fallback alphabet when a configured one leaves too few usable keys.
+const FALLBACK_ALPHABET: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+/// Below this many distinct keys a mode cannot address its labels unambiguously.
+const MIN_LEN: usize = 2;
+
 /// The ordered set of keys used to label hints.
 ///
-/// Normalized on construction: upper-cased, de-duplicated, and restricted to
-/// `TYPABLE_HINT_CHARS`. An input that leaves fewer than two usable keys is
-/// rejected in favour of [`HintKeys::DEFAULT_ALPHABET`], because a single key
-/// cannot tell hints apart.
-///
-/// Always ASCII, which is what lets the label builders index it as bytes.
+/// Normalized on construction: upper-cased, de-duplicated, and restricted to what
+/// `MASK` can deliver. The mask is a type parameter rather than an argument, so
+/// serde picks it from the field's type alone — the hint modes intercept `/` to
+/// start a search, while the grid has no such binding.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
-pub struct HintKeys(String);
+pub struct HintKeys<const MASK: u128 = TYPABLE_HINT_MASK>(String);
 
-impl HintKeys {
-    /// Plain uppercase ASCII letters.
-    pub const DEFAULT_ALPHABET: &'static str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+/// The keys labelling the cells of a recursive grid, in reading order.
+pub type GridKeys = HintKeys<TYPABLE_GRID_MASK>;
 
-    /// Below this many distinct keys hints cannot be addressed unambiguously.
-    const MIN_LEN: usize = 2;
-
-    pub fn new(raw: &str) -> Self {
+impl<const MASK: u128> HintKeys<MASK> {
+    /// Upper-cases `raw` and drops what `MASK` cannot deliver, de-duplicating and
+    /// warning about anything dropped; falls back to [`FALLBACK_ALPHABET`] when fewer
+    /// than [`MIN_LEN`] keys remain.
+    ///
+    /// Always ASCII, which is what lets the label builders index the result as bytes.
+    fn sanitize(raw: &str) -> String {
         // `seen` replaces a scan of the alphabet for every input character, and
         // `ignored` stays allocation-free unless something actually is dropped.
         let mut seen = 0u128;
@@ -483,7 +500,7 @@ impl HintKeys {
 
         for c in raw.chars() {
             let c = c.to_ascii_uppercase();
-            let bit = ascii_bit(c) & TYPABLE_HINT_MASK;
+            let bit = ascii_bit(c) & MASK;
 
             if bit == 0 {
                 if !ignored.contains(c) {
@@ -496,23 +513,18 @@ impl HintKeys {
         }
 
         if !ignored.is_empty() {
-            log::warn!(
-                "Ignoring {ignored:?} in `hint_keys` = {raw:?}: not usable as a single \
-                 keystroke hint key."
-            );
+            log::warn!("Ignoring {ignored:?} in {raw:?}: not usable as a single keystroke key.");
         }
 
-        if sanitized.len() < Self::MIN_LEN {
+        if sanitized.len() < MIN_LEN {
             log::warn!(
-                "`hint_keys` = {raw:?} does not provide at least {} distinct usable keys, \
-                 falling back to {:?}.",
-                Self::MIN_LEN,
-                Self::DEFAULT_ALPHABET
+                "{raw:?} does not provide at least {MIN_LEN} distinct usable keys, \
+                 falling back to {FALLBACK_ALPHABET:?}."
             );
-            return Self::default();
+            return FALLBACK_ALPHABET.to_string();
         }
 
-        Self(sanitized)
+        sanitized
     }
 
     pub fn as_str(&self) -> &str {
@@ -571,20 +583,38 @@ impl HintKeys {
     }
 }
 
-impl Default for HintKeys {
+/// `new` and the default alphabet sit on the concrete instantiation rather than the
+/// generic impl: a bare `HintKeys::new` cannot infer `MASK`, because a defaulted
+/// const parameter is not applied to a path in expression position.
+impl HintKeys<TYPABLE_HINT_MASK> {
+    /// Plain uppercase ASCII letters.
+    pub const DEFAULT_ALPHABET: &'static str = FALLBACK_ALPHABET;
+
+    pub fn new(raw: &str) -> Self {
+        Self(Self::sanitize(raw))
+    }
+}
+
+impl Default for HintKeys<TYPABLE_HINT_MASK> {
     fn default() -> Self {
         Self(Self::DEFAULT_ALPHABET.to_string())
     }
 }
 
-impl From<String> for HintKeys {
-    fn from(raw: String) -> Self {
-        Self::new(&raw)
+impl<const MASK: u128> From<&str> for HintKeys<MASK> {
+    fn from(raw: &str) -> Self {
+        Self(Self::sanitize(raw))
     }
 }
 
-impl From<HintKeys> for String {
-    fn from(keys: HintKeys) -> Self {
+impl<const MASK: u128> From<String> for HintKeys<MASK> {
+    fn from(raw: String) -> Self {
+        Self::from(raw.as_str())
+    }
+}
+
+impl<const MASK: u128> From<HintKeys<MASK>> for String {
+    fn from(keys: HintKeys<MASK>) -> Self {
         keys.0
     }
 }
@@ -593,6 +623,92 @@ impl From<HintKeys> for String {
 pub struct KeyBinding {
     #[serde(with = "key_combo_format")]
     pub keys: Vec<Key>,
+}
+
+/// The look and the size of the recursive grid used by
+/// [`WorkFlowAction::GridMove`].
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GridConfig {
+    #[serde(default = "default_grid_rows")]
+    pub rows: u8,
+    #[serde(default = "default_grid_cols")]
+    pub cols: u8,
+    /// Keys labelling the cells, in reading order.
+    #[serde(default = "default_grid_keys")]
+    pub keys: GridKeys,
+    #[serde(with = "nsfont_format", default = "default_hint_font")]
+    pub font: Retained<NSFont>,
+    #[serde(with = "cgcolor_format", default = "default_grid_bg")]
+    pub grid_color: CFRetained<CGColor>,
+    #[serde(with = "cgcolor_format", default = "default_hint_bg")]
+    pub badge_bg_color: CFRetained<CGColor>,
+    #[serde(with = "cgcolor_format", default = "default_hint_fg")]
+    pub badge_fg_color: CFRetained<CGColor>,
+}
+
+impl GridConfig {
+    /// A homerow block: `uio` / `jkl` / `nm/`, which reads as a 3x3 grid on the
+    /// keyboard it is typed on.
+    pub const DEFAULT_KEYS: &'static str = "UIOJKLNM/";
+
+    /// The size the config asks for, before [`Self::dims`] trims it.
+    fn wanted(&self) -> (usize, usize) {
+        (self.rows.max(1) as usize, self.cols.max(1) as usize)
+    }
+
+    /// The grid as it will be drawn. One key addresses one cell, so a grid
+    /// needing more cells than the alphabet has keys is trimmed.
+    pub fn dims(&self) -> (usize, usize) {
+        let (rows, cols) = self.wanted();
+        let base = self.keys.base();
+        if rows * cols <= base {
+            return (rows, cols);
+        }
+        let trimmed_rows = rows.min(base);
+        (trimmed_rows, (base / trimmed_rows).max(1))
+    }
+
+    /// The configured keys, trimmed to one per cell, in reading order.
+    fn cell_keys(&self) -> impl Iterator<Item = char> + '_ {
+        let (rows, cols) = self.dims();
+        self.keys.as_str().chars().take(rows * cols)
+    }
+
+    /// One label per cell, in reading order. The trim is reported here rather
+    /// than in [`Self::dims`], which a run reads on every key.
+    pub fn labels(&self) -> Vec<char> {
+        let labels: Vec<char> = self.cell_keys().collect();
+        let (rows, cols) = self.wanted();
+        if labels.len() < rows * cols {
+            let (trimmed_rows, trimmed_cols) = self.dims();
+            log::warn!(
+                "grid: {rows}x{cols} needs {} keys but only {} are configured, \
+                 using {trimmed_rows}x{trimmed_cols}",
+                rows * cols,
+                self.keys.base()
+            );
+        }
+        labels
+    }
+
+    /// The index of the cell `key` labels, if it labels one.
+    pub fn label_index(&self, key: char) -> Option<usize> {
+        self.cell_keys().position(|c| c == key)
+    }
+}
+
+impl Default for GridConfig {
+    fn default() -> Self {
+        Self {
+            rows: default_grid_rows(),
+            cols: default_grid_cols(),
+            keys: default_grid_keys(),
+            font: default_hint_font(),
+            grid_color: default_grid_bg(),
+            badge_bg_color: default_hint_bg(),
+            badge_fg_color: default_hint_fg(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Copy)]
@@ -658,6 +774,8 @@ pub struct GlyphlowConfig {
     pub electron_initial_wait_ms: u64,
     #[serde(default = "default_hint_keys")]
     pub hint_keys: HintKeys,
+    #[serde(default = "default_grid_config")]
+    pub grid: GridConfig,
     /// Per-app overrides, keyed by bundle id — see [`AppOverride`].
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub apps: HashMap<String, AppOverride>,
@@ -834,6 +952,13 @@ fn default_workflows() -> Vec<WorkFlow> {
                 WorkFlowAction::Press,
             ],
         },
+        WorkFlow {
+            key: "G".into(),
+            display: "󰋁 Grid Click".into(),
+            starting_role: RoleOfInterest::Window,
+            valid_app_ids: None,
+            actions: vec![WorkFlowAction::GridMove, WorkFlowAction::Click],
+        },
     ]
 }
 fn default_scroll_distance() -> f64 {
@@ -872,6 +997,21 @@ fn default_wait_ms() -> u64 {
 fn default_hint_keys() -> HintKeys {
     HintKeys::default()
 }
+fn default_grid_rows() -> u8 {
+    3
+}
+fn default_grid_cols() -> u8 {
+    3
+}
+fn default_grid_keys() -> GridKeys {
+    GridKeys::from(GridConfig::DEFAULT_KEYS)
+}
+fn default_grid_bg() -> CFRetained<CGColor> {
+    color_from_hex("#c0caf560")
+}
+fn default_grid_config() -> GridConfig {
+    GridConfig::default()
+}
 
 impl Default for GlyphlowConfig {
     fn default() -> Self {
@@ -893,6 +1033,7 @@ impl Default for GlyphlowConfig {
             visibility_checking_level: default_vis_level(),
             electron_initial_wait_ms: default_wait_ms(),
             hint_keys: default_hint_keys(),
+            grid: default_grid_config(),
             apps: HashMap::new(),
         }
     }
@@ -1466,7 +1607,7 @@ mod tests {
             HintKeys::new(HintKeys::DEFAULT_ALPHABET),
             HintKeys::default()
         );
-        assert!(HintKeys::default().base() >= HintKeys::MIN_LEN);
+        assert!(HintKeys::default().base() >= MIN_LEN);
     }
 
     #[test]
@@ -1635,6 +1776,86 @@ mod tests {
                 .hint_keys,
             config.hint_keys
         );
+    }
+
+    /// A grid needing more cells than the alphabet has keys is trimmed: whole rows
+    /// are kept, columns are dropped. Every case is over the default nine keys.
+    #[rstest]
+    #[case::exactly_fits(3, 3, (3, 3))]
+    #[case::one_row_past_the_alphabet(4, 4, (4, 2))]
+    #[case::wide_keeps_a_single_row(1, 20, (1, 9))]
+    #[case::tall_keeps_a_single_column(5, 5, (5, 1))]
+    #[case::nothing_configured_is_one_cell(0, 0, (1, 1))]
+    fn grid_dims_trim_to_the_keys_available(
+        #[case] rows: u8,
+        #[case] cols: u8,
+        #[case] expected: (usize, usize),
+    ) {
+        let grid = GridConfig {
+            rows,
+            cols,
+            ..Default::default()
+        };
+        assert_eq!(grid.dims(), expected);
+
+        // Whatever it settles on, the grid must stay drawable.
+        let (rows, cols) = grid.dims();
+        assert!(rows * cols <= grid.keys.base());
+        assert_eq!(grid.labels().len(), rows * cols);
+    }
+
+    /// `labels` is what the overlay draws and `label_index` is what a keystroke
+    /// looks up: a key the trim left over must address nothing.
+    #[test]
+    fn grid_labels_and_label_index_agree() {
+        // 4x4 over nine keys trims to 4x2, which leaves a key unused.
+        let grid = GridConfig {
+            rows: 4,
+            cols: 4,
+            ..Default::default()
+        };
+
+        let labels = grid.labels();
+        let keys = grid.keys.as_str().chars().collect::<Vec<_>>();
+        let unused = &keys[labels.len()..];
+        assert!(!unused.is_empty(), "the trim should leave a key over");
+
+        for (idx, label) in labels.iter().enumerate() {
+            assert_eq!(grid.label_index(*label), Some(idx));
+        }
+        for key in unused {
+            assert_eq!(grid.label_index(*key), None, "{key:?} labels no cell");
+        }
+    }
+
+    /// `/` starts a search in the hint modes but means nothing to the grid, which
+    /// is why `HintKeys` carries its usable set as a const parameter.
+    #[test]
+    fn grid_keys_keep_the_slash_that_hint_keys_drop() {
+        assert!(
+            GridKeys::from(GridConfig::DEFAULT_KEYS)
+                .as_str()
+                .contains('/')
+        );
+        assert!(
+            !HintKeys::new(GridConfig::DEFAULT_KEYS)
+                .as_str()
+                .contains('/')
+        );
+
+        // A partial table is enough, and the slash survives the round trip.
+        let config: GlyphlowConfig = toml::from_str("[grid]\nkeys = \"uio/jkl\"").unwrap();
+        assert_eq!(config.grid.keys.as_str(), "UIO/JKL");
+        assert_eq!((config.grid.rows, config.grid.cols), (3, 3));
+
+        let config: GlyphlowConfig = toml::from_str("[grid]\nrows = 4").unwrap();
+        assert_eq!((config.grid.rows, config.grid.cols), (4, 3));
+
+        let default = GlyphlowConfig::default();
+        let toml_str = toml::to_string(&default).unwrap();
+        let reloaded: GlyphlowConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(reloaded.grid.keys, default.grid.keys);
+        assert!(reloaded.grid.keys.as_str().contains('/'));
     }
 
     fn workflow_with_display(display: &str) -> WorkFlow {

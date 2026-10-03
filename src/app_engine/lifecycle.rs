@@ -39,6 +39,10 @@ impl AppEngine {
         self.state.try_lock().is_ok_and(|s| *s == mode)
     }
 
+    pub(super) fn mode(&self) -> Mode {
+        self.state.lock().map(|s| s.clone()).unwrap_or(Mode::Idle)
+    }
+
     pub(super) fn deactivate(&mut self) {
         self.clear_cache();
         self.clear_drawing();
@@ -144,7 +148,7 @@ impl AppEngine {
         self.selected = Some(ElementOfInterest::new(
             window.clone(),
             None,
-            RoleOfInterest::Generic,
+            RoleOfInterest::Window,
             *frame,
         ));
     }

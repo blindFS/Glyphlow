@@ -33,6 +33,12 @@ impl AppEngine {
                 .selected
                 .as_ref()
                 .is_some_and(|s| s.element().is_some()),
+            // Nothing selected is still a window: the dashboard is already on
+            // the focused one.
+            RoleOfInterest::Window => self
+                .selected
+                .as_ref()
+                .is_none_or(|s| s.role() == RoleOfInterest::Window),
             _ => self
                 .selected
                 .as_ref()
@@ -122,6 +128,11 @@ impl AppEngine {
             WorkFlowAction::Move(x, y) => {
                 self.move_mouse_with_trail(*x, *y);
                 return false;
+            }
+            WorkFlowAction::GridMove => {
+                self.start_grid();
+                // The queue resumes when Enter accepts a cell.
+                return true;
             }
             WorkFlowAction::KeyCombo(kb) => {
                 self.simulate_key(|| {
@@ -312,6 +323,7 @@ fn custom_target_for_role(role: RoleOfInterest) -> Option<CustomTarget> {
         RoleOfInterest::StaticText => "statictext|heading",
         RoleOfInterest::TextField => "textfield|textarea|combobox",
         RoleOfInterest::Cell => "cell",
+        RoleOfInterest::Window => "window",
         _ => return None,
     };
     Some(CustomTarget {

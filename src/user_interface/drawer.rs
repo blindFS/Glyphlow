@@ -37,6 +37,8 @@ macro_rules! without_animations {
     }};
 }
 
+pub(crate) use without_animations;
+
 const BORDER_WIDTH: f64 = 2.0;
 const MIN_FONT_SIZE: f64 = 10.0;
 const SEARCH_BAR_WIDTH: usize = 10;
