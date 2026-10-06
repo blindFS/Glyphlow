@@ -26,7 +26,10 @@ pub enum MenuStyle {
     Key,
     /// The text the menu acts on.
     Text,
-    /// The leading line of a message that reports a failure.
+    /// The leading line that names an overlay: a menu's `Pick a …`, a picker's
+    /// `Press … to …`, or the first line of a warning.
+    Header,
+    /// A message that reports a failure.
     Error,
     /// Text the current input has ruled out.
     Dim,
@@ -51,6 +54,7 @@ impl MenuStyle {
         match self {
             Self::Key => (&theme.menu_hl_color, None),
             Self::Text => (&theme.menu_text_hl_color, None),
+            Self::Header => (&theme.menu_header_hl_color, None),
             Self::Error => (&theme.menu_error_hl_color, None),
             Self::Dim => (dim, None),
             Self::Selected => (&theme.menu_bg_color, Some(&theme.menu_hl_color)),

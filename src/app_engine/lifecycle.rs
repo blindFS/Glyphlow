@@ -75,9 +75,9 @@ impl AppEngine {
     /// Show a notification; it clears itself after a delay that depends on the
     /// log level.
     ///
-    /// A level that reports a failure also paints the first line of `msg` in the
-    /// error colour, so every such message reads as one without the caller
-    /// having to say so.
+    /// A level that reports something wrong also paints the first line of `msg`
+    /// in the colour for it, so every such message reads the same way without
+    /// the caller having to say so.
     pub(super) fn notify(&mut self, msg: impl Into<MenuString>, log_level: Level) {
         let timeout_secs = match log_level {
             Level::Trace | Level::Info => SHORT_TIMEOUT,
@@ -85,9 +85,12 @@ impl AppEngine {
             _ => LONG_TIMEOUT,
         } * 1000;
         let mut msg = msg.into();
-        if matches!(log_level, Level::Warn | Level::Error) {
-            msg.style_head(MenuStyle::Error);
-        }
+        match log_level {
+            Level::Error => msg.style_head(MenuStyle::Error),
+            // Nothing fatal happened, so a warning shares the header colour.
+            Level::Warn => msg.style_head(MenuStyle::Header),
+            _ => &mut msg,
+        };
         log::log!(log_level, "{}", msg.text());
         let id = self.drawer.notify(&self.config.theme, &msg);
         let sender = self.signal_sender.clone();

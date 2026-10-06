@@ -42,7 +42,7 @@ fn back_hint(prefix: &str) -> MenuString {
 
 pub(super) fn wrong_key_sequence() -> MenuString {
     let mut menu = back_hint("Wrong key sequence\nPress ");
-    menu.style_head(MenuStyle::Error);
+    menu.style_head(MenuStyle::Header);
     menu
 }
 
@@ -154,8 +154,9 @@ impl AppEngine {
         visible_indices
     }
 
-    /// The menu for `key_prefix`: `head`, then a row per reachable item, with the
-    /// keys aligned on the longest one.
+    /// The menu for `key_prefix`: `head` with its first line styled as the
+    /// menu's header, then a row per reachable item, with the keys aligned on
+    /// the longest one.
     fn build_menu_message(
         &self,
         head: MenuString,
@@ -212,6 +213,7 @@ impl AppEngine {
         }
 
         let mut menu = head;
+        menu.style_head(MenuStyle::Header);
         for (key, display) in menu_items {
             menu.push_row(key, display, prefix_len, max_key_len);
         }
