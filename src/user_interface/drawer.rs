@@ -120,10 +120,11 @@ impl MenuString {
             .map_or(key.len(), |(byte, _)| byte);
         self.push("\n")
             .push(&padding)
-            .push("(")
+            .push_styled("(", MenuStyle::Dim)
             .push_styled(&"_".repeat(prefix_len), MenuStyle::Dim)
             .push_styled(&key[rest..], MenuStyle::Key)
-            .push(") ")
+            .push_styled(")", MenuStyle::Dim)
+            .push(" ")
             .push(display)
     }
 

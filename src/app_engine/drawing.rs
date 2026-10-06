@@ -147,8 +147,6 @@ impl AppEngine {
             }
 
             if !self.is_searching && nothing_visible {
-                // A span sits inside the head line, so the head colour the level
-                // would otherwise supply is named here.
                 let mut msg = MenuString::from("");
                 msg.push_styled("Nothing matches, press ", MenuStyle::Header)
                     .push_styled(BACK_KEY, MenuStyle::Key)
