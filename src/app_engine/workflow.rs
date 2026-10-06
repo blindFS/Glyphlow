@@ -1,4 +1,4 @@
-use super::{AppEngine, drawing::wrong_key_sequence};
+use super::{AppEngine, drawing::wrong_key_menu};
 use crate::{
     Mode,
     ax_element::{CompiledTarget, GetAttribute, SetAttribute, Target},
@@ -256,7 +256,7 @@ impl AppEngine {
             self.pending_workflow_actions = workflow.actions.clone().into();
             self.execute_pending_workflow_actions();
         } else {
-            self.draw_menu(&wrong_key_sequence());
+            self.draw_menu(&wrong_key_menu());
         }
     }
 

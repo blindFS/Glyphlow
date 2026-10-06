@@ -411,13 +411,11 @@ impl AppEngine {
         } else if self.target == Target::Clickable {
             self.click_modifiers.toggle(key);
             let mut msg = MenuString::from("Click modifiers: ");
-            msg.push_styled(
-                match self.click_modifiers.label().as_ref() {
-                    Some(keys) => keys,
-                    None => "none",
-                },
-                MenuStyle::Key,
-            );
+            match self.click_modifiers.label() {
+                // `none` is not a key, so it stays unstyled.
+                Some(keys) => msg.push_styled(&keys, MenuStyle::Key),
+                None => msg.push("none"),
+            };
             self.notify(msg, Level::Info);
         }
     }
@@ -430,7 +428,7 @@ impl AppEngine {
             "off"
         };
         let mut msg = MenuString::from("Multi-selection is now ");
-        msg.push_styled(on_off, MenuStyle::Key);
+        msg.push_styled(on_off, MenuStyle::Key).push(".");
         self.notify(msg, Level::Info);
     }
 }

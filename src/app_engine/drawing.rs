@@ -15,12 +15,15 @@ const MAX_TEXT_DISPLAY_LEN: usize = 30;
 /// ellipsis. Whitespace runs collapse, so a selection cannot add lines to the menu.
 fn preview_line(text: &str) -> String {
     let mut line = String::new();
+    let mut len = 0;
     for word in text.split_whitespace() {
-        if !line.is_empty() {
+        if len > 0 {
             line.push(' ');
+            len += 1;
         }
         line.push_str(word);
-        if line.chars().count() > MAX_TEXT_DISPLAY_LEN {
+        len += word.chars().count();
+        if len > MAX_TEXT_DISPLAY_LEN {
             break;
         }
     }
@@ -33,17 +36,23 @@ fn preview_line(text: &str) -> String {
 
 const BACK_KEY: &str = "󰁮";
 
-fn back_hint(prefix: &str) -> MenuString {
-    let mut menu = MenuString::from(prefix);
-    menu.push_styled(BACK_KEY, MenuStyle::Key)
+/// `lead`, then [`BACK_KEY`]: the tail every dead-end message shares.
+///
+/// `lead` is a fragment that has to stop right before the key, because the key
+/// carries its own style.
+fn back_key_message(lead: &str) -> MenuString {
+    let mut msg = MenuString::from(lead);
+    msg.push_styled(BACK_KEY, MenuStyle::Key)
         .push(" to go back");
-    menu
+    msg
 }
 
-pub(super) fn wrong_key_sequence() -> MenuString {
-    let mut menu = back_hint("Wrong key sequence\nPress ");
-    menu.style_head(MenuStyle::Header);
-    menu
+/// The message for a key sequence that reaches no item: it says so, then offers
+/// the way out.
+pub(super) fn wrong_key_menu() -> MenuString {
+    let mut msg = back_key_message("Wrong key sequence\nPress ");
+    msg.style_head(MenuStyle::Header);
+    msg
 }
 
 impl AppEngine {
@@ -147,7 +156,10 @@ impl AppEngine {
             }
 
             if !self.is_searching && nothing_visible {
-                self.notify(back_hint("Nothing matches, press "), log::Level::Warn);
+                self.notify(
+                    back_key_message("Nothing matches, press "),
+                    log::Level::Warn,
+                );
             }
         });
 
@@ -209,7 +221,7 @@ impl AppEngine {
         }
 
         if menu_items.is_empty() {
-            return wrong_key_sequence();
+            return wrong_key_menu();
         }
 
         let mut menu = head;

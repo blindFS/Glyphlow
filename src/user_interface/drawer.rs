@@ -120,7 +120,7 @@ impl MenuString {
             .push(display)
     }
 
-    /// Draw the first line in `style`. It is the weakest span, so one added
+    /// Style the first line in `style`. It is the weakest span, so one added
     /// inside the head still wins.
     pub fn style_head(&mut self, style: MenuStyle) -> &mut Self {
         let end = self.text.find('\n').unwrap_or(self.text.len());
