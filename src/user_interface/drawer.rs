@@ -98,7 +98,7 @@ impl MenuString {
     }
 
     /// Append a `(key) display` row on its own line, highlighting the key: padded
-    /// to `key_width`, with the `prefix_len` characters already typed blanked out.
+    /// to `key_width`, with the `prefix_len` characters already typed dimmed.
     pub fn push_row(
         &mut self,
         key: &str,
@@ -114,7 +114,7 @@ impl MenuString {
         self.push("\n")
             .push(&padding)
             .push("(")
-            .push_styled(&"_".repeat(prefix_len), MenuStyle::Key)
+            .push_styled(&"_".repeat(prefix_len), MenuStyle::Dim)
             .push_styled(&key[rest..], MenuStyle::Key)
             .push(") ")
             .push(display)
