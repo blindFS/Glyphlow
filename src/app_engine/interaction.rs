@@ -238,7 +238,7 @@ impl AppEngine {
             TextAction::Editor => {
                 if let Err(e) = self.open_editor(text) {
                     self.notify_then_deactivate(
-                        &format!("Failed to open editor: {e}"),
+                        format!("Failed to open editor: {e}"),
                         Level::Error,
                     );
                     true
@@ -418,7 +418,7 @@ impl AppEngine {
             .spawn()
         else {
             self.notify_then_deactivate(
-                &format!(
+                format!(
                     "Failed to spawn command: {} {}",
                     action.command,
                     action.args.join(" ")
@@ -438,7 +438,7 @@ impl AppEngine {
                     self.update_selected_text_and_show_menu(new_text);
                 } else if !o.stderr.is_empty() {
                     self.notify_then_deactivate(
-                        &format!("External stderr: {}", String::from_utf8_lossy(&o.stderr)),
+                        format!("External stderr: {}", String::from_utf8_lossy(&o.stderr)),
                         Level::Error,
                     );
                 } else {
@@ -447,7 +447,7 @@ impl AppEngine {
                 }
             }
             Err(e) => {
-                self.notify_then_deactivate(&format!("Failed to run command: {e}"), Level::Error);
+                self.notify_then_deactivate(format!("Failed to run command: {e}"), Level::Error);
             }
         }
     }

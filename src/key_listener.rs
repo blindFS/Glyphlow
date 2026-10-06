@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, HashSet},
-    fmt::Display,
     path::PathBuf,
     sync::{Mutex, MutexGuard},
 };
@@ -141,23 +140,6 @@ impl MenuItem {
             key,
             action,
         }
-    }
-}
-
-impl MenuItem {
-    pub fn pretty_print(&self, prefix_len: usize) -> String {
-        let prefix = "_".repeat(prefix_len);
-        format!(
-            "({prefix}{}) {}",
-            self.key.chars().skip(prefix_len).collect::<String>(),
-            self.description
-        )
-    }
-}
-
-impl Display for MenuItem {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "({}) {}", self.key, self.description)
     }
 }
 

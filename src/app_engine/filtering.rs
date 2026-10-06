@@ -5,7 +5,7 @@ use crate::{
     app_engine::lifecycle::delay,
     ax_element::{ElementOfInterest, Target},
     config::RoleOfInterest,
-    user_interface::{HintBox, hint_boxes_from_frames},
+    user_interface::{HintBox, MenuString, MenuStyle, hint_boxes_from_frames},
     util::{Frame, lower_ascii, select_text_range},
 };
 use log::Level;
@@ -96,7 +96,7 @@ impl AppEngine {
                 self.build_ocr_hints();
             }
             Err(e) => {
-                self.notify_then_deactivate(&format!("OCR failed: {e:?}"), Level::Error);
+                self.notify_then_deactivate(format!("OCR failed: {e:?}"), Level::Error);
             }
             _ => {
                 self.notify_then_deactivate("Empty OCR result.", Level::Warn);
@@ -213,7 +213,7 @@ impl AppEngine {
                         }
                         Err(e) => {
                             self.notify_then_deactivate(
-                                &format!("Failed to open editor: {e}"),
+                                format!("Failed to open editor: {e}"),
                                 Level::Error,
                             );
                         }
@@ -410,8 +410,12 @@ impl AppEngine {
             self.toggle_multiselection();
         } else if self.target == Target::Clickable {
             self.click_modifiers.toggle(key);
-            let held = self.click_modifiers.label();
-            self.notify(&format!("Click modifiers: {held}"), Level::Info);
+            let mut msg = MenuString::from("Click modifiers: ");
+            match self.click_modifiers.label() {
+                Some(keys) => msg.push_styled(&keys, MenuStyle::Key),
+                None => msg.push("none"),
+            };
+            self.notify(msg, Level::Info);
         }
     }
 
@@ -422,6 +426,6 @@ impl AppEngine {
         } else {
             "off"
         };
-        self.notify(&format!("Multi-selection is now {on_off}."), Level::Info);
+        self.notify(format!("Multi-selection is now {on_off}."), Level::Info);
     }
 }

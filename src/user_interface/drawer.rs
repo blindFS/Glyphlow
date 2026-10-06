@@ -12,9 +12,112 @@ use objc2_app_kit::{
     NSMutableParagraphStyle, NSParagraphStyleAttributeName, NSScreen, NSWindow,
     NSWindowCollectionBehavior, NSWindowStyleMask,
 };
-use objc2_core_foundation::CGSize;
+use objc2_core_foundation::{CFRetained, CGSize};
+use objc2_core_graphics::CGColor;
 use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CALayer, CATextLayer, CATransaction};
+use std::ops::Range;
+
+/// How a span of a menu stands out from the text around it.
+#[derive(Clone, Copy, Debug)]
+pub enum MenuStyle {
+    /// A key to press: a row's key, or a click modifier.
+    Key,
+    /// The text the menu acts on.
+    Text,
+    /// The leading line of a message that reports a failure.
+    Error,
+}
+
+impl MenuStyle {
+    fn color(self, theme: &GlyphlowTheme) -> &CFRetained<CGColor> {
+        match self {
+            Self::Key => &theme.menu_hl_color,
+            Self::Text => &theme.menu_text_hl_color,
+            Self::Error => &theme.menu_error_hl_color,
+        }
+    }
+}
+
+/// The text of a menu, plus the spans to draw in an accent colour.
+pub struct MenuString {
+    text: String,
+    spans: Vec<(Range<usize>, MenuStyle)>,
+}
+
+impl MenuString {
+    /// Append `text` in the menu's foreground colour.
+    pub fn push(&mut self, text: &str) -> &mut Self {
+        self.text.push_str(text);
+        self
+    }
+
+    /// Append `text` in `style`'s colour.
+    pub fn push_styled(&mut self, text: &str, style: MenuStyle) -> &mut Self {
+        self.spans
+            .push((self.text.len()..self.text.len() + text.len(), style));
+        self.text.push_str(text);
+        self
+    }
+
+    /// Append a `(key) display` row on its own line, highlighting the key: padded
+    /// to `key_width`, with the `prefix_len` characters already typed blanked out.
+    pub fn push_row(
+        &mut self,
+        key: &str,
+        display: &str,
+        prefix_len: usize,
+        key_width: usize,
+    ) -> &mut Self {
+        let padding = " ".repeat(key_width - key.chars().count());
+        let rest = key
+            .char_indices()
+            .nth(prefix_len)
+            .map_or(key.len(), |(byte, _)| byte);
+        self.push("\n")
+            .push(&padding)
+            .push("(")
+            .push_styled(&"_".repeat(prefix_len), MenuStyle::Key)
+            .push_styled(&key[rest..], MenuStyle::Key)
+            .push(") ")
+            .push(display)
+    }
+
+    /// Draw the first line in `style`. It is the weakest span, so one added
+    /// inside the head still wins.
+    pub fn style_head(&mut self, style: MenuStyle) -> &mut Self {
+        let end = self.text.find('\n').unwrap_or(self.text.len());
+        self.spans.insert(0, (0..end, style));
+        self
+    }
+
+    /// The text as it reads without any styling.
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    fn spans(&self) -> &[(Range<usize>, MenuStyle)] {
+        &self.spans
+    }
+}
+
+impl From<&str> for MenuString {
+    fn from(text: &str) -> Self {
+        Self {
+            text: text.to_owned(),
+            spans: Vec::new(),
+        }
+    }
+}
+
+impl From<String> for MenuString {
+    fn from(text: String) -> Self {
+        Self {
+            text,
+            spans: Vec::new(),
+        }
+    }
+}
 
 struct Menu {
     container: Retained<CALayer>,
@@ -185,13 +288,33 @@ impl Menu {
         }
     }
 
-    fn draw(&self, text: &str, screen_frame: &Frame, overlay_frame: &Frame, theme: &GlyphlowTheme) {
+    fn draw(
+        &self,
+        menu: &MenuString,
+        screen_frame: &Frame,
+        overlay_frame: &Frame,
+        theme: &GlyphlowTheme,
+    ) {
         autoreleasepool(|_| {
-            let ns_string = NSString::from_str(text);
+            let ns_string = NSString::from_str(menu.text());
             self.menu_string.mutableString().setString(&ns_string);
             self.initialize_string_attributes(theme);
+            self.highlight(menu, theme);
             self.resize_and_show(screen_frame, overlay_frame, theme, true);
         })
+    }
+
+    /// Repaint the styled spans over the foreground colour set for the whole string.
+    fn highlight(&self, menu: &MenuString, theme: &GlyphlowTheme) {
+        unsafe {
+            for (span, style) in menu.spans() {
+                self.menu_string.addAttribute_value_range(
+                    NSForegroundColorAttributeName,
+                    style.color(theme).as_ref(),
+                    utf16_range(menu.text(), span),
+                );
+            }
+        }
     }
 
     /// Draw `attr_string`, shrinking the font if `auto_resize` is set.
@@ -261,7 +384,12 @@ impl UIDrawer {
 
         // Search bar initialized as fixed width
         let dummy_text = format!("/{}", "_".repeat(SEARCH_BAR_WIDTH));
-        search_bar.draw(&dummy_text, &current_screen_frame, &overlay_frame, theme);
+        search_bar.draw(
+            &MenuString::from(dummy_text),
+            &current_screen_frame,
+            &overlay_frame,
+            theme,
+        );
         search_bar.hide();
 
         root.addSublayer(&selected_frame);
@@ -298,7 +426,7 @@ impl UIDrawer {
         self.search_bar.load_theme(new_theme);
     }
 
-    pub fn draw_menu(&self, msg: &str, theme: &GlyphlowTheme) {
+    pub fn draw_menu(&self, msg: &MenuString, theme: &GlyphlowTheme) {
         self.menu
             .draw(msg, &self.current_screen_frame, &self.overlay_frame, theme);
     }
@@ -383,7 +511,7 @@ impl UIDrawer {
         }
     }
 
-    pub fn notify(&mut self, theme: &GlyphlowTheme, msg: &str) -> usize {
+    pub fn notify(&mut self, theme: &GlyphlowTheme, msg: &MenuString) -> usize {
         let id = self.next_notification_id;
         self.next_notification_id += 1;
         let nl = Menu::new(theme);
@@ -572,6 +700,14 @@ pub fn calibrated_origin(x: f64, y: f64, overlay_frame: &Frame) -> NSPoint {
         x - overlay_frame.top_left.x,
         overlay_frame.bottom_right.y - y,
     )
+}
+
+/// `NSAttributedString` counts ranges in UTF-16 code units, while [`MenuString`]
+/// spans are byte offsets into a Rust `str`. Menu rows carry non-BMP glyphs, so
+/// the two disagree.
+fn utf16_range(text: &str, span: &Range<usize>) -> NSRange {
+    let start = text[..span.start].encode_utf16().count();
+    NSRange::new(start, text[span.start..span.end].encode_utf16().count())
 }
 
 #[cfg(test)]
