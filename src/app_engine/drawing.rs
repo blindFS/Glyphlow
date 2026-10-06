@@ -36,22 +36,13 @@ fn preview_line(text: &str) -> String {
 
 const BACK_KEY: &str = "󰁮";
 
-/// `lead`, then [`BACK_KEY`]: the tail every dead-end message shares.
-///
-/// `lead` is a fragment that has to stop right before the key, because the key
-/// carries its own style.
-fn back_key_message(lead: &str) -> MenuString {
-    let mut msg = MenuString::from(lead);
-    msg.push_styled(BACK_KEY, MenuStyle::Key)
-        .push(" to go back");
-    msg
-}
-
 /// The message for a key sequence that reaches no item: it says so, then offers
 /// the way out.
-pub(super) fn wrong_key_menu() -> MenuString {
-    let mut msg = back_key_message("Wrong key sequence\nPress ");
-    msg.style_head(MenuStyle::Header);
+pub(super) fn wrong_key_menu_string() -> MenuString {
+    let mut msg = MenuString::styled("Wrong key sequence", MenuStyle::Header);
+    msg.push("\nPress ")
+        .push_styled(BACK_KEY, MenuStyle::Key)
+        .push(" to go back");
     msg
 }
 
@@ -156,18 +147,21 @@ impl AppEngine {
             }
 
             if !self.is_searching && nothing_visible {
-                self.notify(
-                    back_key_message("Nothing matches, press "),
-                    log::Level::Warn,
-                );
+                // A span sits inside the head line, so the head colour the level
+                // would otherwise supply is named here.
+                let mut msg = MenuString::from("");
+                msg.push_styled("Nothing matches, press ", MenuStyle::Header)
+                    .push_styled(BACK_KEY, MenuStyle::Key)
+                    .push_styled(" to go back", MenuStyle::Header);
+                self.notify_styled(msg, log::Level::Warn);
             }
         });
 
         visible_indices
     }
 
-    /// The menu for `key_prefix`: `head` with its first line styled as the
-    /// menu's header, then a row per reachable item, with the keys aligned on
+    /// The menu for `key_prefix`: `head`, whose first line the caller styles as
+    /// the menu's header, then a row per reachable item, with the keys aligned on
     /// the longest one.
     fn build_menu_message(
         &self,
@@ -221,11 +215,10 @@ impl AppEngine {
         }
 
         if menu_items.is_empty() {
-            return wrong_key_menu();
+            return wrong_key_menu_string();
         }
 
         let mut menu = head;
-        menu.style_head(MenuStyle::Header);
         for (key, display) in menu_items {
             menu.push_row(key, display, prefix_len, max_key_len);
         }
@@ -245,7 +238,7 @@ impl AppEngine {
         }
 
         let msg = self.build_menu_message(
-            MenuString::from("Pick a Target:"),
+            MenuString::styled("Pick a Target:", MenuStyle::Header),
             &DASH_BOARD_MENU_ITEMS,
             true,
             false,
@@ -258,7 +251,7 @@ impl AppEngine {
 
     fn draw_image_action_menu(&self, key_prefix: &str) {
         let msg = self.build_menu_message(
-            MenuString::from("Pick an Action for Image:"),
+            MenuString::styled("Pick an Action for Image:", MenuStyle::Header),
             &IMAGE_ACTION_MENU_ITEMS,
             false,
             false,
@@ -271,8 +264,10 @@ impl AppEngine {
 
     fn draw_text_action_menu(&self, text: &str, key_prefix: &str) {
         let text = preview_line(text);
-        let mut head = MenuString::from("Pick an Action for Text:\n\n");
-        head.push_styled(&text, MenuStyle::Text).push("\n");
+        let mut head = MenuString::styled("Pick an Action for Text:", MenuStyle::Header);
+        head.push("\n\n")
+            .push_styled(&text, MenuStyle::Text)
+            .push("\n");
         let msg =
             self.build_menu_message(head, &TEXT_ACTION_MENU_ITEMS, true, true, true, key_prefix);
 
@@ -282,7 +277,7 @@ impl AppEngine {
     fn draw_scrolling_menu(&self, key_prefix: &str) {
         if !self.config.hide_scrolling_menu {
             let msg = self.build_menu_message(
-                MenuString::from("Pick a Scrolling Action:"),
+                MenuString::styled("Pick a Scrolling Action:", MenuStyle::Header),
                 &SCROLLBAR_MENU_ITEMS,
                 false,
                 false,

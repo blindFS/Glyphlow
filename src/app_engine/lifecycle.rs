@@ -67,30 +67,26 @@ impl AppEngine {
         self.click_modifiers.reset();
     }
 
-    pub(super) fn notify_then_deactivate(&mut self, msg: impl Into<MenuString>, log_level: Level) {
+    pub(super) fn notify_then_deactivate(&mut self, text: &str, log_level: Level) {
         self.set_mode(Mode::WaitAndDeactivate);
-        self.notify(msg, log_level);
+        self.notify(text, log_level);
     }
 
-    /// Show a notification; it clears itself after a delay that depends on the
-    /// log level.
-    ///
-    /// A level that reports something wrong also paints the first line of `msg`
-    /// in the colour for it, so every such message reads the same way without
-    /// the caller having to say so.
-    pub(super) fn notify(&mut self, msg: impl Into<MenuString>, log_level: Level) {
+    pub(super) fn notify(&mut self, text: &str, log_level: Level) {
+        let msg = match log_level {
+            Level::Error => MenuString::styled(text, MenuStyle::Error),
+            Level::Warn => MenuString::styled(text, MenuStyle::Header),
+            _ => MenuString::from(text),
+        };
+        self.notify_styled(msg, log_level);
+    }
+
+    pub(super) fn notify_styled(&mut self, msg: MenuString, log_level: Level) {
         let timeout_secs = match log_level {
             Level::Trace | Level::Info => SHORT_TIMEOUT,
             Level::Debug => DEBUG_TIMEOUT,
             _ => LONG_TIMEOUT,
         } * 1000;
-        let mut msg = msg.into();
-        match log_level {
-            Level::Error => msg.style_head(MenuStyle::Error),
-            // Nothing fatal happened, so a warning shares the header colour.
-            Level::Warn => msg.style_head(MenuStyle::Header),
-            _ => &mut msg,
-        };
         log::log!(log_level, "{}", msg.text());
         let id = self.drawer.notify(&self.config.theme, &msg);
         let sender = self.signal_sender.clone();
@@ -425,7 +421,7 @@ impl AppEngine {
             if need_help_msg {
                 let mut msg = MenuString::from("Press ");
                 msg.push_styled("Enter", MenuStyle::Key).push(" to act.");
-                self.notify(msg, Level::Trace);
+                self.notify_styled(msg, Level::Trace);
             }
         } else if target == Target::ImageOCR {
             // Fallback to full window OCR if no image or leaf group found
@@ -472,7 +468,7 @@ impl AppEngine {
                     }
                 }
                 Err(msg) => {
-                    self.notify_then_deactivate(msg, Level::Error);
+                    self.notify_then_deactivate(&msg, Level::Error);
                 }
             };
         }

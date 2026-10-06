@@ -1,4 +1,4 @@
-use super::{AppEngine, drawing::wrong_key_menu};
+use super::{AppEngine, drawing::wrong_key_menu_string};
 use crate::{
     Mode,
     ax_element::{CompiledTarget, GetAttribute, SetAttribute, Target},
@@ -155,7 +155,7 @@ impl AppEngine {
         // Actions that require a selected element
         let Some(selected) = self.selected.as_ref() else {
             self.notify_then_deactivate(
-                format!("Running a workflow action with no element selected. {act:?}"),
+                &format!("Running a workflow action with no element selected. {act:?}"),
                 Level::Error,
             );
             return true;
@@ -189,7 +189,7 @@ impl AppEngine {
         // Actions that require an AX element
         let Some(element) = selected.element() else {
             self.notify_then_deactivate(
-                format!("Running a workflow action with no accessibility element. {act:?}"),
+                &format!("Running a workflow action with no accessibility element. {act:?}"),
                 Level::Error,
             );
             return true;
@@ -218,7 +218,7 @@ impl AppEngine {
             }
             WorkFlowAction::Debug => {
                 let info = element.inspect(&self.last_app_window_info.bundle_id);
-                self.notify(info, Level::Debug);
+                self.notify(&info, Level::Debug);
                 // HACK: break the loop so the notification will be kept,
                 // basically `Debug` should be a terminal op
                 self.pending_workflow_actions.clear();
@@ -256,7 +256,7 @@ impl AppEngine {
             self.pending_workflow_actions = workflow.actions.clone().into();
             self.execute_pending_workflow_actions();
         } else {
-            self.draw_menu(&wrong_key_menu());
+            self.draw_menu(&wrong_key_menu_string());
         }
     }
 
@@ -271,7 +271,7 @@ impl AppEngine {
             let msg = format!(
                 "No workflow matches `{name}`. You can check available ones with `glyphlow-cli workflow list`."
             );
-            self.notify_then_deactivate(msg, Level::Error);
+            self.notify_then_deactivate(&msg, Level::Error);
             return;
         };
 
@@ -302,7 +302,7 @@ impl AppEngine {
         }
 
         if let Some(reason) = self.workflow_invalid_reason(&self.config.workflows[idx]) {
-            self.notify_then_deactivate(reason, Level::Error);
+            self.notify_then_deactivate(&reason, Level::Error);
         }
     }
 }

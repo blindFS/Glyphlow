@@ -97,6 +97,13 @@ impl MenuString {
         self
     }
 
+    /// A message that is exactly `text`, in `style`.
+    pub fn styled(text: &str, style: MenuStyle) -> Self {
+        let mut msg = Self::from("");
+        msg.push_styled(text, style);
+        msg
+    }
+
     /// Append a `(key) display` row on its own line, highlighting the key: padded
     /// to `key_width`, with the `prefix_len` characters already typed dimmed.
     pub fn push_row(
@@ -118,14 +125,6 @@ impl MenuString {
             .push_styled(&key[rest..], MenuStyle::Key)
             .push(") ")
             .push(display)
-    }
-
-    /// Style the first line in `style`. It is the weakest span, so one added
-    /// inside the head still wins.
-    pub fn style_head(&mut self, style: MenuStyle) -> &mut Self {
-        let end = self.text.find('\n').unwrap_or(self.text.len());
-        self.spans.insert(0, (0..end, style));
-        self
     }
 
     /// The text as it reads without any styling.

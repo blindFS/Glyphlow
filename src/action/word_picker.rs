@@ -119,19 +119,18 @@ impl WordPicker {
             .map(|(idx, _)| idx)
             .collect();
 
-        // The header names the picker, so it is styled as a header; the key
-        // inside it stays a key.
+        // The header names the picker, so every part of it is styled as a header;
+        // the key inside it stays a key.
         let (hint_key, hint) = if filtering && matched.is_empty() {
             ("󰁮", " to return")
         } else {
             ("/", " to search")
         };
-        let mut buffer = MenuString::from("Press ");
+        let mut buffer = MenuString::styled("Press ", MenuStyle::Header);
         buffer
             .push_styled(hint_key, MenuStyle::Key)
-            .push(hint)
-            .push("\n")
-            .style_head(MenuStyle::Header);
+            .push_styled(hint, MenuStyle::Header)
+            .push("\n");
 
         let mut line_width = 0;
         for (idx, word) in self.words.iter().enumerate() {

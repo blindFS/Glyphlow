@@ -96,7 +96,7 @@ impl AppEngine {
                 self.build_ocr_hints();
             }
             Err(e) => {
-                self.notify_then_deactivate(format!("OCR failed: {e:?}"), Level::Error);
+                self.notify_then_deactivate(&format!("OCR failed: {e:?}"), Level::Error);
             }
             _ => {
                 self.notify_then_deactivate("Empty OCR result.", Level::Warn);
@@ -213,7 +213,7 @@ impl AppEngine {
                         }
                         Err(e) => {
                             self.notify_then_deactivate(
-                                format!("Failed to open editor: {e}"),
+                                &format!("Failed to open editor: {e}"),
                                 Level::Error,
                             );
                         }
@@ -416,7 +416,7 @@ impl AppEngine {
                 Some(keys) => msg.push_styled(&keys, MenuStyle::Key),
                 None => msg.push("none"),
             };
-            self.notify(msg, Level::Info);
+            self.notify_styled(msg, Level::Info);
         }
     }
 
@@ -429,6 +429,6 @@ impl AppEngine {
         };
         let mut msg = MenuString::from("Multi-selection is now ");
         msg.push_styled(on_off, MenuStyle::Key).push(".");
-        self.notify(msg, Level::Info);
+        self.notify_styled(msg, Level::Info);
     }
 }
