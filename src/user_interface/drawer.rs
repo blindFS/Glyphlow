@@ -1,6 +1,6 @@
 use crate::{
     ScrollAction,
-    config::GlyphlowTheme,
+    config::{GlyphlowTheme, cgcolor_to_rgba},
     util::{Frame, estimate_frame_for_text, format_fixed_width},
 };
 use objc2::{
@@ -8,9 +8,9 @@ use objc2::{
     rc::{DefaultRetained, Retained, autoreleasepool},
 };
 use objc2_app_kit::{
-    NSBackingStoreType, NSColor, NSFont, NSFontAttributeName, NSForegroundColorAttributeName,
-    NSMutableParagraphStyle, NSParagraphStyleAttributeName, NSScreen, NSWindow,
-    NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSBackgroundColorAttributeName, NSBackingStoreType, NSColor, NSFont, NSFontAttributeName,
+    NSForegroundColorAttributeName, NSMutableParagraphStyle, NSParagraphStyleAttributeName,
+    NSScreen, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 use objc2_core_foundation::{CFRetained, CGSize};
 use objc2_core_graphics::CGColor;
@@ -18,25 +18,56 @@ use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSi
 use objc2_quartz_core::{CALayer, CATextLayer, CATransaction};
 use std::ops::Range;
 
-/// How a span of a menu stands out from the text around it.
+/// How a span of text stands out from the rest of the string.
 #[derive(Clone, Copy, Debug)]
 pub enum MenuStyle {
-    /// A key to press: a row's key, or a click modifier.
+    /// A key to press: a menu row's key, a click modifier, or a picker's hint
+    /// label.
     Key,
     /// The text the menu acts on.
     Text,
     /// The leading line of a message that reports a failure.
     Error,
+    /// Text the current input has ruled out.
+    Dim,
+    /// One end of a range the picker has already picked, drawn inverted.
+    Selected,
 }
 
+/// How far [`MenuStyle::Dim`] fades the menu's foreground colour.
+const DIM_ALPHA_DIVISOR: u8 = 3;
+
 impl MenuStyle {
-    fn color(self, theme: &GlyphlowTheme) -> &CFRetained<CGColor> {
+    /// The colours to paint a span with: a foreground, plus a background when
+    /// the style inverts the text.
+    ///
+    /// `dim` is passed in because it is derived from the theme's foreground
+    /// rather than stored in it, so one is built per string, not per span.
+    fn colors<'a>(
+        self,
+        theme: &'a GlyphlowTheme,
+        dim: &'a CFRetained<CGColor>,
+    ) -> (&'a CFRetained<CGColor>, Option<&'a CFRetained<CGColor>>) {
         match self {
-            Self::Key => &theme.menu_hl_color,
-            Self::Text => &theme.menu_text_hl_color,
-            Self::Error => &theme.menu_error_hl_color,
+            Self::Key => (&theme.menu_hl_color, None),
+            Self::Text => (&theme.menu_text_hl_color, None),
+            Self::Error => (&theme.menu_error_hl_color, None),
+            Self::Dim => (dim, None),
+            Self::Selected => (&theme.menu_bg_color, Some(&theme.menu_hl_color)),
         }
     }
+}
+
+/// `color` faded to a fraction of its alpha, for text that should recede.
+fn dimmed(color: &CFRetained<CGColor>) -> CFRetained<CGColor> {
+    let (r, g, b, a) = cgcolor_to_rgba(color).unwrap_or((255, 255, 255, 255));
+    let channel = |c: u8| c as f64 / 255.0;
+    CGColor::new_generic_rgb(
+        channel(r),
+        channel(g),
+        channel(b),
+        channel(a / DIM_ALPHA_DIVISOR),
+    )
 }
 
 /// The text of a menu, plus the spans to draw in an accent colour.
@@ -54,8 +85,10 @@ impl MenuString {
 
     /// Append `text` in `style`'s colour.
     pub fn push_styled(&mut self, text: &str, style: MenuStyle) -> &mut Self {
-        self.spans
-            .push((self.text.len()..self.text.len() + text.len(), style));
+        if !text.is_empty() {
+            self.spans
+                .push((self.text.len()..self.text.len() + text.len(), style));
+        }
         self.text.push_str(text);
         self
     }
@@ -145,6 +178,9 @@ pub(crate) use without_animations;
 const BORDER_WIDTH: f64 = 2.0;
 const MIN_FONT_SIZE: f64 = 10.0;
 const SEARCH_BAR_WIDTH: usize = 10;
+/// Kept off the text layer's width so its widest line never sits exactly on the
+/// wrap boundary, where CoreText's own rounding can break the line.
+const TEXT_WIDTH_SLACK: f64 = 1.0;
 
 impl Menu {
     fn new(theme: &GlyphlowTheme) -> Self {
@@ -257,10 +293,10 @@ impl Menu {
         auto_resize: bool,
     ) {
         let size = self.estimate_text_size(screen_frame, theme, auto_resize);
-        let CGSize { width, height } = size;
+        let text_width = size.width + TEXT_WIDTH_SLACK;
         let margin = theme.menu_margin_size as f64;
-        let box_width = width + (margin * 2.0);
-        let box_height = height + (margin * 2.0);
+        let box_width = text_width + (margin * 2.0);
+        let box_height = size.height + (margin * 2.0);
 
         let (c_x, c_y) = screen_frame.center();
         let (o_x, o_y) = (c_x - box_width / 2.0, c_y + box_height / 2.0);
@@ -275,7 +311,7 @@ impl Menu {
             .setFrame(NSRect::new(origin, NSSize::new(box_width, box_height)));
         self.text_layer.setFrame(NSRect::new(
             NSPoint::new(margin, margin), // Positioned exactly at margin
-            size,
+            NSSize::new(text_width, size.height),
         ));
 
         self.refresh_text();
@@ -306,13 +342,23 @@ impl Menu {
 
     /// Repaint the styled spans over the foreground colour set for the whole string.
     fn highlight(&self, menu: &MenuString, theme: &GlyphlowTheme) {
+        let dim = dimmed(&theme.menu_fg_color);
         unsafe {
             for (span, style) in menu.spans() {
+                let range = utf16_range(menu.text(), span);
+                let (fg, bg) = style.colors(theme, &dim);
                 self.menu_string.addAttribute_value_range(
                     NSForegroundColorAttributeName,
-                    style.color(theme).as_ref(),
-                    utf16_range(menu.text(), span),
+                    fg.as_ref(),
+                    range,
                 );
+                if let Some(bg) = bg {
+                    self.menu_string.addAttribute_value_range(
+                        NSBackgroundColorAttributeName,
+                        bg.as_ref(),
+                        range,
+                    );
+                }
             }
         }
     }
