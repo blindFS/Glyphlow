@@ -217,11 +217,7 @@ impl AppEngine {
                 }
             }
             WorkFlowAction::Debug => {
-                let info = format!(
-                    "App Bundle ID: {}\n{}",
-                    self.last_app_window_info.bundle_id,
-                    element.inspect()
-                );
+                let info = element.inspect(&self.last_app_window_info.bundle_id);
                 self.notify(info, Level::Debug);
                 // HACK: break the loop so the notification will be kept,
                 // basically `Debug` should be a terminal op
