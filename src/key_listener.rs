@@ -148,7 +148,7 @@ pub const DASH_BOARD_MENU_ITEMS: [MenuItem; 9] = [
     MenuItem::new("󰳽 Press", "P", AppSignal::Activate(Target::Clickable)),
     MenuItem::new("󱕒 ScrollBar", "S", AppSignal::Activate(Target::Scrollable)),
     MenuItem::new("󰊄 Input", "I", AppSignal::Activate(Target::Editable)),
-    MenuItem::new(" Image", "M", AppSignal::Activate(Target::Image)),
+    MenuItem::new("󰋩 Image", "M", AppSignal::Activate(Target::Image)),
     MenuItem::new(
         "󰙅 Element Explorer",
         "E",
@@ -156,7 +156,7 @@ pub const DASH_BOARD_MENU_ITEMS: [MenuItem; 9] = [
     ),
     MenuItem::new("󰆟 ScreenShot", "R", AppSignal::ScreenShot),
     MenuItem::new("󱄺 Image OCR", "O", AppSignal::FrameOCR),
-    MenuItem::new(" Read Clipboard", "C", AppSignal::ReadClipboard),
+    MenuItem::new("󰅇 Read Clipboard", "C", AppSignal::ReadClipboard),
 ];
 
 pub const SCROLLBAR_MENU_ITEMS: [MenuItem; 6] = [

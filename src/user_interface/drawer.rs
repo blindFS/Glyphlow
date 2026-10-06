@@ -21,20 +21,11 @@ use std::ops::Range;
 /// How a span of text stands out from the rest of the string.
 #[derive(Clone, Copy, Debug)]
 pub enum MenuStyle {
-    /// A key to press: a menu row's key, a click modifier, or a picker's hint
-    /// label.
     Key,
-    /// The text the menu acts on.
     Text,
-    /// The leading line that names an overlay: a menu's `Pick a …`, a picker's
-    /// `Press … to …`, or the first line of a warning.
     Header,
-    /// A message that reports a failure.
     Error,
-    /// Text the current input has ruled out.
     Dim,
-    /// One end of a range the picker has already picked, drawn inverted.
-    Selected,
 }
 
 /// How far [`MenuStyle::Dim`] fades the menu's foreground colour.
@@ -57,7 +48,6 @@ impl MenuStyle {
             Self::Header => (&theme.menu_header_hl_color, None),
             Self::Error => (&theme.menu_error_hl_color, None),
             Self::Dim => (dim, None),
-            Self::Selected => (&theme.menu_bg_color, Some(&theme.menu_hl_color)),
         }
     }
 }

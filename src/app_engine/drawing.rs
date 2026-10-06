@@ -147,9 +147,8 @@ impl AppEngine {
             }
 
             if !self.is_searching && nothing_visible {
-                let mut msg = MenuString::from("");
-                msg.push_styled("Nothing matches, press ", MenuStyle::Header)
-                    .push_styled(BACK_KEY, MenuStyle::Key)
+                let mut msg = MenuString::styled("Nothing matches, press ", MenuStyle::Header);
+                msg.push_styled(BACK_KEY, MenuStyle::Key)
                     .push_styled(" to go back", MenuStyle::Header);
                 self.notify_styled(msg, log::Level::Warn);
             }

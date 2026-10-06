@@ -115,8 +115,7 @@ impl WordPicker {
             .words
             .iter()
             .enumerate()
-            .filter(|(_, word)| matches(word))
-            .map(|(idx, _)| idx)
+            .filter_map(|(idx, word)| matches(word).then_some(idx))
             .collect();
 
         // The header names the picker, so every part of it is styled as a header;
@@ -148,7 +147,7 @@ impl WordPicker {
             if multi_selection_idx == Some(idx) {
                 // A picked end of the range: its key cannot be pressed again.
                 buffer
-                    .push_styled(&word.text, MenuStyle::Selected)
+                    .push_styled(&word.text, MenuStyle::Key)
                     .push(WORD_LABEL_GAP)
                     .push_styled(&word.label, MenuStyle::Dim);
             } else if matched.binary_search(&idx).is_ok() {
