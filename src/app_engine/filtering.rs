@@ -373,15 +373,9 @@ impl AppEngine {
             return;
         };
 
-        // Exactly one match is unambiguous. Several matches are still fine when
-        // multi-selection is off and they are all the same word, because then
-        // there is nothing to tell apart.
-        let unique_matching = wp.matched_count() == 1
-            || (!self.multi_selection.is_on && wp.all_matches_are_one_word());
-
         let mut new_text = None;
 
-        if unique_matching && let Some((idx, text)) = wp.first_matched_word() {
+        if let Some((idx, text)) = wp.unambiguous_match(self.multi_selection.is_on) {
             if self.multi_selection.is_on {
                 if let Some((idx1, idx2)) = self.multi_selection.set_one_side(idx) {
                     let text = wp

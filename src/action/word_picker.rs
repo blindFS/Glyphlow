@@ -185,28 +185,20 @@ impl WordPicker {
             .filter_map(|idx| self.words.get(*idx).map(|w| (*idx, w.text.as_str())))
     }
 
-    /// How many words match the current prefix and search.
-    pub fn matched_count(&self) -> usize {
-        self.live_matches().count()
-    }
-
-    /// The first matching word, as `(index, text)`.
-    pub fn first_matched_word(&self) -> Option<(usize, &str)> {
-        self.live_matches().next()
-    }
-
-    /// Whether every match is the same word, which keeps the pick unambiguous
-    /// even though several copies of it matched.
+    /// The match to pick, when the matches leave no choice: the only one, or
+    /// several that are all the same word while `multi_selection` is off, since
+    /// then there is nothing to tell apart.
     ///
-    /// False when nothing matched: an empty match set is not a unique pick, and
-    /// saying so vacuously is exactly the kind of thing that turns into a bug at
-    /// the next call site.
-    pub fn all_matches_are_one_word(&self) -> bool {
+    /// `None` when nothing matched or the pick is ambiguous.
+    pub fn unambiguous_match(&self, multi_selection: bool) -> Option<(usize, &str)> {
         let mut live = self.live_matches();
-        let Some((_, first)) = live.next() else {
-            return false;
+        let (idx, text) = live.next()?;
+        let Some((_, second)) = live.next() else {
+            return Some((idx, text));
         };
-        live.all(|(_, word)| word == first)
+
+        (!multi_selection && second == text && live.all(|(_, word)| word == text))
+            .then_some((idx, text))
     }
 
     pub fn select_range(&self, idx1: usize, idx2: usize) -> Option<String> {
@@ -383,36 +375,35 @@ mod tests {
         }
     }
 
-    /// These three queries are what decides whether a word-picking keypress is
-    /// unambiguous, so pin each of them rather than only the combination the
-    /// caller happens to use today.
+    /// This is what decides whether a word-picking keypress picks a word or waits
+    /// for another key, so pin every case: no match, one, and several that are
+    /// the same word or not, with and without multi-selection.
     #[rstest]
-    // Nothing matched is not a unique pick, and must not claim to be one by
-    // vacuous truth.
-    #[case::nothing_matched(&["alpha"], &[], 0, false, None)]
-    // One match is unique, and trivially "all the same word".
-    #[case::one_match(&["alpha"], &[0], 1, true, Some((0, "alpha")))]
-    // Two copies of one word cannot be told apart, so the pick stays unique.
-    #[case::duplicates_of_one_word(&["alpha", "alpha"], &[0, 1], 2, true, Some((0, "alpha")))]
-    #[case::two_different_words(&["alpha", "beta"], &[0, 1], 2, false, Some((0, "alpha")))]
-    #[case::same_word_thrice(&["go", "go", "go"], &[0, 1, 2], 3, true, Some((0, "go")))]
+    // Nothing matched is not a pick, and must not claim to be one by vacuous
+    // truth.
+    #[case::nothing_matched(&["alpha"], &[], false, None)]
+    // A lone match is a pick even for a range: it is the only word either end
+    // could mean.
+    #[case::one_match(&["alpha"], &[0], false, Some((0, "alpha")))]
+    #[case::one_match_of_a_range(&["alpha"], &[0], true, Some((0, "alpha")))]
+    // Two copies of one word cannot be told apart, so the pick stays unique —
+    // but not for a range, which needs two ends that differ.
+    #[case::duplicates_of_one_word(&["alpha", "alpha"], &[0, 1], false, Some((0, "alpha")))]
+    #[case::duplicates_of_one_word_of_a_range(&["alpha", "alpha"], &[0, 1], true, None)]
+    #[case::two_different_words(&["alpha", "beta"], &[0, 1], false, None)]
+    #[case::two_different_words_of_a_range(&["alpha", "beta"], &[0, 1], true, None)]
+    #[case::same_word_thrice(&["go", "go", "go"], &[0, 1, 2], false, Some((0, "go")))]
+    #[case::same_word_thrice_of_a_range(&["go", "go", "go"], &[0, 1, 2], true, None)]
     // A stale index is skipped rather than panicking, and does not count.
-    #[case::stale_index_is_skipped(&["alpha"], &[0, 7], 1, true, Some((0, "alpha")))]
-    #[case::every_index_stale(&["alpha"], &[3, 4], 0, false, None)]
-    fn match_queries_agree_on_whether_the_pick_is_unambiguous(
+    #[case::stale_index_is_skipped(&["alpha"], &[0, 7], false, Some((0, "alpha")))]
+    #[case::every_index_stale(&["alpha"], &[3, 4], false, None)]
+    fn picks_only_when_the_matches_leave_no_choice(
         #[case] words: &[&str],
         #[case] matched: &[usize],
-        #[case] count: usize,
-        #[case] all_one_word: bool,
-        #[case] first: Option<(usize, &str)>,
+        #[case] multi_selection: bool,
+        #[case] expected: Option<(usize, &str)>,
     ) {
         let wp = picker_with(words, matched);
-        assert_eq!(wp.matched_count(), count, "matched_count");
-        assert_eq!(
-            wp.all_matches_are_one_word(),
-            all_one_word,
-            "all_matches_are_one_word"
-        );
-        assert_eq!(wp.first_matched_word(), first, "first_matched_word");
+        assert_eq!(wp.unambiguous_match(multi_selection), expected);
     }
 }
