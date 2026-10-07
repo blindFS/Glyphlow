@@ -8,9 +8,9 @@ use objc2::{
     rc::{DefaultRetained, Retained, autoreleasepool},
 };
 use objc2_app_kit::{
-    NSBackgroundColorAttributeName, NSBackingStoreType, NSColor, NSFont, NSFontAttributeName,
-    NSForegroundColorAttributeName, NSMutableParagraphStyle, NSParagraphStyleAttributeName,
-    NSScreen, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSBackingStoreType, NSColor, NSFont, NSFontAttributeName, NSForegroundColorAttributeName,
+    NSMutableParagraphStyle, NSParagraphStyleAttributeName, NSScreen, NSWindow,
+    NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 use objc2_core_foundation::{CFRetained, CGSize};
 use objc2_core_graphics::CGColor;
@@ -71,13 +71,13 @@ impl MenuStyle {
         self,
         theme: &'a GlyphlowTheme,
         dim: &'a CFRetained<CGColor>,
-    ) -> (&'a CFRetained<CGColor>, Option<&'a CFRetained<CGColor>>) {
+    ) -> &'a CFRetained<CGColor> {
         match self {
-            Self::Key => (&theme.menu_hl_color, None),
-            Self::Text => (&theme.menu_text_hl_color, None),
-            Self::Header => (&theme.menu_header_hl_color, None),
-            Self::Error => (&theme.menu_error_hl_color, None),
-            Self::Dim => (dim, None),
+            Self::Key => &theme.menu_hl_color,
+            Self::Text => &theme.menu_text_hl_color,
+            Self::Header => &theme.menu_header_hl_color,
+            Self::Error => &theme.menu_error_hl_color,
+            Self::Dim => dim,
         }
     }
 }
@@ -332,14 +332,14 @@ impl Menu {
     ) {
         autoreleasepool(|_| {
             let spans = menu.spans.clone();
-            // While the layer still holds this text, laid out for these frames,
-            // only the colours can have changed: the string, the base attributes
-            // and the measured size are all still in place.
-            let laid_out = self
-                .menu_string
-                .string()
-                .isEqualToString(&NSString::from_str(&menu.text));
             let previous = self.drawn.take().filter(|drawn| {
+                // While the layer still holds this text, laid out for these frames,
+                // only the colours can have changed: the string, the base attributes
+                // and the measured size are all still in place.
+                let laid_out = self
+                    .menu_string
+                    .string()
+                    .isEqualToString(&NSString::from_str(&menu.text));
                 laid_out
                     && drawn.screen_frame == *screen_frame
                     && drawn.overlay_frame == *overlay_frame
@@ -372,10 +372,6 @@ impl Menu {
 
     /// Repaint the spans whose style differs from `previous`, and return whether
     /// anything was repainted.
-    ///
-    /// Both lists index the same text, so they are compared run by run; a range
-    /// that is styled now but was not, or the other way round, goes back to the
-    /// foreground colour the whole string was given.
     fn restyle(
         &self,
         theme: &GlyphlowTheme,
@@ -387,27 +383,19 @@ impl Menu {
             return false;
         }
 
-        let dim = dimmed(&theme.menu_fg_color);
         unsafe {
             self.menu_string.beginEditing();
+            let dim = dimmed(&theme.menu_fg_color);
             for (range, style) in plan {
-                let (fg, bg) = match style {
-                    Some(style) => style.colors(theme, &dim),
-                    None => (&theme.menu_fg_color, None),
-                };
+                let fg = style
+                    .map(|s| s.colors(theme, &dim))
+                    .unwrap_or(&theme.menu_fg_color);
                 let range = NSRange::new(range.start, range.end - range.start);
                 self.menu_string.addAttribute_value_range(
                     NSForegroundColorAttributeName,
                     fg.as_ref(),
                     range,
                 );
-                if let Some(bg) = bg {
-                    self.menu_string.addAttribute_value_range(
-                        NSBackgroundColorAttributeName,
-                        bg.as_ref(),
-                        range,
-                    );
-                }
             }
             self.menu_string.endEditing();
         }
