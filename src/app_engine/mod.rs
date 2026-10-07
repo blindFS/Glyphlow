@@ -104,7 +104,7 @@ impl ClickModifiers {
     }
 
     /// The combination as it is written, or `None` when nothing is held.
-    pub(super) fn label(&self) -> Option<String> {
+    pub(super) fn label(&self) -> String {
         let held = [
             self.shift.then_some("Shift"),
             self.ctrl.then_some("Ctrl"),
@@ -116,9 +116,9 @@ impl ClickModifiers {
         .collect::<Vec<_>>();
 
         if held.is_empty() {
-            None
+            "None".into()
         } else {
-            Some(held.join("+"))
+            held.join("+")
         }
     }
 }

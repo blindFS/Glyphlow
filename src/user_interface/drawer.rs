@@ -19,6 +19,23 @@ use objc2_quartz_core::{CALayer, CATextLayer, CATransaction};
 use std::cell::Cell;
 use std::ops::Range;
 
+/// Runs `body` with Core Animation actions disabled, so the layer changes it
+/// makes take effect on the next frame instead of animating.
+///
+/// `begin` and `commit` have to be paired, and a stray `begin` leaves the
+/// transaction open for every later change on the thread. Keeping the pair
+/// inside one construct is the point.
+macro_rules! without_animations {
+    ($($body:tt)*) => {{
+        CATransaction::begin();
+        CATransaction::setDisableActions(true);
+        $($body)*
+        CATransaction::commit();
+    }};
+}
+
+pub(crate) use without_animations;
+
 /// How a span of text stands out from the rest of the string.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MenuStyle {
@@ -31,6 +48,18 @@ pub enum MenuStyle {
 
 /// How far [`MenuStyle::Dim`] fades the menu's foreground colour.
 const DIM_ALPHA_DIVISOR: u8 = 3;
+
+/// `color` faded to a fraction of its alpha, for text that should recede.
+fn dimmed(color: &CFRetained<CGColor>) -> CFRetained<CGColor> {
+    let (r, g, b, a) = cgcolor_to_rgba(color).unwrap_or((255, 255, 255, 255));
+    let channel = |c: u8| c as f64 / 255.0;
+    CGColor::new_generic_rgb(
+        channel(r),
+        channel(g),
+        channel(b),
+        channel(a / DIM_ALPHA_DIVISOR),
+    )
+}
 
 impl MenuStyle {
     /// The colours to paint a span with: a foreground, plus a background when
@@ -53,21 +82,9 @@ impl MenuStyle {
     }
 }
 
-/// `color` faded to a fraction of its alpha, for text that should recede.
-fn dimmed(color: &CFRetained<CGColor>) -> CFRetained<CGColor> {
-    let (r, g, b, a) = cgcolor_to_rgba(color).unwrap_or((255, 255, 255, 255));
-    let channel = |c: u8| c as f64 / 255.0;
-    CGColor::new_generic_rgb(
-        channel(r),
-        channel(g),
-        channel(b),
-        channel(a / DIM_ALPHA_DIVISOR),
-    )
-}
-
 /// The text of a menu, plus the spans to draw in an accent colour.
 pub struct MenuString {
-    text: String,
+    pub text: String,
     spans: Vec<(Range<usize>, MenuStyle)>,
 }
 
@@ -97,7 +114,7 @@ impl MenuString {
 
     /// Append a `(key) display` row on its own line, highlighting the key: padded
     /// to `key_width`, with the `prefix_len` characters already typed dimmed.
-    pub fn push_row(
+    pub fn push_key_map_entry(
         &mut self,
         key: &str,
         display: &str,
@@ -119,13 +136,23 @@ impl MenuString {
             .push(display)
     }
 
-    /// The text as it reads without any styling.
-    pub fn text(&self) -> &str {
-        &self.text
-    }
-
-    fn spans(&self) -> &[(Range<usize>, MenuStyle)] {
-        &self.spans
+    /// `menu`'s spans in the UTF-16 code units `NSAttributedString` counts in, since
+    /// a [`MenuString`] span is a byte offset into a Rust `str` and menu rows carry
+    /// non-BMP glyphs.
+    ///
+    /// Converted in one pass: a span's offset needs the UTF-16 length of everything
+    /// before it, so converting them one at a time is quadratic in the menu.
+    fn utf16_spans(&self) -> Vec<(Range<usize>, MenuStyle)> {
+        let mut converted = Vec::with_capacity(self.spans.len());
+        let (mut byte, mut utf16) = (0, 0);
+        for (span, style) in self.spans.iter() {
+            utf16 += self.text[byte..span.start].encode_utf16().count();
+            let start = utf16;
+            utf16 += self.text[span.start..span.end].encode_utf16().count();
+            byte = span.end;
+            converted.push((start..utf16, *style));
+        }
+        converted
     }
 }
 
@@ -138,18 +165,7 @@ impl From<&str> for MenuString {
     }
 }
 
-impl From<String> for MenuString {
-    fn from(text: String) -> Self {
-        Self {
-            text,
-            spans: Vec::new(),
-        }
-    }
-}
-
-/// What a menu's layer was last told to draw, so a redraw that changes neither
-/// the text nor the frames can skip the string copy, the base attributes and the
-/// CoreText measurement.
+/// For efficient incremental drawing
 struct Drawn {
     /// In UTF-16 units, as `NSAttributedString` counts them.
     spans: Vec<(Range<usize>, MenuStyle)>,
@@ -163,23 +179,6 @@ struct Menu {
     menu_string: Retained<NSMutableAttributedString>,
     drawn: Cell<Option<Drawn>>,
 }
-
-/// Runs `body` with Core Animation actions disabled, so the layer changes it
-/// makes take effect on the next frame instead of animating.
-///
-/// `begin` and `commit` have to be paired, and a stray `begin` leaves the
-/// transaction open for every later change on the thread. Keeping the pair
-/// inside one construct is the point.
-macro_rules! without_animations {
-    ($($body:tt)*) => {{
-        CATransaction::begin();
-        CATransaction::setDisableActions(true);
-        $($body)*
-        CATransaction::commit();
-    }};
-}
-
-pub(crate) use without_animations;
 
 const BORDER_WIDTH: f64 = 2.0;
 const MIN_FONT_SIZE: f64 = 10.0;
@@ -342,14 +341,14 @@ impl Menu {
         theme: &GlyphlowTheme,
     ) {
         autoreleasepool(|_| {
-            let spans = utf16_spans(menu.text(), menu.spans());
+            let spans = menu.utf16_spans();
             // While the layer still holds this text, laid out for these frames,
             // only the colours can have changed: the string, the base attributes
             // and the measured size are all still in place.
             let laid_out = self
                 .menu_string
                 .string()
-                .isEqualToString(&NSString::from_str(menu.text()));
+                .isEqualToString(&NSString::from_str(&menu.text));
             let previous = self.drawn.take().filter(|drawn| {
                 laid_out
                     && drawn.screen_frame == *screen_frame
@@ -357,7 +356,7 @@ impl Menu {
             });
 
             let Some(mut previous) = previous else {
-                let ns_string = NSString::from_str(menu.text());
+                let ns_string = NSString::from_str(&menu.text);
                 self.menu_string.mutableString().setString(&ns_string);
                 self.initialize_string_attributes(theme);
                 self.restyle(theme, &spans, &[]);
@@ -496,7 +495,7 @@ impl UIDrawer {
         // Search bar initialized as fixed width
         let dummy_text = format!("/{}", "_".repeat(SEARCH_BAR_WIDTH));
         search_bar.draw(
-            &MenuString::from(dummy_text),
+            &MenuString::from(dummy_text.as_str()),
             &current_screen_frame,
             &overlay_frame,
             theme,
@@ -812,25 +811,6 @@ pub fn calibrated_origin(x: f64, y: f64, overlay_frame: &Frame) -> NSPoint {
         x - overlay_frame.top_left.x,
         overlay_frame.bottom_right.y - y,
     )
-}
-
-/// `menu`'s spans in the UTF-16 code units `NSAttributedString` counts in, since
-/// a [`MenuString`] span is a byte offset into a Rust `str` and menu rows carry
-/// non-BMP glyphs.
-///
-/// Converted in one pass: a span's offset needs the UTF-16 length of everything
-/// before it, so converting them one at a time is quadratic in the menu.
-fn utf16_spans(text: &str, spans: &[(Range<usize>, MenuStyle)]) -> Vec<(Range<usize>, MenuStyle)> {
-    let mut converted = Vec::with_capacity(spans.len());
-    let (mut byte, mut utf16) = (0, 0);
-    for (span, style) in spans {
-        utf16 += text[byte..span.start].encode_utf16().count();
-        let start = utf16;
-        utf16 += text[span.start..span.end].encode_utf16().count();
-        byte = span.end;
-        converted.push((start..utf16, *style));
-    }
-    converted
 }
 
 /// The ranges of `spans` to repaint, with the style to paint them in; `None`

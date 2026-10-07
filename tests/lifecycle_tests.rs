@@ -455,7 +455,7 @@ fn main() {
             TestEvent::ExpectMessage("Click modifiers: Meta".into()),
             TestEvent::ClearMessages,
             TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Meta)),
-            TestEvent::ExpectMessage("Click modifiers: none".into()),
+            TestEvent::ExpectMessage("Click modifiers: None".into()),
         ])
         .await;
 

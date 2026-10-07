@@ -87,7 +87,7 @@ impl AppEngine {
             Level::Debug => DEBUG_TIMEOUT,
             _ => LONG_TIMEOUT,
         } * 1000;
-        log::log!(log_level, "{}", msg.text());
+        log::log!(log_level, "{}", msg.text);
         let id = self.drawer.notify(&self.config.theme, &msg);
         let sender = self.signal_sender.clone();
         tokio::spawn(

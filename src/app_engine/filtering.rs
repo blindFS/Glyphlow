@@ -405,11 +405,7 @@ impl AppEngine {
         } else if self.target == Target::Clickable {
             self.click_modifiers.toggle(key);
             let mut msg = MenuString::from("Click modifiers: ");
-            match self.click_modifiers.label() {
-                // `none` is not a key, so it stays unstyled.
-                Some(keys) => msg.push_styled(&keys, MenuStyle::Key),
-                None => msg.push("none"),
-            };
+            msg.push_styled(&self.click_modifiers.label(), MenuStyle::Key);
             self.notify_styled(msg, Level::Info);
         }
     }

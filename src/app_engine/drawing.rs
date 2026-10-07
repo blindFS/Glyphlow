@@ -8,29 +8,17 @@ use crate::{
     util::search_regex,
 };
 use objc2::rc::autoreleasepool;
+use std::borrow::Cow;
 
 const MAX_TEXT_DISPLAY_LEN: usize = 30;
 
 /// The selection as one line of at most [`MAX_TEXT_DISPLAY_LEN`] characters plus an
-/// ellipsis. Whitespace runs collapse, so a selection cannot add lines to the menu.
-fn preview_line(text: &str) -> String {
-    let mut line = String::new();
-    let mut len = 0;
-    for word in text.split_whitespace() {
-        if len > 0 {
-            line.push(' ');
-            len += 1;
-        }
-        line.push_str(word);
-        len += word.chars().count();
-        if len > MAX_TEXT_DISPLAY_LEN {
-            break;
-        }
-    }
-
-    match line.char_indices().nth(MAX_TEXT_DISPLAY_LEN) {
-        Some((cut, _)) => format!("{}...", &line[..cut]),
-        None => line,
+/// ellipsis.
+fn preview_line(text: &str) -> Cow<'_, str> {
+    if let Some((cut, _)) = text.char_indices().nth(MAX_TEXT_DISPLAY_LEN) {
+        Cow::Owned(format!("{}...", &text[..cut]))
+    } else {
+        Cow::Borrowed(text)
     }
 }
 
@@ -160,15 +148,15 @@ impl AppEngine {
     /// The menu for `key_prefix`: `head`, whose first line the caller styles as
     /// the menu's header, then a row per reachable item, with the keys aligned on
     /// the longest one.
-    fn build_menu_message(
+    fn complete_menu_string(
         &self,
-        head: MenuString,
+        head: &mut MenuString,
         builtin_menu_items: &[MenuItem],
         need_editor: bool,
         need_action: bool,
         need_workflow: bool,
         key_prefix: &str,
-    ) -> MenuString {
+    ) {
         let prefix_len = key_prefix.chars().count();
         let mut max_key_len = 1;
         let mut menu_items = Vec::new();
@@ -212,15 +200,12 @@ impl AppEngine {
         }
 
         if menu_items.is_empty() {
-            return wrong_key_menu_string();
+            *head = wrong_key_menu_string();
         }
 
-        let mut menu = head;
         for (key, display) in menu_items {
-            menu.push_row(key, display, prefix_len, max_key_len);
+            head.push_key_map_entry(key, display, prefix_len, max_key_len);
         }
-
-        menu
     }
 
     pub(super) fn draw_menu(&self, msg: &MenuString) {
@@ -234,8 +219,9 @@ impl AppEngine {
             self.get_app_window_info();
         }
 
-        let msg = self.build_menu_message(
-            MenuString::styled("Pick a Target:", MenuStyle::Header),
+        let mut msg = MenuString::styled("Pick a Target:", MenuStyle::Header);
+        self.complete_menu_string(
+            &mut msg,
             &DASH_BOARD_MENU_ITEMS,
             true,
             false,
@@ -247,8 +233,9 @@ impl AppEngine {
     }
 
     fn draw_image_action_menu(&self, key_prefix: &str) {
-        let msg = self.build_menu_message(
-            MenuString::styled("Pick an Action for Image:", MenuStyle::Header),
+        let mut msg = MenuString::styled("Pick an Action for Image:", MenuStyle::Header);
+        self.complete_menu_string(
+            &mut msg,
             &IMAGE_ACTION_MENU_ITEMS,
             false,
             false,
@@ -265,16 +252,23 @@ impl AppEngine {
         head.push("\n\n")
             .push_styled(&text, MenuStyle::Text)
             .push("\n");
-        let msg =
-            self.build_menu_message(head, &TEXT_ACTION_MENU_ITEMS, true, true, true, key_prefix);
+        self.complete_menu_string(
+            &mut head,
+            &TEXT_ACTION_MENU_ITEMS,
+            true,
+            true,
+            true,
+            key_prefix,
+        );
 
-        self.draw_menu(&msg);
+        self.draw_menu(&head);
     }
 
     fn draw_scrolling_menu(&self, key_prefix: &str) {
         if !self.config.hide_scrolling_menu {
-            let msg = self.build_menu_message(
-                MenuString::styled("Pick a Scrolling Action:", MenuStyle::Header),
+            let mut msg = MenuString::styled("Pick a Scrolling Action:", MenuStyle::Header);
+            self.complete_menu_string(
+                &mut msg,
                 &SCROLLBAR_MENU_ITEMS,
                 false,
                 false,
