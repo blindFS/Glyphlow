@@ -147,7 +147,7 @@ impl WordPicker {
             if multi_selection_idx == Some(idx) {
                 // A picked end of the range: its key cannot be pressed again.
                 buffer
-                    .push_styled(&word.text, MenuStyle::Key)
+                    .push_styled(&word.text, MenuStyle::Text)
                     .push(WORD_LABEL_GAP)
                     .push_styled(&word.label, MenuStyle::Dim);
             } else if matched.binary_search(&idx).is_ok() {
