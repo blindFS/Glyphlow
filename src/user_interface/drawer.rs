@@ -664,6 +664,7 @@ impl UIDrawer {
 
     pub fn clear(&mut self) {
         without_animations! {
+            self.menu.drawn.set(None);
             self.menu.hide();
             self.search_bar.hide();
             self.selected_frame.setHidden(true);
