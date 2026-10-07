@@ -169,6 +169,12 @@ pub struct GlyphlowTheme {
     pub menu_fg_color: CFRetained<CGColor>,
     #[serde(with = "cgcolor_format", default = "default_menu_hl")]
     pub menu_hl_color: CFRetained<CGColor>,
+    #[serde(with = "cgcolor_format", default = "default_menu_text_hl")]
+    pub menu_text_hl_color: CFRetained<CGColor>,
+    #[serde(with = "cgcolor_format", default = "default_menu_header_hl")]
+    pub menu_header_hl_color: CFRetained<CGColor>,
+    #[serde(with = "cgcolor_format", default = "default_menu_error_hl")]
+    pub menu_error_hl_color: CFRetained<CGColor>,
     #[serde(with = "vec_cgcolor_format", default = "default_frame_colors")]
     pub frame_colors: Vec<CFRetained<CGColor>>,
     #[serde(default = "default_enable_animation")]
@@ -205,6 +211,15 @@ fn default_menu_fg() -> CFRetained<CGColor> {
 fn default_menu_hl() -> CFRetained<CGColor> {
     color_from_hex("#769ff0d0")
 }
+fn default_menu_text_hl() -> CFRetained<CGColor> {
+    color_from_hex("#9ece6aff")
+}
+fn default_menu_header_hl() -> CFRetained<CGColor> {
+    color_from_hex("#e0af68ff")
+}
+fn default_menu_error_hl() -> CFRetained<CGColor> {
+    color_from_hex("#f7768eff")
+}
 fn default_frame_colors() -> Vec<CFRetained<CGColor>> {
     vec![
         color_from_hex("#e0af68ff"),
@@ -230,6 +245,9 @@ impl Default for GlyphlowTheme {
             menu_bg_color: default_menu_bg(),
             menu_fg_color: default_menu_fg(),
             menu_hl_color: default_menu_hl(),
+            menu_text_hl_color: default_menu_text_hl(),
+            menu_header_hl_color: default_menu_header_hl(),
+            menu_error_hl_color: default_menu_error_hl(),
             frame_colors: default_frame_colors(),
             enable_animation: default_enable_animation(),
         }

@@ -103,7 +103,7 @@ impl ClickModifiers {
         .collect()
     }
 
-    /// The combination as it is written, or `none`.
+    /// The combination as it is written, or `None` when nothing is held.
     pub(super) fn label(&self) -> String {
         let held = [
             self.shift.then_some("Shift"),
@@ -116,7 +116,7 @@ impl ClickModifiers {
         .collect::<Vec<_>>();
 
         if held.is_empty() {
-            "none".to_string()
+            "None".into()
         } else {
             held.join("+")
         }

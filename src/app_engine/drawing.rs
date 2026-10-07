@@ -4,11 +4,35 @@ use crate::{
     TEXT_ACTION_MENU_ITEMS,
     ax_element::{ElementOfInterest, Target},
     config::RoleOfInterest,
+    user_interface::{MenuString, MenuStyle},
     util::search_regex,
 };
 use objc2::rc::autoreleasepool;
+use std::borrow::Cow;
 
 const MAX_TEXT_DISPLAY_LEN: usize = 30;
+
+/// The selection as one line of at most [`MAX_TEXT_DISPLAY_LEN`] characters plus an
+/// ellipsis.
+fn preview_line(text: &str) -> Cow<'_, str> {
+    if let Some((cut, _)) = text.char_indices().nth(MAX_TEXT_DISPLAY_LEN) {
+        Cow::Owned(format!("{}...", &text[..cut]))
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
+const BACK_KEY: &str = "󰁮";
+
+/// The message for a key sequence that reaches no item: it says so, then offers
+/// the way out.
+pub(super) fn wrong_key_menu_string() -> MenuString {
+    let mut msg = MenuString::styled("Wrong key sequence", MenuStyle::Header);
+    msg.push("\nPress ")
+        .push_styled(BACK_KEY, MenuStyle::Key)
+        .push(" to go back");
+    msg
+}
 
 impl AppEngine {
     pub(super) fn clear_drawing(&mut self) {
@@ -111,35 +135,28 @@ impl AppEngine {
             }
 
             if !self.is_searching && nothing_visible {
-                self.notify("Nothing matches, press 󰁮 to go back", log::Level::Warn);
+                let mut msg = MenuString::styled("Nothing matches, press ", MenuStyle::Header);
+                msg.push_styled(BACK_KEY, MenuStyle::Key)
+                    .push_styled(" to go back", MenuStyle::Header);
+                self.notify_styled(msg, log::Level::Warn);
             }
         });
 
         visible_indices
     }
 
-    /// Render one `(key) display` menu row, padding the key so the columns line
-    /// up and blanking the already-typed prefix with underscores.
-    fn format_menu_line(key: &str, display: &str, prefix_len: usize, max_key_len: usize) -> String {
-        let padding = " ".repeat(max_key_len - key.chars().count());
-        let filling = "_".repeat(prefix_len);
-        format!(
-            "\n{padding}({filling}{}) {display}",
-            key.chars().skip(prefix_len).collect::<String>(),
-        )
-    }
-
-    /// Build the menu text for `key_prefix`, with the keys aligned on the
-    /// longest one that is still reachable.
-    fn build_menu_message(
+    /// The menu for `key_prefix`: `head`, whose first line the caller styles as
+    /// the menu's header, then a row per reachable item, with the keys aligned on
+    /// the longest one.
+    fn complete_menu_string(
         &self,
-        head: &str,
+        head: &mut MenuString,
         builtin_menu_items: &[MenuItem],
         need_editor: bool,
         need_action: bool,
         need_workflow: bool,
         key_prefix: &str,
-    ) -> String {
+    ) {
         let prefix_len = key_prefix.chars().count();
         let mut max_key_len = 1;
         let mut menu_items = Vec::new();
@@ -183,24 +200,15 @@ impl AppEngine {
         }
 
         if menu_items.is_empty() {
-            return "Wrong key sequence\nPress 󰁮 to go back".to_string();
+            *head = wrong_key_menu_string();
         }
 
-        // Aligned
-        let mut msg = head.to_string();
         for (key, display) in menu_items {
-            msg.push_str(&Self::format_menu_line(
-                key,
-                display,
-                prefix_len,
-                max_key_len,
-            ));
+            head.push_key_map_entry(key, display, prefix_len, max_key_len);
         }
-
-        msg
     }
 
-    pub(super) fn draw_menu(&self, msg: &str) {
+    pub(super) fn draw_menu(&self, msg: &MenuString) {
         self.drawer.draw_menu(msg, &self.config.theme);
     }
 
@@ -211,8 +219,9 @@ impl AppEngine {
             self.get_app_window_info();
         }
 
-        let msg = self.build_menu_message(
-            "Pick a Target:",
+        let mut msg = MenuString::styled("Pick a Target:", MenuStyle::Header);
+        self.complete_menu_string(
+            &mut msg,
             &DASH_BOARD_MENU_ITEMS,
             true,
             false,
@@ -224,8 +233,9 @@ impl AppEngine {
     }
 
     fn draw_image_action_menu(&self, key_prefix: &str) {
-        let msg = self.build_menu_message(
-            "Pick an Action for Image:",
+        let mut msg = MenuString::styled("Pick an Action for Image:", MenuStyle::Header);
+        self.complete_menu_string(
+            &mut msg,
             &IMAGE_ACTION_MENU_ITEMS,
             false,
             false,
@@ -237,15 +247,13 @@ impl AppEngine {
     }
 
     fn draw_text_action_menu(&self, text: &str, key_prefix: &str) {
-        // Truncate long text
-        let text = if text.len() > MAX_TEXT_DISPLAY_LEN {
-            &format!("{:.max_len$}...", text, max_len = MAX_TEXT_DISPLAY_LEN)
-        } else {
-            text
-        };
-        let header = format!("Pick an Action for Text:\n\n{}\n", text);
-        let msg = self.build_menu_message(
-            &header,
+        let text = preview_line(text);
+        let mut head = MenuString::styled("Pick an Action for Text:", MenuStyle::Header);
+        head.push("\n\n")
+            .push_styled(&text, MenuStyle::Text)
+            .push("\n");
+        self.complete_menu_string(
+            &mut head,
             &TEXT_ACTION_MENU_ITEMS,
             true,
             true,
@@ -253,13 +261,14 @@ impl AppEngine {
             key_prefix,
         );
 
-        self.draw_menu(&msg);
+        self.draw_menu(&head);
     }
 
     fn draw_scrolling_menu(&self, key_prefix: &str) {
         if !self.config.hide_scrolling_menu {
-            let msg = self.build_menu_message(
-                "Pick a Scrolling Action:",
+            let mut msg = MenuString::styled("Pick a Scrolling Action:", MenuStyle::Header);
+            self.complete_menu_string(
+                &mut msg,
                 &SCROLLBAR_MENU_ITEMS,
                 false,
                 false,

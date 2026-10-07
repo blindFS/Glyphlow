@@ -1,4 +1,4 @@
-use super::AppEngine;
+use super::{AppEngine, drawing::wrong_key_menu_string};
 use crate::{
     Mode,
     ax_element::{CompiledTarget, GetAttribute, SetAttribute, Target},
@@ -217,11 +217,7 @@ impl AppEngine {
                 }
             }
             WorkFlowAction::Debug => {
-                let info = format!(
-                    "App Bundle ID: {}\n{}",
-                    self.last_app_window_info.bundle_id,
-                    element.inspect()
-                );
+                let info = element.inspect(&self.last_app_window_info.bundle_id);
                 self.notify(&info, Level::Debug);
                 // HACK: break the loop so the notification will be kept,
                 // basically `Debug` should be a terminal op
@@ -260,7 +256,7 @@ impl AppEngine {
             self.pending_workflow_actions = workflow.actions.clone().into();
             self.execute_pending_workflow_actions();
         } else {
-            self.draw_menu("Wrong key sequence\nPress 󰁮 to go back");
+            self.draw_menu(&wrong_key_menu_string());
         }
     }
 

@@ -1,28 +1,22 @@
 use crate::{
-    action::html_to_attributed_string,
-    config::{GlyphlowTheme, HintKeys, cgcolor_to_rgba},
-    user_interface::UIDrawer,
+    config::{GlyphlowTheme, HintKeys},
+    user_interface::{MenuString, MenuStyle, UIDrawer},
     util::{lower_ascii, search_regex},
 };
-use objc2::rc::{Retained, autoreleasepool};
-use objc2_app_kit::NSFontAttributeName;
-use objc2_foundation::{NSMutableAttributedString, NSRange};
 use regex::Regex;
 use std::sync::OnceLock;
 use unicode_width::UnicodeWidthStr;
 
-const WORD_PICKER_STYLE: &str = r#"
-<style>
-body {
-    font-size: 25px;
-    line-height: 1.5;
-    color: {fg_color};
+/// Between a word and its own label.
+const WORD_LABEL_GAP: &str = " ";
+/// Between a label and the next word, wider so the label reads as part of the
+/// word it picks rather than the word after it.
+const LABEL_WORD_GAP: &str = "  ";
+
+/// One entry's width in monospace cells, matching the spaces the loop emits.
+fn entry_width(word: &str, digits: u32) -> usize {
+    word.width() + WORD_LABEL_GAP.len() + digits as usize + LABEL_WORD_GAP.len()
 }
-.line { display: block; }
-.h { color: {hl_color} }
-.rh { color: {bg_color}; background-color: {hl_color}; }
-.d { color: {dim_color} }
-</style>"#;
 
 /// A token of the picked text: the original, its hint label, and the folded form
 /// searches are matched against.
@@ -69,11 +63,8 @@ impl WordPicker {
             matched: Vec::new(),
         };
 
-        autoreleasepool(|_| {
-            if let Some((attr_string, _)) = word_picker.get_attributed_string(theme, None, "", "") {
-                drawer.draw_attributed_string(theme, attr_string, true);
-            }
-        });
+        let (msg, _) = word_picker.menu_string(None, "", "");
+        drawer.draw_menu(&msg, theme);
 
         word_picker
     }
@@ -86,105 +77,106 @@ impl WordPicker {
         label_prefix: &str,
         text_prefix: &str,
     ) {
-        autoreleasepool(|_| {
-            if let Some((attr_string, matched)) =
-                self.get_attributed_string(theme, multi_selection_idx, label_prefix, text_prefix)
-            {
-                self.matched = matched;
-                drawer.draw_attributed_string(theme, attr_string, true);
-            };
-        })
+        let (msg, matched) = self.menu_string(multi_selection_idx, label_prefix, text_prefix);
+        self.matched = matched;
+        drawer.draw_menu(&msg, theme);
     }
 
-    /// Render the picker as HTML, with the label prefix and the search match
-    /// highlighted, plus the indices of the words that matched.
-    fn to_string(
+    /// The picker's text, with the key of every label and the match state of
+    /// every word styled, plus the indices of the words that matched.
+    fn menu_string(
         &self,
-        width_height_ratio: f64,
         multi_selection_idx: Option<usize>,
         label_prefix: &str,
         text_prefix: &str,
-    ) -> (String, Vec<usize>) {
-        let text_pattern = search_regex(text_prefix);
-        let total_unicode_width = self.words.iter().map(|w| w.text.width()).sum::<usize>()
-            + self.words.len() * (2 + self.digits as usize);
+    ) -> (MenuString, Vec<usize>) {
+        let total_unicode_width = self
+            .words
+            .iter()
+            .map(|w| entry_width(&w.text, self.digits))
+            .sum::<usize>();
         // ideal_width / (total_unicode_width / ideal_width) 󰾞 ratio * 3
-        let ideal_width = (total_unicode_width as f64 * width_height_ratio * 3.0)
+        let ideal_width = (total_unicode_width as f64 * self.screen_ratio * 3.0)
             .sqrt()
             .round() as usize;
 
-        let line_span_head = "<span class=\"line\">";
-        let mut buffer = String::new();
-
-        let mut line_width = 0;
-        buffer.push_str(line_span_head);
-
-        let mut matched = Vec::new();
-        let helper = |label, class| format!("<span class=\"{class}\">{label}</span>");
-
-        for (idx, w) in self.words.iter().enumerate() {
-            let (this_class, label_html) = if multi_selection_idx.is_some_and(|other| other == idx)
-            {
-                // For already selected start/end, dim the label
-                ("rh", helper(&w.label, "d"))
-            } else if (!label_prefix.is_empty() || !text_prefix.is_empty())
-                && w.label.starts_with(label_prefix)
+        let filtering = !label_prefix.is_empty() || !text_prefix.is_empty();
+        let typed = label_prefix.len();
+        let text_pattern = search_regex(text_prefix);
+        let matches = |word: &Word| {
+            filtering
+                && word.label.starts_with(label_prefix)
                 && text_pattern
                     .as_ref()
-                    .is_none_or(|pattern| pattern.is_match(&w.ascii))
-            {
-                // For matched, highlight the label suffix
-                matched.push(idx);
-                (
-                    "m",
-                    format!(
-                        "<span class=\"d\">{}</span><span class=\"h\">{}</span>",
-                        label_prefix,
-                        w.label.get(label_prefix.len()..).unwrap_or_default()
-                    ),
-                )
-            } else if label_prefix.is_empty() && text_prefix.is_empty() {
-                // No prefix, highlight the all labels
-                ("n", helper(&w.label, "h"))
-            } else {
-                // Unmatched choices, dim whole span
-                ("d", helper(&w.label, "d"))
-            };
-            let this_span = format!(
-                "<span class=\"{}\">{}</span> {} ",
-                this_class, w.text, label_html
-            );
+                    .is_none_or(|pattern| pattern.is_match(&word.ascii))
+        };
 
-            let this_width = w.text.width() + self.digits as usize + 2;
-            if line_width + this_width <= ideal_width {
-                line_width += this_width;
-            } else {
-                // If the line is empty, don't add an empty span
-                if line_width > 0 {
-                    buffer.push_str("</span>");
-                    buffer.push_str(line_span_head);
-                }
-                line_width = this_width;
+        let matched: Vec<usize> = self
+            .words
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, word)| matches(word).then_some(idx))
+            .collect();
+
+        // The header names the picker, so every part of it is styled as a header;
+        // the key inside it stays a key.
+        let (hint_key, hint) = if filtering && matched.is_empty() {
+            ("󰁮", " to return")
+        } else {
+            ("/", " to search")
+        };
+        let mut buffer = MenuString::styled("Press ", MenuStyle::Header);
+        buffer
+            .push_styled(hint_key, MenuStyle::Key)
+            .push_styled(hint, MenuStyle::Header)
+            .push("\n");
+
+        let mut line_width = 0;
+        for (idx, word) in self.words.iter().enumerate() {
+            let this_width = entry_width(&word.text, self.digits);
+            // Wrap when this word would overflow, unless the line is still empty.
+            if line_width + this_width > ideal_width && line_width > 0 {
+                buffer.push("\n");
+                line_width = 0;
+            } else if line_width > 0 {
+                // Separate entries on a line, but keep the gap off either end.
+                buffer.push(LABEL_WORD_GAP);
             }
-            buffer.push_str(&this_span);
+            line_width += this_width;
+
+            if multi_selection_idx == Some(idx) {
+                // A picked end of the range: its key cannot be pressed again.
+                buffer
+                    .push_styled(&word.text, MenuStyle::Key)
+                    .push(WORD_LABEL_GAP)
+                    .push_styled(&word.label, MenuStyle::Dim);
+            } else if matched.binary_search(&idx).is_ok() {
+                // The typed part of the key cannot be pressed again either.
+                buffer
+                    .push(&word.text)
+                    .push(WORD_LABEL_GAP)
+                    .push_styled(&word.label[..typed], MenuStyle::Dim)
+                    .push_styled(&word.label[typed..], MenuStyle::Key);
+            } else if filtering {
+                buffer
+                    .push_styled(&word.text, MenuStyle::Dim)
+                    .push(WORD_LABEL_GAP)
+                    .push_styled(&word.label, MenuStyle::Dim);
+            } else {
+                buffer
+                    .push(&word.text)
+                    .push(WORD_LABEL_GAP)
+                    .push_styled(&word.label, MenuStyle::Key);
+            }
         }
-        buffer.push_str("</span>");
-
-        let buffer = format!(
-            "<span class=\"h\">{}</span>\n{buffer}",
-            if !(label_prefix.is_empty() && text_prefix.is_empty()) && matched.is_empty() {
-                "Press 󰁮 to return"
-            } else {
-                "Press / to search"
-            }
-        );
+        buffer.push("\n");
 
         (buffer, matched)
     }
 
     /// The matches that still resolve to a word, in match order.
     ///
-    /// Indices come from [`Self::to_string`], so a stale one should not happen;
+    /// Indices come from [`Self::menu_string`], so a stale one should not happen;
     /// skipping it rather than panicking keeps a bad index from taking down an
     /// input handler.
     fn live_matches(&self) -> impl Iterator<Item = (usize, &str)> + '_ {
@@ -193,28 +185,20 @@ impl WordPicker {
             .filter_map(|idx| self.words.get(*idx).map(|w| (*idx, w.text.as_str())))
     }
 
-    /// How many words match the current prefix and search.
-    pub fn matched_count(&self) -> usize {
-        self.live_matches().count()
-    }
-
-    /// The first matching word, as `(index, text)`.
-    pub fn first_matched_word(&self) -> Option<(usize, &str)> {
-        self.live_matches().next()
-    }
-
-    /// Whether every match is the same word, which keeps the pick unambiguous
-    /// even though several copies of it matched.
+    /// The match to pick, when the matches leave no choice: the only one, or
+    /// several that are all the same word while `multi_selection` is off, since
+    /// then there is nothing to tell apart.
     ///
-    /// False when nothing matched: an empty match set is not a unique pick, and
-    /// saying so vacuously is exactly the kind of thing that turns into a bug at
-    /// the next call site.
-    pub fn all_matches_are_one_word(&self) -> bool {
+    /// `None` when nothing matched or the pick is ambiguous.
+    pub fn unambiguous_match(&self, multi_selection: bool) -> Option<(usize, &str)> {
         let mut live = self.live_matches();
-        let Some((_, first)) = live.next() else {
-            return false;
+        let (idx, text) = live.next()?;
+        let Some((_, second)) = live.next() else {
+            return Some((idx, text));
         };
-        live.all(|(_, word)| word == first)
+
+        (!multi_selection && second == text && live.all(|(_, word)| word == text))
+            .then_some((idx, text))
     }
 
     pub fn select_range(&self, idx1: usize, idx2: usize) -> Option<String> {
@@ -227,37 +211,6 @@ impl WordPicker {
         let e_off = self.offsets.get(end)? + self.words.get(end)?.text.len();
 
         self.raw.get(*s_off..e_off).map(String::from)
-    }
-
-    fn get_attributed_string(
-        &self,
-        theme: &GlyphlowTheme,
-        multi_selection_idx: Option<usize>,
-        label_prefix: &str,
-        text_prefix: &str,
-    ) -> Option<(Retained<NSMutableAttributedString>, Vec<usize>)> {
-        let (html_str, matched) = self.to_string(
-            self.screen_ratio,
-            multi_selection_idx,
-            label_prefix,
-            text_prefix,
-        );
-
-        // CSS colors
-        let attr_string = html_to_attributed_string(
-            &html_str,
-            Some(&replace_color_in_css(WORD_PICKER_STYLE, theme, 3)),
-        )?;
-
-        unsafe {
-            attr_string.addAttribute_value_range(
-                NSFontAttributeName,
-                &theme.menu_font,
-                NSRange::new(0, attr_string.length()),
-            );
-        }
-
-        Some((attr_string, matched))
     }
 }
 
@@ -275,26 +228,6 @@ fn get_url_re() -> &'static Regex {
 fn get_segment_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(SCRIPT_SEGMENT_PATTERN).unwrap())
-}
-
-fn rgba_to_css_color(rgba: (u8, u8, u8, u8)) -> String {
-    let (r, g, b, a) = rgba;
-    format!("rgba({}, {}, {}, {:.2})", r, g, b, a as f64 / 255.0)
-}
-
-fn replace_color_in_css(css: &str, theme: &GlyphlowTheme, dim_level: u8) -> String {
-    let default_rgba = (255, 255, 255, 255);
-    let fg_rgba = cgcolor_to_rgba(&theme.menu_fg_color).unwrap_or(default_rgba);
-    let bg_rgba = cgcolor_to_rgba(&theme.menu_bg_color).unwrap_or(default_rgba);
-    let mut dim_rgba = fg_rgba;
-    dim_rgba.3 /= dim_level;
-    css.replace("{fg_color}", &rgba_to_css_color(fg_rgba))
-        .replace("{bg_color}", &rgba_to_css_color(bg_rgba))
-        .replace(
-            "{hl_color}",
-            &rgba_to_css_color(cgcolor_to_rgba(&theme.menu_hl_color).unwrap_or(default_rgba)),
-        )
-        .replace("{dim_color}", &rgba_to_css_color(dim_rgba))
 }
 
 /// Split `input` into pickable tokens, with each token's byte offset in `input`.
@@ -442,36 +375,35 @@ mod tests {
         }
     }
 
-    /// These three queries are what decides whether a word-picking keypress is
-    /// unambiguous, so pin each of them rather than only the combination the
-    /// caller happens to use today.
+    /// This is what decides whether a word-picking keypress picks a word or waits
+    /// for another key, so pin every case: no match, one, and several that are
+    /// the same word or not, with and without multi-selection.
     #[rstest]
-    // Nothing matched is not a unique pick, and must not claim to be one by
-    // vacuous truth.
-    #[case::nothing_matched(&["alpha"], &[], 0, false, None)]
-    // One match is unique, and trivially "all the same word".
-    #[case::one_match(&["alpha"], &[0], 1, true, Some((0, "alpha")))]
-    // Two copies of one word cannot be told apart, so the pick stays unique.
-    #[case::duplicates_of_one_word(&["alpha", "alpha"], &[0, 1], 2, true, Some((0, "alpha")))]
-    #[case::two_different_words(&["alpha", "beta"], &[0, 1], 2, false, Some((0, "alpha")))]
-    #[case::same_word_thrice(&["go", "go", "go"], &[0, 1, 2], 3, true, Some((0, "go")))]
+    // Nothing matched is not a pick, and must not claim to be one by vacuous
+    // truth.
+    #[case::nothing_matched(&["alpha"], &[], false, None)]
+    // A lone match is a pick even for a range: it is the only word either end
+    // could mean.
+    #[case::one_match(&["alpha"], &[0], false, Some((0, "alpha")))]
+    #[case::one_match_of_a_range(&["alpha"], &[0], true, Some((0, "alpha")))]
+    // Two copies of one word cannot be told apart, so the pick stays unique —
+    // but not for a range, which needs two ends that differ.
+    #[case::duplicates_of_one_word(&["alpha", "alpha"], &[0, 1], false, Some((0, "alpha")))]
+    #[case::duplicates_of_one_word_of_a_range(&["alpha", "alpha"], &[0, 1], true, None)]
+    #[case::two_different_words(&["alpha", "beta"], &[0, 1], false, None)]
+    #[case::two_different_words_of_a_range(&["alpha", "beta"], &[0, 1], true, None)]
+    #[case::same_word_thrice(&["go", "go", "go"], &[0, 1, 2], false, Some((0, "go")))]
+    #[case::same_word_thrice_of_a_range(&["go", "go", "go"], &[0, 1, 2], true, None)]
     // A stale index is skipped rather than panicking, and does not count.
-    #[case::stale_index_is_skipped(&["alpha"], &[0, 7], 1, true, Some((0, "alpha")))]
-    #[case::every_index_stale(&["alpha"], &[3, 4], 0, false, None)]
-    fn match_queries_agree_on_whether_the_pick_is_unambiguous(
+    #[case::stale_index_is_skipped(&["alpha"], &[0, 7], false, Some((0, "alpha")))]
+    #[case::every_index_stale(&["alpha"], &[3, 4], false, None)]
+    fn picks_only_when_the_matches_leave_no_choice(
         #[case] words: &[&str],
         #[case] matched: &[usize],
-        #[case] count: usize,
-        #[case] all_one_word: bool,
-        #[case] first: Option<(usize, &str)>,
+        #[case] multi_selection: bool,
+        #[case] expected: Option<(usize, &str)>,
     ) {
         let wp = picker_with(words, matched);
-        assert_eq!(wp.matched_count(), count, "matched_count");
-        assert_eq!(
-            wp.all_matches_are_one_word(),
-            all_one_word,
-            "all_matches_are_one_word"
-        );
-        assert_eq!(wp.first_matched_word(), first, "first_matched_word");
+        assert_eq!(wp.unambiguous_match(multi_selection), expected);
     }
 }

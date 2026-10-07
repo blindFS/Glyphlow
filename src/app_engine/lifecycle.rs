@@ -6,7 +6,7 @@ use crate::{
     },
     config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
     os_util::{AppWindowInfo, element_at_point, get_focused_window},
-    user_interface::{HintBox, find_overlaps, resolve_collisions},
+    user_interface::{HintBox, MenuString, MenuStyle, find_overlaps, resolve_collisions},
 };
 use accessibility::AXUIElementAttributes;
 use accessibility_sys::{AXUIElementCreateSystemWide, AXUIElementRef};
@@ -67,21 +67,28 @@ impl AppEngine {
         self.click_modifiers.reset();
     }
 
-    pub(super) fn notify_then_deactivate(&mut self, msg: &str, log_level: Level) {
+    pub(super) fn notify_then_deactivate(&mut self, text: &str, log_level: Level) {
         self.set_mode(Mode::WaitAndDeactivate);
-        self.notify(msg, log_level);
+        self.notify(text, log_level);
     }
 
-    /// Show a notification; it clears itself after a delay that depends on the
-    /// log level.
-    pub(super) fn notify(&mut self, msg: &str, log_level: Level) {
+    pub(super) fn notify(&mut self, text: &str, log_level: Level) {
+        let msg = match log_level {
+            Level::Error => MenuString::styled(text, MenuStyle::Error),
+            Level::Warn => MenuString::styled(text, MenuStyle::Header),
+            _ => MenuString::from(text),
+        };
+        self.notify_styled(msg, log_level);
+    }
+
+    pub(super) fn notify_styled(&mut self, msg: MenuString, log_level: Level) {
         let timeout_secs = match log_level {
             Level::Trace | Level::Info => SHORT_TIMEOUT,
             Level::Debug => DEBUG_TIMEOUT,
             _ => LONG_TIMEOUT,
         } * 1000;
-        log::log!(log_level, "{msg}");
-        let id = self.drawer.notify(&self.config.theme, msg);
+        log::log!(log_level, "{}", msg.text);
+        let id = self.drawer.notify(&self.config.theme, &msg);
         let sender = self.signal_sender.clone();
         tokio::spawn(
             async move { delay(sender, AppSignal::ClearNotification(id), timeout_secs).await },
@@ -412,7 +419,9 @@ impl AppEngine {
             self.finalize_hints();
 
             if need_help_msg {
-                self.notify("Press Enter to act.", Level::Trace);
+                let mut msg = MenuString::from("Press ");
+                msg.push_styled("Enter", MenuStyle::Key).push(" to act.");
+                self.notify_styled(msg, Level::Trace);
             }
         } else if target == Target::ImageOCR {
             // Fallback to full window OCR if no image or leaf group found

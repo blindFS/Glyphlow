@@ -505,7 +505,7 @@ pub trait GetAttribute {
     /// when its position or size is unavailable.
     fn get_frame(&self, default: Frame) -> Frame;
     fn get_dom_classes(&self) -> Option<Vec<String>>;
-    fn inspect(&self) -> String;
+    fn inspect(&self, bundle_id: &str) -> String;
     fn search_target(&self) -> String;
     fn is_clickable(&self) -> bool;
     fn has_children(&self) -> bool;
@@ -572,12 +572,12 @@ impl GetAttribute for AXUIElement {
         frame.unwrap_or(default_frame)
     }
 
-    fn inspect(&self) -> String {
+    fn inspect(&self, bundle_id: &str) -> String {
         let Some(fp) = ElementBasicAttributes::from(self) else {
             return "Unknown".into();
         };
 
-        let mut msg = String::new();
+        let mut msg = format!("App Bundle ID: {}\n", bundle_id);
 
         msg.push_str(&format!("Role: {}\n", fp.role));
 

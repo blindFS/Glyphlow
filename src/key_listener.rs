@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, HashSet},
-    fmt::Display,
     path::PathBuf,
     sync::{Mutex, MutexGuard},
 };
@@ -144,29 +143,12 @@ impl MenuItem {
     }
 }
 
-impl MenuItem {
-    pub fn pretty_print(&self, prefix_len: usize) -> String {
-        let prefix = "_".repeat(prefix_len);
-        format!(
-            "({prefix}{}) {}",
-            self.key.chars().skip(prefix_len).collect::<String>(),
-            self.description
-        )
-    }
-}
-
-impl Display for MenuItem {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "({}) {}", self.key, self.description)
-    }
-}
-
 pub const DASH_BOARD_MENU_ITEMS: [MenuItem; 9] = [
     MenuItem::new("󰦨 Text", "T", AppSignal::Activate(Target::Text)),
     MenuItem::new("󰳽 Press", "P", AppSignal::Activate(Target::Clickable)),
     MenuItem::new("󱕒 ScrollBar", "S", AppSignal::Activate(Target::Scrollable)),
     MenuItem::new("󰊄 Input", "I", AppSignal::Activate(Target::Editable)),
-    MenuItem::new(" Image", "M", AppSignal::Activate(Target::Image)),
+    MenuItem::new("󰋩 Image", "M", AppSignal::Activate(Target::Image)),
     MenuItem::new(
         "󰙅 Element Explorer",
         "E",
@@ -174,7 +156,7 @@ pub const DASH_BOARD_MENU_ITEMS: [MenuItem; 9] = [
     ),
     MenuItem::new("󰆟 ScreenShot", "R", AppSignal::ScreenShot),
     MenuItem::new("󱄺 Image OCR", "O", AppSignal::FrameOCR),
-    MenuItem::new(" Read Clipboard", "C", AppSignal::ReadClipboard),
+    MenuItem::new("󰅇 Read Clipboard", "C", AppSignal::ReadClipboard),
 ];
 
 pub const SCROLLBAR_MENU_ITEMS: [MenuItem; 6] = [

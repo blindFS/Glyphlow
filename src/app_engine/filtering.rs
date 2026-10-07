@@ -5,7 +5,7 @@ use crate::{
     app_engine::lifecycle::delay,
     ax_element::{ElementOfInterest, Target},
     config::RoleOfInterest,
-    user_interface::{HintBox, hint_boxes_from_frames},
+    user_interface::{HintBox, MenuString, MenuStyle, hint_boxes_from_frames},
     util::{Frame, lower_ascii, select_text_range},
 };
 use log::Level;
@@ -373,15 +373,9 @@ impl AppEngine {
             return;
         };
 
-        // Exactly one match is unambiguous. Several matches are still fine when
-        // multi-selection is off and they are all the same word, because then
-        // there is nothing to tell apart.
-        let unique_matching = wp.matched_count() == 1
-            || (!self.multi_selection.is_on && wp.all_matches_are_one_word());
-
         let mut new_text = None;
 
-        if unique_matching && let Some((idx, text)) = wp.first_matched_word() {
+        if let Some((idx, text)) = wp.unambiguous_match(self.multi_selection.is_on) {
             if self.multi_selection.is_on {
                 if let Some((idx1, idx2)) = self.multi_selection.set_one_side(idx) {
                     let text = wp
@@ -410,8 +404,9 @@ impl AppEngine {
             self.toggle_multiselection();
         } else if self.target == Target::Clickable {
             self.click_modifiers.toggle(key);
-            let held = self.click_modifiers.label();
-            self.notify(&format!("Click modifiers: {held}"), Level::Info);
+            let mut msg = MenuString::from("Click modifiers: ");
+            msg.push_styled(&self.click_modifiers.label(), MenuStyle::Key);
+            self.notify_styled(msg, Level::Info);
         }
     }
 
@@ -422,6 +417,8 @@ impl AppEngine {
         } else {
             "off"
         };
-        self.notify(&format!("Multi-selection is now {on_off}."), Level::Info);
+        let mut msg = MenuString::from("Multi-selection is now ");
+        msg.push_styled(on_off, MenuStyle::Key).push(".");
+        self.notify_styled(msg, Level::Info);
     }
 }

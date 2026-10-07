@@ -229,7 +229,10 @@ keeps its default instead of failing to load.
 | `theme.menu_margin_size` | Margin around the menu window | `10` |
 | `theme.menu_bg_color` | Background color of the menu | $\color{#111726}{\blacksquare}$ |
 | `theme.menu_fg_color` | Foreground (text) color of the menu | $\color{#a3aed2}{\blacksquare}$ |
-| `theme.menu_hl_color` | Highlight color of the menu | $\color{#769ff0}{\blacksquare}$ |
+| `theme.menu_hl_color` | Highlight color of the menu keys | $\color{#769ff0}{\blacksquare}$ |
+| `theme.menu_text_hl_color` | Highlight color of the text a menu acts on | $\color{#9ece6a}{\blacksquare}$ |
+| `theme.menu_header_hl_color` | Highlight color of menu headers and warnings | $\color{#e0af68}{\blacksquare}$ |
+| `theme.menu_error_hl_color` | Highlight color of error messages | $\color{#f7768e}{\blacksquare}$ |
 | `theme.frame_colors` | Colors used for large UI element frames | [ $\color{#e0af68}{\blacksquare}$, $\color{#9ece6a}{\blacksquare}$, $\color{#bb9af7}{\blacksquare}$, $\color{#f7768e}{\blacksquare}$ ] |
 | `theme.enable_animation` | Animations for mouse events | `true` |
 
