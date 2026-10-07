@@ -16,10 +16,11 @@ use objc2_core_foundation::{CFRetained, CGSize};
 use objc2_core_graphics::CGColor;
 use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CALayer, CATextLayer, CATransaction};
+use std::cell::Cell;
 use std::ops::Range;
 
 /// How a span of text stands out from the rest of the string.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MenuStyle {
     Key,
     Text,
@@ -146,10 +147,21 @@ impl From<String> for MenuString {
     }
 }
 
+/// What a menu's layer was last told to draw, so a redraw that changes neither
+/// the text nor the frames can skip the string copy, the base attributes and the
+/// CoreText measurement.
+struct Drawn {
+    /// In UTF-16 units, as `NSAttributedString` counts them.
+    spans: Vec<(Range<usize>, MenuStyle)>,
+    screen_frame: Frame,
+    overlay_frame: Frame,
+}
+
 struct Menu {
     container: Retained<CALayer>,
     text_layer: Retained<CATextLayer>,
     menu_string: Retained<NSMutableAttributedString>,
+    drawn: Cell<Option<Drawn>>,
 }
 
 /// Runs `body` with Core Animation actions disabled, so the layer changes it
@@ -200,6 +212,7 @@ impl Menu {
                 container,
                 text_layer,
                 menu_string: attr_string,
+                drawn: Cell::new(None),
             };
 
             menu.load_theme(theme);
@@ -218,6 +231,9 @@ impl Menu {
             .setBackgroundColor(Some(&theme.menu_bg_color));
         self.container
             .setCornerRadius(theme.menu_margin_size as f64);
+        // The spans hold the colours they were painted in, so a new theme has to
+        // be painted over the whole string again.
+        self.drawn.set(None);
     }
 
     fn initialize_string_attributes(&self, theme: &GlyphlowTheme) {
@@ -326,21 +342,71 @@ impl Menu {
         theme: &GlyphlowTheme,
     ) {
         autoreleasepool(|_| {
-            let ns_string = NSString::from_str(menu.text());
-            self.menu_string.mutableString().setString(&ns_string);
-            self.initialize_string_attributes(theme);
-            self.highlight(menu, theme);
-            self.resize_and_show(screen_frame, overlay_frame, theme, true);
+            let spans = utf16_spans(menu.text(), menu.spans());
+            // While the layer still holds this text, laid out for these frames,
+            // only the colours can have changed: the string, the base attributes
+            // and the measured size are all still in place.
+            let laid_out = self
+                .menu_string
+                .string()
+                .isEqualToString(&NSString::from_str(menu.text()));
+            let previous = self.drawn.take().filter(|drawn| {
+                laid_out
+                    && drawn.screen_frame == *screen_frame
+                    && drawn.overlay_frame == *overlay_frame
+            });
+
+            let Some(mut previous) = previous else {
+                let ns_string = NSString::from_str(menu.text());
+                self.menu_string.mutableString().setString(&ns_string);
+                self.initialize_string_attributes(theme);
+                self.restyle(theme, &spans, &[]);
+                self.resize_and_show(screen_frame, overlay_frame, theme, true);
+                self.drawn.set(Some(Drawn {
+                    spans,
+                    screen_frame: *screen_frame,
+                    overlay_frame: *overlay_frame,
+                }));
+                return;
+            };
+
+            if self.restyle(theme, &spans, &previous.spans) {
+                self.refresh_text();
+            }
+            // The frame is the one already in place, but the menu may have been
+            // hidden since it was drawn.
+            self.show();
+            previous.spans = spans;
+            self.drawn.set(Some(previous));
         })
     }
 
-    /// Repaint the styled spans over the foreground colour set for the whole string.
-    fn highlight(&self, menu: &MenuString, theme: &GlyphlowTheme) {
+    /// Repaint the spans whose style differs from `previous`, and return whether
+    /// anything was repainted.
+    ///
+    /// Both lists index the same text, so they are compared run by run; a range
+    /// that is styled now but was not, or the other way round, goes back to the
+    /// foreground colour the whole string was given.
+    fn restyle(
+        &self,
+        theme: &GlyphlowTheme,
+        spans: &[(Range<usize>, MenuStyle)],
+        previous: &[(Range<usize>, MenuStyle)],
+    ) -> bool {
+        let plan = restyle_plan(previous, spans);
+        if plan.is_empty() {
+            return false;
+        }
+
         let dim = dimmed(&theme.menu_fg_color);
         unsafe {
-            for (span, style) in menu.spans() {
-                let range = utf16_range(menu.text(), span);
-                let (fg, bg) = style.colors(theme, &dim);
+            self.menu_string.beginEditing();
+            for (range, style) in plan {
+                let (fg, bg) = match style {
+                    Some(style) => style.colors(theme, &dim),
+                    None => (&theme.menu_fg_color, None),
+                };
+                let range = NSRange::new(range.start, range.end - range.start);
                 self.menu_string.addAttribute_value_range(
                     NSForegroundColorAttributeName,
                     fg.as_ref(),
@@ -354,7 +420,9 @@ impl Menu {
                     );
                 }
             }
+            self.menu_string.endEditing();
         }
+        true
     }
 
     /// Draw `attr_string`, shrinking the font if `auto_resize` is set.
@@ -367,6 +435,9 @@ impl Menu {
         auto_resize: bool,
     ) {
         autoreleasepool(|_| {
+            // The whole string is replaced, so nothing from the last draw can be
+            // reused.
+            self.drawn.set(None);
             self.menu_string.setAttributedString(&attr_string);
             self.resize_and_show(screen_frame, overlay_frame, theme, auto_resize);
         })
@@ -742,12 +813,76 @@ pub fn calibrated_origin(x: f64, y: f64, overlay_frame: &Frame) -> NSPoint {
     )
 }
 
-/// `NSAttributedString` counts ranges in UTF-16 code units, while [`MenuString`]
-/// spans are byte offsets into a Rust `str`. Menu rows carry non-BMP glyphs, so
-/// the two disagree.
-fn utf16_range(text: &str, span: &Range<usize>) -> NSRange {
-    let start = text[..span.start].encode_utf16().count();
-    NSRange::new(start, text[span.start..span.end].encode_utf16().count())
+/// `menu`'s spans in the UTF-16 code units `NSAttributedString` counts in, since
+/// a [`MenuString`] span is a byte offset into a Rust `str` and menu rows carry
+/// non-BMP glyphs.
+///
+/// Converted in one pass: a span's offset needs the UTF-16 length of everything
+/// before it, so converting them one at a time is quadratic in the menu.
+fn utf16_spans(text: &str, spans: &[(Range<usize>, MenuStyle)]) -> Vec<(Range<usize>, MenuStyle)> {
+    let mut converted = Vec::with_capacity(spans.len());
+    let (mut byte, mut utf16) = (0, 0);
+    for (span, style) in spans {
+        utf16 += text[byte..span.start].encode_utf16().count();
+        let start = utf16;
+        utf16 += text[span.start..span.end].encode_utf16().count();
+        byte = span.end;
+        converted.push((start..utf16, *style));
+    }
+    converted
+}
+
+/// The ranges of `spans` to repaint, with the style to paint them in; `None`
+/// puts a range back to the foreground colour the whole string was given.
+///
+/// Both lists are sorted and disjoint, so every one of their boundaries starts a
+/// run whose style is fixed on either side, and only a run whose two sides
+/// disagree has to be repainted.
+fn restyle_plan(
+    previous: &[(Range<usize>, MenuStyle)],
+    spans: &[(Range<usize>, MenuStyle)],
+) -> Vec<(Range<usize>, Option<MenuStyle>)> {
+    if previous == spans {
+        return Vec::new();
+    }
+
+    let mut boundaries: Vec<usize> = previous
+        .iter()
+        .chain(spans)
+        .flat_map(|(span, _)| [span.start, span.end])
+        .collect();
+    boundaries.sort_unstable();
+    boundaries.dedup();
+
+    let (mut old, mut new) = (0, 0);
+    let mut plan = Vec::new();
+    for window in boundaries.windows(2) {
+        let (start, end) = (window[0], window[1]);
+        let before = style_at(previous, &mut old, start);
+        let after = style_at(spans, &mut new, start);
+        if before != after {
+            plan.push((start..end, after));
+        }
+    }
+    plan
+}
+
+/// The style covering `at` in a sorted, disjoint span list, advancing `cursor`
+/// past every span that ends before it.
+///
+/// Only constant amortized: one call walks as many spans as it has to skip, so
+/// the caller has to ask for ascending positions — which is what keeps a whole
+/// walk linear, since then each span is skipped once and the cursor never
+/// rewinds.
+fn style_at(
+    spans: &[(Range<usize>, MenuStyle)],
+    cursor: &mut usize,
+    at: usize,
+) -> Option<MenuStyle> {
+    while spans.get(*cursor).is_some_and(|s| s.0.end <= at) {
+        *cursor += 1;
+    }
+    spans.get(*cursor).filter(|s| s.0.start <= at).map(|s| s.1)
 }
 
 #[cfg(test)]
