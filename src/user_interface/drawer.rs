@@ -83,25 +83,31 @@ impl MenuStyle {
 }
 
 /// The text of a menu, plus the spans to draw in an accent colour.
+///
+/// A span is a range in UTF-16 code units, the unit `NSAttributedString` counts
+/// in, so a row carrying non-BMP glyphs styles the characters it means.
 pub struct MenuString {
     pub text: String,
     spans: Vec<(Range<usize>, MenuStyle)>,
+    /// UTF-16 length of `text`, the offset the next span starts at.
+    utf16_len: usize,
 }
 
 impl MenuString {
     /// Append `text` in the menu's foreground colour.
     pub fn push(&mut self, text: &str) -> &mut Self {
         self.text.push_str(text);
+        self.utf16_len += text.encode_utf16().count();
         self
     }
 
     /// Append `text` in `style`'s colour.
     pub fn push_styled(&mut self, text: &str, style: MenuStyle) -> &mut Self {
-        if !text.is_empty() {
-            self.spans
-                .push((self.text.len()..self.text.len() + text.len(), style));
+        let start = self.utf16_len;
+        self.push(text);
+        if self.utf16_len > start {
+            self.spans.push((start..self.utf16_len, style));
         }
-        self.text.push_str(text);
         self
     }
 
@@ -135,33 +141,17 @@ impl MenuString {
             .push(" ")
             .push(display)
     }
-
-    /// `menu`'s spans in the UTF-16 code units `NSAttributedString` counts in, since
-    /// a [`MenuString`] span is a byte offset into a Rust `str` and menu rows carry
-    /// non-BMP glyphs.
-    ///
-    /// Converted in one pass: a span's offset needs the UTF-16 length of everything
-    /// before it, so converting them one at a time is quadratic in the menu.
-    fn utf16_spans(&self) -> Vec<(Range<usize>, MenuStyle)> {
-        let mut converted = Vec::with_capacity(self.spans.len());
-        let (mut byte, mut utf16) = (0, 0);
-        for (span, style) in self.spans.iter() {
-            utf16 += self.text[byte..span.start].encode_utf16().count();
-            let start = utf16;
-            utf16 += self.text[span.start..span.end].encode_utf16().count();
-            byte = span.end;
-            converted.push((start..utf16, *style));
-        }
-        converted
-    }
 }
 
 impl From<&str> for MenuString {
     fn from(text: &str) -> Self {
-        Self {
-            text: text.to_owned(),
+        let mut msg = Self {
+            text: String::new(),
             spans: Vec::new(),
-        }
+            utf16_len: 0,
+        };
+        msg.push(text);
+        msg
     }
 }
 
@@ -341,7 +331,7 @@ impl Menu {
         theme: &GlyphlowTheme,
     ) {
         autoreleasepool(|_| {
-            let spans = menu.utf16_spans();
+            let spans = menu.spans.clone();
             // While the layer still holds this text, laid out for these frames,
             // only the colours can have changed: the string, the base attributes
             // and the measured size are all still in place.
