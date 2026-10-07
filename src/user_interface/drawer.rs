@@ -874,3 +874,106 @@ mod calibrated_origin_tests {
         assert_eq!((origin.x, origin.y), expected);
     }
 }
+
+#[cfg(test)]
+mod restyle_plan_tests {
+    use super::*;
+    use rstest::rstest;
+
+    /// `restyle_plan` turns "what was painted" plus "what should be painted" into
+    /// the shortest list of runs to repaint. Both lists are sorted and disjoint, so
+    /// every boundary in either list begins a run whose style is fixed on both
+    /// sides, and only a run whose two sides disagree is emitted. A span covers
+    /// `start..end` half-open, and a run that was styled but is not any more
+    /// carries `None`, putting it back to the string's foreground colour.
+    #[rstest]
+    // The same list twice: the early return, and the common redraw that changes no
+    // styling at all.
+    #[case::identical_lists_are_no_work(
+        vec![(0..3, MenuStyle::Key)],
+        vec![(0..3, MenuStyle::Key)],
+        vec![]
+    )]
+    #[case::two_empty_lists_are_no_work(vec![], vec![], vec![])]
+    // The first pass: nothing painted yet, so each span is a run and the gaps
+    // between spans are not boundaries and stay untouched.
+    #[case::first_pass_paints_only_the_spans(
+        vec![],
+        vec![(2..5, MenuStyle::Key)],
+        vec![(2..5, Some(MenuStyle::Key))]
+    )]
+    #[case::first_pass_leaves_the_gaps_alone(
+        vec![],
+        vec![(0..2, MenuStyle::Key), (4..6, MenuStyle::Dim)],
+        vec![(0..2, Some(MenuStyle::Key)), (4..6, Some(MenuStyle::Dim))]
+    )]
+    // Losing every span puts each former span back to the foreground colour.
+    #[case::dropping_a_span_returns_it_to_the_foreground(
+        vec![(2..5, MenuStyle::Key)],
+        vec![],
+        vec![(2..5, None)]
+    )]
+    // A style that changed over the same range is repainted whole.
+    #[case::a_changed_style_repaints_its_whole_run(
+        vec![(2..5, MenuStyle::Key)],
+        vec![(2..5, MenuStyle::Dim)],
+        vec![(2..5, Some(MenuStyle::Dim))]
+    )]
+    // Only the run that disagrees is emitted; the identical neighbours are not.
+    #[case::unchanged_neighbours_are_not_repainted(
+        vec![(0..2, MenuStyle::Key), (2..4, MenuStyle::Key), (4..6, MenuStyle::Key)],
+        vec![(0..2, MenuStyle::Key), (2..4, MenuStyle::Dim), (4..6, MenuStyle::Key)],
+        vec![(2..4, Some(MenuStyle::Dim))]
+    )]
+    // Splitting one span in two repaints only the half whose style differs.
+    #[case::splitting_a_span_repaints_only_the_half_that_changed(
+        vec![(0..4, MenuStyle::Key)],
+        vec![(0..2, MenuStyle::Key), (2..4, MenuStyle::Dim)],
+        vec![(2..4, Some(MenuStyle::Dim))]
+    )]
+    // Merging two spans repaints only the second, which takes on the first's style.
+    #[case::merging_two_spans_repaints_only_the_second(
+        vec![(0..2, MenuStyle::Key), (2..4, MenuStyle::Dim)],
+        vec![(0..4, MenuStyle::Key)],
+        vec![(2..4, Some(MenuStyle::Key))]
+    )]
+    // A narrower span inside a wider one returns both sides to the foreground.
+    #[case::a_narrower_span_leaves_both_sides_unstyled(
+        vec![(0..6, MenuStyle::Key)],
+        vec![(2..4, MenuStyle::Dim)],
+        vec![(0..2, None), (2..4, Some(MenuStyle::Dim)), (4..6, None)]
+    )]
+    // The same styles, split differently: `previous != spans`, but no run
+    // disagrees, so the plan is empty rather than a repaint of the whole range.
+    #[case::a_repartition_with_unchanged_styles_is_no_work(
+        vec![(0..4, MenuStyle::Key)],
+        vec![(0..1, MenuStyle::Key), (1..4, MenuStyle::Key)],
+        vec![]
+    )]
+    // Touching spans: the run starting exactly at 2 belongs to the second span,
+    // because a span covers `start..end` half-open.
+    #[case::touching_spans_swap_styles(
+        vec![(0..2, MenuStyle::Key), (2..4, MenuStyle::Dim)],
+        vec![(0..2, MenuStyle::Dim), (2..4, MenuStyle::Key)],
+        vec![(0..2, Some(MenuStyle::Dim)), (2..4, Some(MenuStyle::Key))]
+    )]
+    // Spans that moved: the old offsets lose their style and the new ones gain it,
+    // interleaved in one ascending plan.
+    #[case::moved_spans_unstyle_the_old_offsets(
+        vec![(0..2, MenuStyle::Key), (6..8, MenuStyle::Dim)],
+        vec![(2..4, MenuStyle::Key), (4..6, MenuStyle::Dim)],
+        vec![
+            (0..2, None),
+            (2..4, Some(MenuStyle::Key)),
+            (4..6, Some(MenuStyle::Dim)),
+            (6..8, None),
+        ]
+    )]
+    fn repaints_only_the_runs_whose_style_changed(
+        #[case] previous: Vec<(Range<usize>, MenuStyle)>,
+        #[case] spans: Vec<(Range<usize>, MenuStyle)>,
+        #[case] expected: Vec<(Range<usize>, Option<MenuStyle>)>,
+    ) {
+        assert_eq!(restyle_plan(&previous, &spans), expected);
+    }
+}
