@@ -8,18 +8,19 @@ use crate::{
     os_util::{AppWindowInfo, element_at_point, get_focused_window},
     user_interface::{HintBox, MenuString, MenuStyle, find_overlaps, resolve_collisions},
 };
-use accessibility::AXUIElementAttributes;
-use accessibility_sys::{AXUIElementCreateSystemWide, AXUIElementRef};
-use core_foundation::base::CFRelease;
+use accessibility::{AXUIElement, AXUIElementAttributes};
+use accessibility_sys::AXUIElementRef;
+use core_foundation::base::TCFType;
 use log::Level;
 use objc2::rc::autoreleasepool;
 use objc2_quartz_core::CATransaction;
 use std::{path::PathBuf, sync::mpsc::Receiver, time::Duration};
 use tokio::sync::mpsc::Sender;
 
-const SHORT_TIMEOUT: u64 = 1;
-const LONG_TIMEOUT: u64 = 2;
-const DEBUG_TIMEOUT: u64 = 5;
+/// How long a notification stays on screen, in milliseconds.
+const SHORT_TIMEOUT_MS: u64 = 1_000;
+const DEBUG_TIMEOUT_MS: u64 = 5_000;
+const LONG_TIMEOUT_MS: u64 = 2_000;
 
 impl AppEngine {
     pub(super) fn set_mode(&self, mode: Mode) {
@@ -82,17 +83,17 @@ impl AppEngine {
     }
 
     pub(super) fn notify_styled(&mut self, msg: MenuString, log_level: Level) {
-        let timeout_secs = match log_level {
-            Level::Trace | Level::Info => SHORT_TIMEOUT,
-            Level::Debug => DEBUG_TIMEOUT,
-            _ => LONG_TIMEOUT,
-        } * 1000;
+        let timeout_millis = match log_level {
+            Level::Trace | Level::Info => SHORT_TIMEOUT_MS,
+            Level::Debug => DEBUG_TIMEOUT_MS,
+            _ => LONG_TIMEOUT_MS,
+        };
         log::log!(log_level, "{}", msg.text);
         let id = self.drawer.notify(&self.config.theme, &msg);
         let sender = self.signal_sender.clone();
-        tokio::spawn(
-            async move { delay(sender, AppSignal::ClearNotification(id), timeout_secs).await },
-        );
+        tokio::spawn(async move {
+            delay(sender, AppSignal::ClearNotification(id), timeout_millis).await
+        });
     }
 
     /// Refresh the focused window information.
@@ -271,41 +272,43 @@ impl AppEngine {
             || cached_ele_i.is_ancestor_of(&mut ele_i)
     }
 
+    /// Take hint `idx` as really being on top, or fade it out when something
+    /// else covers it. Returns `true` when it was faded, which settles the pair.
+    ///
+    /// The check by the element at the centre is not reliable for electron apps,
+    /// so those are taken on trust.
+    fn confirm_or_fade(
+        &mut self,
+        idx: usize,
+        base: AXUIElementRef,
+        confirmed: &mut [bool],
+    ) -> bool {
+        if self.last_app_window_info.is_electron || confirmed[idx] || self.hint_boxes[idx].disabled
+        {
+            return false;
+        }
+
+        if self.hint_visibility_check(idx, base) {
+            confirmed[idx] = true;
+            return false;
+        }
+
+        self.hint_boxes[idx].fade_out(true);
+        self.hint_boxes[idx].disabled = true;
+        true
+    }
+
     /// Fade out hint boxes whose centre is covered by a different element.
     fn resolve_overlapping(&mut self) {
-        let system_wide = unsafe { AXUIElementCreateSystemWide() };
-        if system_wide.is_null() {
-            return;
-        }
+        let system_wide = AXUIElement::system_wide();
+        let base = system_wide.as_concrete_TypeRef();
         let mut confirmed_visible = vec![false; self.hint_boxes.len()];
 
         for (i, mut j, i_f) in find_overlaps(&self.hint_boxes, 3.0) {
-            // NOTE: visibility check by element at center point is not reliable
-            // for electron apps
-            if !self.last_app_window_info.is_electron
-                && !confirmed_visible[i]
-                && !self.hint_boxes[i].disabled
+            if self.confirm_or_fade(i, base, &mut confirmed_visible)
+                || self.confirm_or_fade(j, base, &mut confirmed_visible)
             {
-                if self.hint_visibility_check(i, system_wide) {
-                    confirmed_visible[i] = true;
-                } else {
-                    self.hint_boxes[i].fade_out(true);
-                    self.hint_boxes[i].disabled = true;
-                    continue;
-                }
-            }
-
-            if !self.last_app_window_info.is_electron
-                && !confirmed_visible[j]
-                && !self.hint_boxes[j].disabled
-            {
-                if self.hint_visibility_check(j, system_wide) {
-                    confirmed_visible[j] = true;
-                } else {
-                    self.hint_boxes[j].fade_out(true);
-                    self.hint_boxes[j].disabled = true;
-                    continue;
-                }
+                continue;
             }
 
             if self.hint_boxes[i].disabled || self.hint_boxes[j].disabled {
@@ -319,7 +322,7 @@ impl AppEngine {
 
             // NOTE: Both are visible on their own, check the center of the overlap
             let (x, y) = i_f.center();
-            let target_ele = unsafe { element_at_point(system_wide, x, y) };
+            let target_ele = unsafe { element_at_point(base, x, y) };
             let Some(mut target_ele) = target_ele else {
                 continue;
             };
@@ -344,7 +347,6 @@ impl AppEngine {
                 self.hint_boxes[j].fade_out(false);
             }
         }
-        unsafe { CFRelease(system_wide as *mut _) };
     }
 
     fn handle_element_found(
@@ -444,34 +446,35 @@ impl AppEngine {
     /// A watched file changed: the temp file means the editor wrote back,
     /// anything else is the config.
     pub(super) fn handle_file_update(&mut self, pb: PathBuf) {
-        if pb == self.temp_file
-            && let Ok(new_text) = std::fs::read_to_string(&self.temp_file)
-        {
-            self.update_editing_text(new_text.trim_end_matches('\n').into());
-        } else if pb != self.temp_file {
-            match GlyphlowConfig::load_config(&pb) {
-                Ok(mut new_config) => {
-                    // Clear first so `safe_reload` and the assignment see the
-                    // global config; `apply_app_override` puts them back.
-                    self.clear_app_override();
-                    let need_warning = !self.config.safe_reload(&mut new_config);
-                    self.config = new_config;
-                    self.apply_app_override();
-
-                    if need_warning {
-                        self.notify_then_deactivate(
-                            "Restart the app to apply full changes",
-                            Level::Warn,
-                        );
-                    } else {
-                        self.notify_then_deactivate("Configuration reloaded", Level::Info);
-                    }
-                }
-                Err(msg) => {
-                    self.notify_then_deactivate(&msg, Level::Error);
-                }
-            };
+        if pb == self.temp_file {
+            if let Ok(new_text) = std::fs::read_to_string(&self.temp_file) {
+                self.update_editing_text(new_text.trim_end_matches('\n').into());
+            }
+            return;
         }
+
+        match GlyphlowConfig::load_config(&pb) {
+            Ok(mut new_config) => {
+                // Clear first so `safe_reload` and the assignment see the
+                // global config; `apply_app_override` puts them back.
+                self.clear_app_override();
+                let need_warning = !self.config.safe_reload(&mut new_config);
+                self.config = new_config;
+                self.apply_app_override();
+
+                if need_warning {
+                    self.notify_then_deactivate(
+                        "Restart the app to apply full changes",
+                        Level::Warn,
+                    );
+                } else {
+                    self.notify_then_deactivate("Configuration reloaded", Level::Info);
+                }
+            }
+            Err(msg) => {
+                self.notify_then_deactivate(&msg, Level::Error);
+            }
+        };
     }
 }
 
