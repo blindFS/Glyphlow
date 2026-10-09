@@ -22,7 +22,11 @@ use objc2::rc::autoreleasepool;
 use objc2_core_foundation::{CGPoint, CGSize};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::mpsc::Sender};
+use std::{
+    collections::HashMap,
+    sync::mpsc::Sender,
+    time::{Duration, Instant},
+};
 
 const BASIC_ATTRIBUTES: [&str; 4] = [
     kAXRoleAttribute,
@@ -813,6 +817,34 @@ pub enum Target {
 }
 
 const MAX_DEPTH: u8 = 200;
+const TRAVERSAL_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How far the walk has descended, and when it has to stop.
+#[derive(Clone, Copy)]
+struct WalkState {
+    depth: u8,
+    deadline: Instant,
+}
+
+impl WalkState {
+    fn new() -> Self {
+        Self {
+            depth: 0,
+            deadline: Instant::now() + TRAVERSAL_TIMEOUT,
+        }
+    }
+
+    fn descend(self) -> Self {
+        Self {
+            depth: self.depth + 1,
+            deadline: self.deadline,
+        }
+    }
+
+    fn should_stop(&self) -> bool {
+        self.depth > MAX_DEPTH || Instant::now() >= self.deadline
+    }
+}
 
 /// Walks the tree under `ts_elem` depth-first, reporting every element that
 /// matches `target` on `result_tx`.
@@ -828,9 +860,9 @@ fn traverse_elements(
     target: &Target,
     vis_level: VisibilityCheckingLevel,
     result_tx: &Sender<ElementSignal>,
-    depth: u8,
+    state: WalkState,
 ) {
-    if depth > MAX_DEPTH {
+    if state.should_stop() {
         return;
     }
     let element = &ts_elem.0;
@@ -906,7 +938,7 @@ fn traverse_elements(
                         target,
                         vis_level,
                         result_tx,
-                        depth + 1,
+                        state.descend(),
                     );
                 } else {
                     let roi = role_to_interest(&child_fp.role);
@@ -1113,7 +1145,7 @@ fn traverse_elements(
                 target,
                 vis_level,
                 result_tx,
-                depth + 1,
+                state.descend(),
             );
         }
     }
@@ -1137,7 +1169,7 @@ pub fn traverse(
             &target,
             vis_level,
             result_tx,
-            0,
+            WalkState::new(),
         );
         let _ = result_tx.send(ElementSignal::TraversalFinished(target));
     })
