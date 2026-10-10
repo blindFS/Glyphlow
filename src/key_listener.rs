@@ -10,7 +10,7 @@ use tokio::sync::mpsc::Sender;
 
 use crate::{
     ax_element::Target,
-    config::{AlphabeticKey, GlyphlowConfig, KeyBinding},
+    config::{AlphabeticKey, GlyphlowConfig, KeyBinding, MenuKind, WorkFlow, WorkFlowAction},
     util::SEARCH_TERM_SEPARATOR,
 };
 
@@ -107,17 +107,17 @@ pub enum AppSignal {
     ClearNotification(usize),
     /// A modifier key was tapped while filtering hints.
     ToggleModifier(ModifierKey),
-    // Menu specific
-    TextAction(TextAction),
-    ScrollAction(ScrollAction),
     // Generic Actions
     RunWorkFlow(usize),
     /// Run a workflow addressed by (a fragment of) its display name,
     /// resolved against the server side config. Used by the CLI.
     RunWorkFlowByName(String),
-    ReadClipboard,
-    ScreenShot,
-    FrameOCR,
+    /// Run a chain of actions, the way a menu row does.
+    ///
+    /// Unlike [`RunWorkFlow`](Self::RunWorkFlow) the chain is not checked
+    /// against the selection, and running out of actions leaves the menu up
+    /// instead of ending the interaction.
+    RunActions(Box<[WorkFlowAction]>),
     StartSearch,
     FinishSearch(FilterMode),
     /// A debounced search re-check. The id is the counter it was scheduled with,
@@ -125,81 +125,6 @@ pub enum AppSignal {
     SearchDebounce(usize, FilterMode),
     BackToTextActionMenu,
 }
-
-#[derive(Debug, PartialEq)]
-pub struct MenuItem {
-    pub description: &'static str,
-    pub key: &'static str,
-    pub action: AppSignal,
-}
-
-impl MenuItem {
-    pub const fn new(description: &'static str, key: &'static str, action: AppSignal) -> MenuItem {
-        MenuItem {
-            description,
-            key,
-            action,
-        }
-    }
-}
-
-pub const DASH_BOARD_MENU_ITEMS: [MenuItem; 9] = [
-    MenuItem::new("󰦨 Text", "T", AppSignal::Activate(Target::Text)),
-    MenuItem::new("󰳽 Press", "P", AppSignal::Activate(Target::Clickable)),
-    MenuItem::new("󱕒 ScrollBar", "S", AppSignal::Activate(Target::Scrollable)),
-    MenuItem::new("󰊄 Input", "I", AppSignal::Activate(Target::Editable)),
-    MenuItem::new("󰋩 Image", "M", AppSignal::Activate(Target::Image)),
-    MenuItem::new(
-        "󰙅 Element Explorer",
-        "E",
-        AppSignal::Activate(Target::ChildElement),
-    ),
-    MenuItem::new("󰆟 ScreenShot", "R", AppSignal::ScreenShot),
-    MenuItem::new("󱄺 Image OCR", "O", AppSignal::FrameOCR),
-    MenuItem::new("󰅇 Read Clipboard", "C", AppSignal::ReadClipboard),
-];
-
-pub const SCROLLBAR_MENU_ITEMS: [MenuItem; 6] = [
-    MenuItem::new(
-        "> Down/Right",
-        "J",
-        AppSignal::ScrollAction(ScrollAction::DownRight),
-    ),
-    MenuItem::new(
-        "< Up/Left",
-        "K",
-        AppSignal::ScrollAction(ScrollAction::UpLeft),
-    ),
-    MenuItem::new(
-        "+ Distance Increase",
-        "I",
-        AppSignal::ScrollAction(ScrollAction::IncreaseDistance),
-    ),
-    MenuItem::new(
-        "- Distance Decrease",
-        "D",
-        AppSignal::ScrollAction(ScrollAction::DecreaseDistance),
-    ),
-    MenuItem::new("󰢦 Top", "GG", AppSignal::ScrollAction(ScrollAction::Top)),
-    MenuItem::new(
-        "󰢢 Bottom",
-        "󰘶G",
-        AppSignal::ScrollAction(ScrollAction::Bottom),
-    ),
-];
-
-pub const TEXT_ACTION_MENU_ITEMS: [MenuItem; 3] = [
-    MenuItem::new("⮺ Copy", "C", AppSignal::TextAction(TextAction::Copy)),
-    MenuItem::new(
-        "◫ Dictionary",
-        "D",
-        AppSignal::TextAction(TextAction::Dictionary),
-    ),
-    MenuItem::new("󰃻 Split", "S", AppSignal::TextAction(TextAction::Split)),
-];
-
-pub const IMAGE_ACTION_MENU_ITEMS: [MenuItem; 1] =
-    [MenuItem::new("󱄺 Image OCR", "O", AppSignal::FrameOCR)];
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Mode {
@@ -220,106 +145,85 @@ pub enum Mode {
     WaitAndDeactivate,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
-enum MenuType {
-    Dashboard,
-    TextAction,
-    ImageAction,
-    Scroll,
-}
-
 #[derive(Debug)]
 pub struct KeyListener {
-    menu_actions: HashMap<MenuType, HashMap<String, AppSignal>>,
-    menu_action_max_key_len: HashMap<MenuType, usize>,
+    menu_actions: HashMap<MenuKind, HashMap<String, AppSignal>>,
+    menu_action_max_key_len: HashMap<MenuKind, usize>,
     sender: Sender<AppSignal>,
     global_key_binding: KeyBinding,
 }
 
 impl KeyListener {
-    fn iter_from<const N: usize>(
-        items: [MenuItem; N],
-    ) -> impl Iterator<Item = (String, AppSignal)> {
-        items.into_iter().map(|it| (it.key.to_string(), it.action))
+    /// The signal that runs a menu row's chain.
+    fn run_chain(actions: impl Into<Box<[WorkFlowAction]>>) -> AppSignal {
+        AppSignal::RunActions(actions.into())
     }
 
     fn build_menu_actions(
-        menu_type: MenuType,
+        menu: MenuKind,
         config: &GlyphlowConfig,
     ) -> (HashMap<String, AppSignal>, usize) {
-        let (base_items, need_workflow, need_text_action, editor_signal) = match menu_type {
-            MenuType::Dashboard => (
-                Self::iter_from(DASH_BOARD_MENU_ITEMS).collect::<HashMap<_, _>>(),
-                true,
-                false,
-                Some(AppSignal::Activate(Target::Edit)),
-            ),
-            MenuType::TextAction => (
-                Self::iter_from(TEXT_ACTION_MENU_ITEMS).collect::<HashMap<_, _>>(),
-                true,
-                true,
-                Some(AppSignal::TextAction(TextAction::Editor)),
-            ),
-            MenuType::ImageAction => (
-                Self::iter_from(IMAGE_ACTION_MENU_ITEMS).collect::<HashMap<_, _>>(),
-                true,
-                false,
-                None,
-            ),
-            MenuType::Scroll => (
-                Self::iter_from(SCROLLBAR_MENU_ITEMS).collect::<HashMap<_, _>>(),
-                false,
-                false,
-                None,
-            ),
-        };
-
         let mut items = HashMap::new();
-        // Order matters!
-        if need_workflow {
-            for (idx, wf) in config.workflows.iter().enumerate() {
-                items.insert(wf.key.clone(), AppSignal::RunWorkFlow(idx));
-            }
-        }
 
-        if need_text_action {
-            for (idx, act) in config.text_actions.iter().enumerate() {
-                items.insert(
-                    act.key.clone(),
-                    AppSignal::TextAction(TextAction::UserDefined(idx)),
-                );
-            }
-        }
+        // Order matters: the first entry to claim a key keeps it, and this is the
+        // order the menu draws its rows in — rows bound to this menu, the editor,
+        // the text actions, then the workflows offered wherever their role allows.
+        Self::add_workflows(&mut items, menu.rows(config));
 
-        if let Some(sig) = editor_signal
+        if let Some(chain) = menu.editor_row()
             && let Some(editor) = config.editor.as_ref()
         {
-            items.insert(editor.key.clone(), sig);
+            items
+                .entry(editor.key.clone())
+                .or_insert(Self::run_chain(chain));
         }
 
-        for (key, sig) in base_items {
-            items.insert(key, sig);
+        if menu.offers_text_actions() {
+            for (idx, act) in config.text_actions.iter().enumerate() {
+                let action = WorkFlowAction::TextAction(TextAction::UserDefined(idx));
+                items
+                    .entry(act.key.clone())
+                    .or_insert(Self::run_chain([action]));
+            }
         }
+
+        Self::add_workflows(&mut items, menu.unbound_workflows(config));
 
         let max_key_len = items.keys().map(|k| k.chars().count()).max().unwrap_or(0);
         (items, max_key_len)
+    }
+
+    /// Register `workflows` as menu entries: a row bound to a menu runs quietly,
+    /// an unbound workflow is checked against the selection when its key is
+    /// pressed and announces when it is done.
+    fn add_workflows<'a>(
+        items: &mut HashMap<String, AppSignal>,
+        workflows: impl Iterator<Item = (usize, &'a WorkFlow)>,
+    ) {
+        for (idx, wf) in workflows {
+            let signal = match wf.menu {
+                Some(_) => Self::run_chain(wf.actions.as_slice()),
+                None => AppSignal::RunWorkFlow(idx),
+            };
+            items.entry(wf.key.clone()).or_insert(signal);
+        }
     }
 
     pub fn new(sender: Sender<AppSignal>, config: &GlyphlowConfig) -> KeyListener {
         let mut menu_actions = HashMap::new();
         let mut menu_action_max_key_len = HashMap::new();
 
-        for menu_type in [
-            MenuType::Dashboard,
-            MenuType::TextAction,
-            MenuType::ImageAction,
-            MenuType::Scroll,
+        for menu in [
+            MenuKind::Dashboard,
+            MenuKind::TextAction,
+            MenuKind::ImageAction,
+            MenuKind::Scroll,
         ]
         .into_iter()
         {
-            let (items, max_key_len) = Self::build_menu_actions(menu_type, config);
-            menu_actions.insert(menu_type, items);
-            menu_action_max_key_len.insert(menu_type, max_key_len);
+            let (items, max_key_len) = Self::build_menu_actions(menu, config);
+            menu_actions.insert(menu, items);
+            menu_action_max_key_len.insert(menu, max_key_len);
         }
 
         KeyListener {
@@ -339,7 +243,7 @@ impl KeyListener {
     fn handle_menu_key(
         &self,
         key: &Key,
-        menu_type: MenuType,
+        menu_type: MenuKind,
         mut state: MutexGuard<'_, Mode>,
         key_state: &mut KeyState,
     ) -> bool {
@@ -368,7 +272,7 @@ impl KeyListener {
         } else {
             if *state != Mode::DictionaryScrolling {
                 let signal = match menu_type {
-                    MenuType::Dashboard => AppSignal::DashboardRefresh(key_state.prefix.clone()),
+                    MenuKind::Dashboard => AppSignal::DashboardRefresh(key_state.prefix.clone()),
                     _ => AppSignal::MenuRefresh(key_state.prefix.clone()),
                 };
                 self.send(signal);
@@ -430,18 +334,18 @@ impl KeyListener {
                     false
                 }
             }
-            Mode::DashBoard => self.handle_menu_key(&key, MenuType::Dashboard, state, key_state),
+            Mode::DashBoard => self.handle_menu_key(&key, MenuKind::Dashboard, state, key_state),
             Mode::WordPicking => self.handle_filter_key(&key, state, FilterMode::WordPicking),
             Mode::Filtering => self.handle_filter_key(&key, state, FilterMode::Generic),
             Mode::OCRResultFiltering => self.handle_filter_key(&key, state, FilterMode::OCR),
             Mode::TextActionMenu => {
-                self.handle_menu_key(&key, MenuType::TextAction, state, key_state)
+                self.handle_menu_key(&key, MenuKind::TextAction, state, key_state)
             }
             Mode::ImageActionMenu => {
-                self.handle_menu_key(&key, MenuType::ImageAction, state, key_state)
+                self.handle_menu_key(&key, MenuKind::ImageAction, state, key_state)
             }
             Mode::Scrolling | Mode::DictionaryScrolling => {
-                self.handle_menu_key(&key, MenuType::Scroll, state, key_state)
+                self.handle_menu_key(&key, MenuKind::Scroll, state, key_state)
             }
             Mode::Searching(mode) => {
                 match key {

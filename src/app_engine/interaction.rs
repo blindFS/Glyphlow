@@ -2,9 +2,10 @@ use super::AppEngine;
 use crate::{
     AppSignal, Mode, ScrollAction, TextAction,
     action::{
-        WordPicker, get_dictionary_attributed_string, text_from_clipboard, text_to_clipboard,
+        WordPicker, get_dictionary_attributed_string, screen_shot, text_from_clipboard,
+        text_to_clipboard,
     },
-    ax_element::{ElementOfInterest, GetAttribute, SetAttribute},
+    ax_element::{ElementOfInterest, GetAttribute, SetAttribute, Target},
     config::RoleOfInterest,
 };
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
@@ -189,7 +190,11 @@ impl AppEngine {
             ..
         }) = self.selected.as_ref()
         else {
-            panic!("Internal Error: No selected text in Mode::TextActionMenu.");
+            self.notify_then_deactivate(
+                &format!("Running a text action with no text selected. {ta:?}"),
+                Level::Error,
+            );
+            return;
         };
 
         // TODO:
@@ -352,6 +357,60 @@ impl AppEngine {
     pub(super) fn update_selected_text_and_show_menu(&mut self, new_text: String) {
         self.update_selected_text(new_text);
         self.draw_element_menu("", RoleOfInterest::PseudoText, true);
+    }
+
+    /// Focus a target's hints and, for `Scrollable`/`Editable`/`Edit`, take the
+    /// only candidate straight away.
+    pub(super) async fn activate_target(&mut self, target: Target) {
+        let auto_advance = matches!(target, Target::Scrollable | Target::Editable | Target::Edit);
+        self.activate(target);
+        if auto_advance {
+            self.press_sole_hint().await;
+        }
+    }
+
+    /// Scroll the dictionary's own menu, or the selection.
+    ///
+    /// The mode picks them apart: while a dictionary is up its text is drawn as
+    /// a menu box, and the scroll keys move that box rather than the page.
+    pub(super) fn scroll_action(&mut self, sa: ScrollAction) {
+        if self.check_mode(Mode::DictionaryScrolling) {
+            match sa {
+                ScrollAction::IncreaseDistance => self.config.scroll_distance *= 1.5,
+                ScrollAction::DecreaseDistance => self.config.scroll_distance /= 1.5,
+                _ => self.drawer.scroll_menu(sa, self.config.scroll_distance),
+            }
+        } else {
+            self.perform_scroll_action(sa);
+        }
+    }
+
+    /// Copy a screenshot of the selection, or of the focused window, to the
+    /// clipboard.
+    pub(super) async fn take_screenshot(&mut self) {
+        self.clear_cache();
+        self.clear_drawing();
+        let frame = self
+            .selected
+            .as_ref()
+            .map(|eoi| eoi.frame)
+            .unwrap_or(self.last_app_window_info.frame);
+        if screen_shot(&frame).await {
+            self.notify_then_deactivate("Screenshot copied to clipboard.", Level::Info);
+        } else {
+            self.notify_then_deactivate("Failed to take screenshot.", Level::Error);
+        };
+    }
+
+    /// Run OCR on the selection, or on an image the user picks.
+    pub(super) async fn run_frame_ocr(&mut self) {
+        let selected_frame = self.selected.as_ref().map(|eoi| eoi.frame);
+        if let Some(frame) = selected_frame {
+            self.target = Target::ImageOCR;
+            self.perform_ocr_on_frame(frame).await;
+        } else {
+            self.activate(Target::ImageOCR);
+        }
     }
 
     /// Put the clipboard's text up for action, or warn when it is empty.

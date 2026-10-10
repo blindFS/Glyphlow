@@ -1,13 +1,12 @@
 use crate::{
-    AppSignal, KeyState, Mode, ModifierKey, ScrollAction,
-    action::{OCRResult, WordPicker, screen_shot},
+    AppSignal, KeyState, Mode, ModifierKey,
+    action::{OCRResult, WordPicker},
     ax_element::{ElementCache, ElementOfInterest, Target},
     config::{AppOverride, GlyphlowConfig, RoleOfInterest, WorkFlowAction},
     os_util::AppWindowInfo,
     user_interface::{HintBox, UIDrawer, get_screen_frames},
     util::Frame,
 };
-use log::Level;
 use monio::Key;
 use objc2::MainThreadMarker;
 use std::{
@@ -213,14 +212,7 @@ impl AppEngine {
 
     pub async fn handle_signal(&mut self, signal: AppSignal) {
         match signal {
-            AppSignal::Activate(target) => {
-                let auto_advance =
-                    matches!(target, Target::Scrollable | Target::Editable | Target::Edit);
-                self.activate(target);
-                if auto_advance {
-                    self.press_sole_hint().await;
-                }
-            }
+            AppSignal::Activate(target) => self.activate_target(target).await,
             AppSignal::DeActivate => {
                 self.deactivate();
             }
@@ -233,37 +225,20 @@ impl AppEngine {
             }
             AppSignal::RunWorkFlow(idx) => {
                 self.drawer.clear_menus();
-                self.execute_workflow(idx);
+                self.execute_workflow(idx).await;
             }
             AppSignal::RunWorkFlowByName(name) => {
                 self.drawer.clear_menus();
-                self.run_workflow_by_name(&name);
+                self.run_workflow_by_name(&name).await;
             }
-            AppSignal::ScrollAction(sa) => {
-                if self.check_mode(Mode::DictionaryScrolling) {
-                    match sa {
-                        ScrollAction::IncreaseDistance => {
-                            self.config.scroll_distance *= 1.5;
-                        }
-                        ScrollAction::DecreaseDistance => {
-                            self.config.scroll_distance /= 1.5;
-                        }
-                        _ => {
-                            self.drawer.scroll_menu(sa, self.config.scroll_distance);
-                        }
-                    }
-                } else {
-                    self.perform_scroll_action(sa);
-                }
-            }
-            AppSignal::TextAction(ta) => self.perform_text_action(ta),
+            AppSignal::RunActions(actions) => self.run_menu_actions(actions).await,
             AppSignal::BackToTextActionMenu => {
                 self.set_mode(Mode::TextActionMenu);
                 self.menu_refresh("", false);
             }
             AppSignal::ToggleModifier(key) => self.toggle_modifier(key),
             AppSignal::GridKey(key) => self.grid_step(key),
-            AppSignal::GridAccept => self.accept_grid(),
+            AppSignal::GridAccept => self.accept_grid().await,
             AppSignal::GridBack => self.grid_back(),
             AppSignal::HintFilter(key_char, mode) => {
                 self.filter_by_hint(key_char, mode).await;
@@ -307,30 +282,7 @@ impl AppEngine {
                     self.set_mode(Mode::DashBoard);
                 }
             }
-            AppSignal::ScreenShot => {
-                self.clear_cache();
-                self.clear_drawing();
-                let frame = self
-                    .selected
-                    .as_ref()
-                    .map(|eoi| eoi.frame)
-                    .unwrap_or(self.last_app_window_info.frame);
-                if screen_shot(&frame).await {
-                    self.notify_then_deactivate("Screenshot copied to clipboard.", Level::Info);
-                } else {
-                    self.notify_then_deactivate("Failed to take screenshot.", Level::Error);
-                };
-            }
-            AppSignal::FrameOCR => {
-                if let Some(ElementOfInterest { frame, .. }) = self.selected.as_ref() {
-                    self.target = Target::ImageOCR;
-                    self.perform_ocr_on_frame(*frame).await;
-                } else {
-                    self.activate(Target::ImageOCR);
-                }
-            }
             AppSignal::FileUpdate(pb) => self.handle_file_update(pb),
-            AppSignal::ReadClipboard => self.read_clipboard(),
             AppSignal::ClearNotification(id) => {
                 if self.check_mode(Mode::WaitAndDeactivate) {
                     self.deactivate();

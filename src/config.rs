@@ -1,4 +1,4 @@
-use crate::ax_element::Target;
+use crate::{ScrollAction, TextAction, ax_element::Target};
 use monio::Key;
 use objc2::rc::Retained;
 use objc2_app_kit::NSFont;
@@ -90,16 +90,97 @@ pub enum WorkFlowAction {
     Activate(Target),
     /// Put the clipboard's text up for action.
     ReadClipboard,
+    /// Run a text action against the selection's text.
+    TextAction(TextAction),
+    /// Scroll the selection, or adjust the scroll step.
+    ScrollAction(ScrollAction),
+    /// Copy a screenshot of the selection, or of the focused window.
+    ScreenShot,
+    /// Run OCR on the selection, or pick an image to run it on.
+    FrameOCR,
     /// Run `actions` `n` times; a step that suspends the queue resumes the
     /// round on the next pick.
     Repeat(usize, Box<[WorkFlowAction]>),
 }
 
+/// Which menu a row is bound to.
+///
+/// A row bound to a menu is a *menu row*: it is offered only there, and running
+/// it leaves the menu up, because it is one keystroke in an interaction that is
+/// still going. A workflow left unbound ([`WorkFlow::menu`] is `None`) is offered
+/// on every menu that takes workflows, wherever its `starting_role` allows, and
+/// announces when it is done.
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Clone, Copy)]
+pub enum MenuKind {
+    Dashboard,
+    TextAction,
+    ImageAction,
+    Scroll,
+}
+
+impl MenuKind {
+    /// Whether this menu shows a row bound to `bound`. `None` asks about an
+    /// unbound workflow, which every menu but the scroll one offers: its rows are
+    /// all scrolling actions, and a generic `Press` there reads as noise.
+    fn shows(self, bound: Option<MenuKind>) -> bool {
+        match bound {
+            Some(menu) => menu == self,
+            None => !matches!(self, Self::Scroll),
+        }
+    }
+
+    /// The rows bound to this menu, in config order.
+    pub fn rows(self, config: &GlyphlowConfig) -> impl Iterator<Item = (usize, &WorkFlow)> {
+        self.workflows(config, true)
+    }
+
+    /// The workflows this menu offers that are not bound to one, in config order.
+    pub fn unbound_workflows(
+        self,
+        config: &GlyphlowConfig,
+    ) -> impl Iterator<Item = (usize, &WorkFlow)> {
+        self.workflows(config, false)
+    }
+
+    /// The workflows this menu shows whose menu binding is `bound`.
+    fn workflows(
+        self,
+        config: &GlyphlowConfig,
+        bound: bool,
+    ) -> impl Iterator<Item = (usize, &WorkFlow)> {
+        config
+            .workflows
+            .iter()
+            .enumerate()
+            .filter(move |(_, wf)| wf.menu.is_some() == bound && self.shows(wf.menu))
+    }
+
+    /// Whether this menu also offers the config's text actions.
+    pub fn offers_text_actions(self) -> bool {
+        matches!(self, Self::TextAction)
+    }
+
+    /// The row this menu offers for the configured editor command, if any.
+    pub fn editor_row(self) -> Option<&'static [WorkFlowAction]> {
+        match self {
+            Self::Dashboard => Some(DASHBOARD_EDITOR),
+            Self::TextAction => Some(TEXT_ACTION_EDITOR),
+            _ => None,
+        }
+    }
+}
+
+/// The editor row the dashboard offers, when an editor is configured.
+const DASHBOARD_EDITOR: &[WorkFlowAction] = &[WorkFlowAction::Activate(Target::Edit)];
+
+/// The editor row the text action menu offers, when an editor is configured.
+const TEXT_ACTION_EDITOR: &[WorkFlowAction] = &[WorkFlowAction::TextAction(TextAction::Editor)];
+
 /// A pre-defined workflow: a key, the apps it applies to and the actions it runs.
 ///
 /// The [`Tabled`] derive is what lets `glyphlow-cli workflow list` print these
-/// directly. Three fields need a `display` function because their stored shape
-/// is not worth showing, and `order` puts `valid_app_ids` after the role even
+/// directly. Four fields need a `display` function because their stored shape is
+/// not worth showing, and `order` puts `valid_app_ids` after the role even
 /// though it is declared next to `key`.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Tabled)]
 pub struct WorkFlow {
@@ -110,10 +191,22 @@ pub struct WorkFlow {
     #[tabled(rename = "ROLE", order = 2, display = "role_label")]
     #[serde(default = "default_starting_role")]
     pub starting_role: RoleOfInterest,
-    #[tabled(rename = "APPS", order = 3, display = "apps_label")]
+    #[tabled(rename = "MENU", order = 3, display = "menu_label")]
+    #[serde(default)]
+    pub menu: Option<MenuKind>,
+    #[tabled(rename = "APPS", order = 4, display = "apps_label")]
     pub valid_app_ids: Option<Vec<String>>,
-    #[tabled(rename = "STEPS", order = 4, display = "step_count")]
+    #[tabled(rename = "STEPS", order = 5, display = "step_count")]
     pub actions: Vec<WorkFlowAction>,
+}
+
+/// Table cell for [`WorkFlow::menu`]: the menu a row is bound to, or `any` for a
+/// workflow offered wherever its role allows.
+fn menu_label(menu: &Option<MenuKind>) -> String {
+    match menu {
+        Some(menu) => format!("{menu:?}"),
+        None => "any".to_owned(),
+    }
 }
 
 /// Table cell for [`WorkFlow::starting_role`].
@@ -905,12 +998,145 @@ fn default_global_keybinding() -> KeyBinding {
 fn default_text_actions() -> Vec<CommandAction> {
     vec![]
 }
+/// A built-in menu row: always offered on its menu, whatever is selected.
+fn menu_row(key: &str, display: &str, menu: MenuKind, actions: Vec<WorkFlowAction>) -> WorkFlow {
+    WorkFlow {
+        key: key.into(),
+        display: display.into(),
+        starting_role: RoleOfInterest::Any,
+        menu: Some(menu),
+        valid_app_ids: None,
+        actions,
+    }
+}
+
 fn default_workflows() -> Vec<WorkFlow> {
+    use MenuKind::{Dashboard, ImageAction, Scroll, TextAction as TextActionMenu};
+
     vec![
+        // Menu rows: each is bound to one menu and runs quietly, leaving the
+        // menu up. See [`MenuKind`].
+        menu_row(
+            "T",
+            "󰦨 Text",
+            Dashboard,
+            vec![WorkFlowAction::Activate(Target::Text)],
+        ),
+        menu_row(
+            "P",
+            "󰳽 Press",
+            Dashboard,
+            vec![WorkFlowAction::Activate(Target::Clickable)],
+        ),
+        menu_row(
+            "S",
+            "󱕒 ScrollBar",
+            Dashboard,
+            vec![WorkFlowAction::Activate(Target::Scrollable)],
+        ),
+        menu_row(
+            "I",
+            "󰊄 Input",
+            Dashboard,
+            vec![WorkFlowAction::Activate(Target::Editable)],
+        ),
+        menu_row(
+            "M",
+            "󰋩 Image",
+            Dashboard,
+            vec![WorkFlowAction::Activate(Target::Image)],
+        ),
+        menu_row(
+            "E",
+            "󰙅 Element Explorer",
+            Dashboard,
+            vec![WorkFlowAction::Activate(Target::ChildElement)],
+        ),
+        menu_row(
+            "R",
+            "󰆟 ScreenShot",
+            Dashboard,
+            vec![WorkFlowAction::ScreenShot],
+        ),
+        menu_row(
+            "O",
+            "󱄺 Image OCR",
+            Dashboard,
+            vec![WorkFlowAction::FrameOCR],
+        ),
+        menu_row(
+            "C",
+            "󰅇 Read Clipboard",
+            Dashboard,
+            vec![WorkFlowAction::ReadClipboard],
+        ),
+        menu_row(
+            "J",
+            "> Down/Right",
+            Scroll,
+            vec![WorkFlowAction::ScrollAction(ScrollAction::DownRight)],
+        ),
+        menu_row(
+            "K",
+            "< Up/Left",
+            Scroll,
+            vec![WorkFlowAction::ScrollAction(ScrollAction::UpLeft)],
+        ),
+        menu_row(
+            "I",
+            "+ Distance Increase",
+            Scroll,
+            vec![WorkFlowAction::ScrollAction(ScrollAction::IncreaseDistance)],
+        ),
+        menu_row(
+            "D",
+            "- Distance Decrease",
+            Scroll,
+            vec![WorkFlowAction::ScrollAction(ScrollAction::DecreaseDistance)],
+        ),
+        menu_row(
+            "GG",
+            "󰢦 Top",
+            Scroll,
+            vec![WorkFlowAction::ScrollAction(ScrollAction::Top)],
+        ),
+        menu_row(
+            "󰘶G",
+            "󰢢 Bottom",
+            Scroll,
+            vec![WorkFlowAction::ScrollAction(ScrollAction::Bottom)],
+        ),
+        menu_row(
+            "C",
+            "⮺ Copy",
+            TextActionMenu,
+            vec![WorkFlowAction::TextAction(TextAction::Copy)],
+        ),
+        menu_row(
+            "D",
+            "◫ Dictionary",
+            TextActionMenu,
+            vec![WorkFlowAction::TextAction(TextAction::Dictionary)],
+        ),
+        menu_row(
+            "S",
+            "󰃻 Split",
+            TextActionMenu,
+            vec![WorkFlowAction::TextAction(TextAction::Split)],
+        ),
+        menu_row(
+            "O",
+            "󱄺 Image OCR",
+            ImageAction,
+            vec![WorkFlowAction::FrameOCR],
+        ),
+        // Unbound workflows: offered on every menu that takes them, wherever
+        // their `starting_role` allows.
         WorkFlow {
             key: "R".into(),
             display: " ProofRead".into(),
             starting_role: RoleOfInterest::TextField,
+            menu: None,
             valid_app_ids: None,
             actions: vec![
                 WorkFlowAction::Focus,
@@ -929,6 +1155,7 @@ fn default_workflows() -> Vec<WorkFlow> {
             key: "C".into(),
             display: "⮺ Copy".into(),
             starting_role: RoleOfInterest::Image,
+            menu: None,
             valid_app_ids: None,
             actions: vec![
                 WorkFlowAction::ShowMenu,
@@ -945,6 +1172,7 @@ fn default_workflows() -> Vec<WorkFlow> {
             key: "L".into(),
             display: " Copy Link".into(),
             starting_role: RoleOfInterest::Image,
+            menu: None,
             valid_app_ids: None,
             actions: vec![
                 WorkFlowAction::ShowMenu,
@@ -961,6 +1189,7 @@ fn default_workflows() -> Vec<WorkFlow> {
             key: "[".into(),
             display: "󰳽 Press [Left Click]".into(),
             starting_role: RoleOfInterest::Generic,
+            menu: None,
             valid_app_ids: None,
             actions: vec![WorkFlowAction::Press],
         },
@@ -968,6 +1197,7 @@ fn default_workflows() -> Vec<WorkFlow> {
             key: "]".into(),
             display: " Menu [Right Click]".into(),
             starting_role: RoleOfInterest::Generic,
+            menu: None,
             valid_app_ids: None,
             actions: vec![
                 WorkFlowAction::ShowMenu,
@@ -984,6 +1214,7 @@ fn default_workflows() -> Vec<WorkFlow> {
             key: "G".into(),
             display: "󰋁 Grid Click".into(),
             starting_role: RoleOfInterest::Window,
+            menu: None,
             valid_app_ids: None,
             actions: vec![WorkFlowAction::GridMove, WorkFlowAction::Click],
         },
@@ -1892,6 +2123,7 @@ mod tests {
             key: "X".into(),
             valid_app_ids: None,
             starting_role: RoleOfInterest::Generic,
+            menu: None,
             actions: vec![],
         }
     }
@@ -1948,17 +2180,21 @@ mod tests {
             .into_iter()
             .map(|h| h.into_owned())
             .collect();
-        assert_eq!(headers, ["NAME", "KEY", "ROLE", "APPS", "STEPS"]);
+        assert_eq!(headers, ["NAME", "KEY", "ROLE", "MENU", "APPS", "STEPS"]);
 
         let wf = WorkFlow {
             display: "ProofRead".into(),
             key: "p".into(),
             valid_app_ids: Some(vec!["Notes".into()]),
             starting_role: RoleOfInterest::TextField,
+            menu: Some(MenuKind::TextAction),
             actions: vec![WorkFlowAction::Click],
         };
         let fields: Vec<String> = wf.fields().into_iter().map(|f| f.into_owned()).collect();
-        assert_eq!(fields, ["ProofRead", "p", "TextField", "Notes", "1"]);
+        assert_eq!(
+            fields,
+            ["ProofRead", "p", "TextField", "TextAction", "Notes", "1"]
+        );
         assert_eq!(WorkFlow::LENGTH, headers.len());
         assert_eq!(fields.len(), headers.len());
     }

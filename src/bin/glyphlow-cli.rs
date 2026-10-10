@@ -283,6 +283,7 @@ mod tests {
             key: key.to_owned(),
             valid_app_ids: apps.map(|ids| ids.iter().map(|s| s.to_string()).collect()),
             starting_role: role,
+            menu: None,
             actions: vec![],
         }
     }
@@ -320,10 +321,10 @@ mod tests {
         assert_eq!(
             colored.ansi_strip(),
             "\
-|NAME       |KEY  |ROLE     |APPS   |STEPS  |
-|-----------|-----|---------|-------|-------|
-|ProofRead  |p    |Any      |any    |0      |
-|短         |q    |Generic  |Notes  |0      |
+|NAME       |KEY  |ROLE     |MENU  |APPS   |STEPS  |
+|-----------|-----|---------|------|-------|-------|
+|ProofRead  |p    |Any      |any   |any    |0      |
+|短         |q    |Generic  |any   |Notes  |0      |
 "
         );
     }
@@ -405,7 +406,7 @@ mod tests {
         let out = render_workflow_table(&rows);
         let header = out.lines().next().expect("no header line");
 
-        for name in ["NAME", "KEY", "ROLE", "APPS", "STEPS"] {
+        for name in ["NAME", "KEY", "ROLE", "MENU", "APPS", "STEPS"] {
             assert!(
                 header.contains(&table_header_color().colorize(name)),
                 "header cell {name:?} is not coloured:\n{out:?}"
