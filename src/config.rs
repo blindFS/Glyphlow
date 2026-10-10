@@ -83,6 +83,9 @@ pub enum WorkFlowAction {
     /// Search for a [`CustomTarget`] and continue with whatever it finds.
     SearchFor(CustomTarget),
     Sleep(u64),
+    /// Wait for the user to pick a clickable hint, then resume the queue.
+    HintPress,
+    Repeat(usize, Box<[WorkFlowAction]>),
 }
 
 /// A pre-defined workflow: a key, the apps it applies to and the actions it runs.
