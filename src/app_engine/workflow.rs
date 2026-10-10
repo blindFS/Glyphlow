@@ -89,8 +89,27 @@ impl AppEngine {
                 let _ = monio::key_release(*k);
             }
         };
+
         // Actions don't need a selected element
         match act {
+            WorkFlowAction::Repeat(n, actions) => {
+                for i in 0..*n {
+                    for (j, action) in actions.iter().enumerate() {
+                        if self.execute_workflow_action(action) {
+                            if *n > i + 1 {
+                                self.pending_workflow_actions
+                                    .push_front(WorkFlowAction::Repeat(n - i - 1, actions.clone()));
+                            }
+                            for pending_act in actions[j + 1..].iter().rev() {
+                                self.pending_workflow_actions
+                                    .push_front(pending_act.clone());
+                            }
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
             WorkFlowAction::GlyphlowMenu => {
                 if self.selected.is_some() {
                     self.menu_refresh("", true);
@@ -124,6 +143,11 @@ impl AppEngine {
                     return true;
                 }
                 return false;
+            }
+            WorkFlowAction::HintPress => {
+                self.activate(Target::Clickable);
+                // Wait for filtering
+                return true;
             }
             WorkFlowAction::Move(x, y) => {
                 self.move_mouse_with_trail(*x, *y);
