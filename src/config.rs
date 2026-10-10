@@ -83,6 +83,7 @@ pub enum WorkFlowAction {
     /// Search for a [`CustomTarget`] and continue with whatever it finds.
     SearchFor(CustomTarget),
     Sleep(u64),
+    /// Wait for the user to pick a clickable hint, then resume the queue.
     HintPress,
     Repeat(usize, Box<[WorkFlowAction]>),
 }

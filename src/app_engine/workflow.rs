@@ -93,16 +93,18 @@ impl AppEngine {
         // Actions don't need a selected element
         match act {
             WorkFlowAction::Repeat(n, actions) => {
-                for i in 0..*n {
-                    for (j, action) in actions.iter().enumerate() {
+                for round in 0..*n {
+                    for (step, action) in actions.iter().enumerate() {
                         if self.execute_workflow_action(action) {
-                            if *n > i + 1 {
-                                self.pending_workflow_actions
-                                    .push_front(WorkFlowAction::Repeat(n - i - 1, actions.clone()));
+                            // The round stopped mid-way: resume with what is left
+                            // of it, then the rounds after it.
+                            let rounds_left = *n - round - 1;
+                            if rounds_left > 0 {
+                                let repeat = WorkFlowAction::Repeat(rounds_left, actions.clone());
+                                self.pending_workflow_actions.push_front(repeat);
                             }
-                            for pending_act in actions[j + 1..].iter().rev() {
-                                self.pending_workflow_actions
-                                    .push_front(pending_act.clone());
+                            for rest in actions[step + 1..].iter().rev() {
+                                self.pending_workflow_actions.push_front(rest.clone());
                             }
                             return true;
                         }
