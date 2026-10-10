@@ -127,13 +127,7 @@ impl AppEngine {
                 Target::Clickable => {
                     let center = frame.center();
                     self.press_on_element(element, &role, center);
-                    // HACK: a `HintPress` action resumes the pending workflow here.
-                    if self.pending_workflow_actions.is_empty() {
-                        self.deactivate();
-                    } else {
-                        self.drawer.clear();
-                        self.execute_pending_workflow_actions();
-                    }
+                    self.resume_or_deactivate();
                 }
                 Target::Image => {
                     self.select(eoi.clone());
@@ -205,7 +199,7 @@ impl AppEngine {
                 Target::Editable => {
                     self.selected = Some(eoi.clone());
                     self.focus_on_element(element);
-                    self.deactivate();
+                    self.resume_or_deactivate();
                 }
                 Target::Edit => {
                     self.editing = Some(eoi.clone());

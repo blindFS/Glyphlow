@@ -1,7 +1,9 @@
 use super::AppEngine;
 use crate::{
     AppSignal, Mode, ScrollAction, TextAction,
-    action::{WordPicker, get_dictionary_attributed_string, text_to_clipboard},
+    action::{
+        WordPicker, get_dictionary_attributed_string, text_from_clipboard, text_to_clipboard,
+    },
     ax_element::{ElementOfInterest, GetAttribute, SetAttribute},
     config::RoleOfInterest,
 };
@@ -350,6 +352,19 @@ impl AppEngine {
     pub(super) fn update_selected_text_and_show_menu(&mut self, new_text: String) {
         self.update_selected_text(new_text);
         self.draw_element_menu("", RoleOfInterest::PseudoText, true);
+    }
+
+    /// Put the clipboard's text up for action, or warn when it is empty.
+    pub(super) fn read_clipboard(&mut self) {
+        if let Some(text) = text_from_clipboard() {
+            self.selected = Some(ElementOfInterest::pseudo(
+                None,
+                self.last_app_window_info.frame,
+            ));
+            self.update_selected_text_and_show_menu(text);
+        } else {
+            self.notify_then_deactivate("No text found in clipboard.", Level::Warn);
+        }
     }
 
     pub(super) fn update_editing_text(&mut self, new_text: String) {
