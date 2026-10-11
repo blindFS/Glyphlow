@@ -76,7 +76,7 @@ impl AppEngine {
     }
 
     /// Run one workflow action; returns `true` when the queue should stop.
-    async fn execute_workflow_action(&mut self, act: &WorkFlowAction) -> bool {
+    fn execute_workflow_action(&mut self, act: &WorkFlowAction) -> bool {
         let key_down = |kb: &KeyBinding| {
             for k in kb.keys.iter() {
                 let _ = monio::key_press(*k);
@@ -95,8 +95,7 @@ impl AppEngine {
             WorkFlowAction::Repeat(n, actions) => {
                 for round in 0..*n {
                     for (step, action) in actions.iter().enumerate() {
-                        // Boxed: an `async fn` cannot recurse unboxed.
-                        if Box::pin(self.execute_workflow_action(action)).await {
+                        if self.execute_workflow_action(action) {
                             // The round stopped mid-way: resume with what is left
                             // of it, then the rounds after it.
                             let rounds_left = *n - round - 1;
@@ -148,30 +147,13 @@ impl AppEngine {
                 return false;
             }
             WorkFlowAction::Activate(target) => {
-                self.activate_target(target.clone()).await;
+                self.activate(target.clone());
                 // The queue resumes from `resume_or_deactivate` once the pick lands.
                 return true;
             }
             WorkFlowAction::ReadClipboard => {
                 self.read_clipboard();
                 // The text action menu takes over from here.
-                return true;
-            }
-            WorkFlowAction::TextAction(ta) => {
-                self.perform_text_action(ta.clone());
-                // Whatever it settles on, the interaction stops being the queue's.
-                return true;
-            }
-            WorkFlowAction::ScrollAction(sa) => {
-                self.scroll_action(sa.clone());
-                return false;
-            }
-            WorkFlowAction::ScreenShot => {
-                self.take_screenshot().await;
-                return true;
-            }
-            WorkFlowAction::FrameOCR => {
-                self.run_frame_ocr().await;
                 return true;
             }
             WorkFlowAction::Move(x, y) => {
@@ -285,45 +267,27 @@ impl AppEngine {
         false
     }
 
-    /// Run queued actions until the queue empties or an action suspends it.
-    /// Returns `true` when it stopped because of a suspension.
-    async fn drain_workflow_actions(&mut self) -> bool {
+    pub(super) fn execute_pending_workflow_actions(&mut self) {
         while let Some(act) = self.pending_workflow_actions.pop_front() {
-            if self.execute_workflow_action(&act).await {
-                return true;
+            if self.execute_workflow_action(&act) {
+                return;
             };
         }
-        false
-    }
-
-    /// Run the queued workflow to its end, announcing that the run is over.
-    pub(super) async fn execute_pending_workflow_actions(&mut self) {
-        if !self.drain_workflow_actions().await {
-            self.notify_then_deactivate("Done", Level::Trace);
-        }
-    }
-
-    /// Run the chain a built-in menu row handed over.
-    ///
-    /// Unlike a workflow this ends quietly: the row was one keystroke in an
-    /// interaction that is still going, so the menu stays up.
-    pub(super) async fn run_menu_actions(&mut self, actions: Box<[WorkFlowAction]>) {
-        self.pending_workflow_actions = actions.into_vec().into();
-        self.drain_workflow_actions().await;
+        self.notify_then_deactivate("Done", Level::Trace);
     }
 
     /// End an interaction a workflow was waiting on: carry on with the rest of
     /// the queue, or deactivate when nothing is left.
-    pub(super) async fn resume_or_deactivate(&mut self) {
+    pub(super) fn resume_or_deactivate(&mut self) {
         if self.pending_workflow_actions.is_empty() {
             self.deactivate();
         } else {
             self.drawer.clear();
-            self.execute_pending_workflow_actions().await;
+            self.execute_pending_workflow_actions();
         }
     }
 
-    pub(super) async fn execute_workflow(&mut self, idx: usize) {
+    pub(super) fn execute_workflow(&mut self, idx: usize) {
         let workflow = self
             .config
             .workflows
@@ -332,7 +296,7 @@ impl AppEngine {
 
         if self.is_workflow_valid(workflow) {
             self.pending_workflow_actions = workflow.actions.clone().into();
-            self.execute_pending_workflow_actions().await;
+            self.execute_pending_workflow_actions();
         } else {
             self.draw_menu(&wrong_key_menu_string());
         }
@@ -344,7 +308,7 @@ impl AppEngine {
     /// matching that role are offered for picking and the workflow runs on
     /// whichever one gets picked. This reuses the very same machinery as the
     /// `SearchFor` action: a custom target plus queued workflow actions.
-    pub(super) async fn run_workflow_by_name(&mut self, name: &str) {
+    pub(super) fn run_workflow_by_name(&mut self, name: &str) {
         let Some(idx) = self.config.find_workflow(name) else {
             let msg = format!(
                 "No workflow matches `{name}`. You can check available ones with `glyphlow-cli workflow list`."
@@ -355,7 +319,7 @@ impl AppEngine {
 
         if self.is_workflow_valid(&self.config.workflows[idx]) {
             self.pending_workflow_actions = self.config.workflows[idx].actions.clone().into();
-            self.execute_pending_workflow_actions().await;
+            self.execute_pending_workflow_actions();
             return;
         }
 
@@ -374,7 +338,7 @@ impl AppEngine {
             if self.element_cache.cache.len() == 1 {
                 self.clear_hints();
                 self.select(self.element_cache.cache[0].clone());
-                self.execute_pending_workflow_actions().await;
+                self.execute_pending_workflow_actions();
             }
             return;
         }

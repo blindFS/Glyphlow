@@ -1,8 +1,9 @@
 use super::AppEngine;
 use crate::{
-    Mode,
+    DASH_BOARD_MENU_ITEMS, IMAGE_ACTION_MENU_ITEMS, MenuItem, Mode, SCROLLBAR_MENU_ITEMS,
+    TEXT_ACTION_MENU_ITEMS,
     ax_element::{ElementOfInterest, Target},
-    config::{MenuKind, RoleOfInterest, WorkFlow},
+    config::RoleOfInterest,
     user_interface::{MenuString, MenuStyle},
     util::search_regex,
 };
@@ -147,23 +148,31 @@ impl AppEngine {
     /// The menu for `key_prefix`: `head`, whose first line the caller styles as
     /// the menu's header, then a row per reachable item, with the keys aligned on
     /// the longest one.
-    fn complete_menu_string(&self, head: &mut MenuString, menu: MenuKind, key_prefix: &str) {
+    fn complete_menu_string(
+        &self,
+        head: &mut MenuString,
+        builtin_menu_items: &[MenuItem],
+        need_editor: bool,
+        need_action: bool,
+        need_workflow: bool,
+        key_prefix: &str,
+    ) {
         let prefix_len = key_prefix.chars().count();
         let mut max_key_len = 1;
         let mut menu_items = Vec::new();
 
-        // Rows bound to this menu first, then the editor and the text actions,
-        // then the workflows offered wherever their role allows.
-        self.push_menu_rows(
-            &mut menu_items,
-            &mut max_key_len,
-            menu.rows(&self.config),
-            key_prefix,
-        );
+        // Skip static single key menu items
+        // when searching for multi-key actions
+        for it in builtin_menu_items {
+            if it.key.starts_with(key_prefix) {
+                max_key_len = max_key_len.max(it.key.chars().count());
+                menu_items.push((it.key, it.description));
+            }
+        }
 
         // Editor entry
-        if let Some(editor) = self.config.editor.as_ref()
-            && menu.editor_row().is_some()
+        if need_editor
+            && let Some(editor) = self.config.editor.as_ref()
             && editor.key.starts_with(key_prefix)
         {
             max_key_len = max_key_len.max(editor.key.chars().count());
@@ -171,7 +180,7 @@ impl AppEngine {
         }
 
         // TODO: refactor this if we introduce actions for elements other than text
-        if menu.offers_text_actions() {
+        if need_action {
             for action in self.config.text_actions.iter() {
                 if action.key.starts_with(key_prefix) {
                     max_key_len = max_key_len.max(action.key.chars().count());
@@ -180,12 +189,15 @@ impl AppEngine {
             }
         }
 
-        self.push_menu_rows(
-            &mut menu_items,
-            &mut max_key_len,
-            menu.unbound_workflows(&self.config),
-            key_prefix,
-        );
+        // Workflows valid for current selected element
+        if need_workflow {
+            for workflow in self.config.workflows.iter() {
+                if workflow.key.starts_with(key_prefix) && self.is_workflow_valid(workflow) {
+                    max_key_len = max_key_len.max(workflow.key.chars().count());
+                    menu_items.push((&workflow.key, &workflow.display));
+                }
+            }
+        }
 
         if menu_items.is_empty() {
             *head = wrong_key_menu_string();
@@ -193,24 +205,6 @@ impl AppEngine {
 
         for (key, display) in menu_items {
             head.push_key_map_entry(key, display, prefix_len, max_key_len);
-        }
-    }
-
-    /// Push every workflow the menu shows, skipping the ones whose key does not
-    /// match the prefix or that the current selection does not allow.
-    fn push_menu_rows<'a>(
-        &'a self,
-        menu_items: &mut Vec<(&'a str, &'a str)>,
-        max_key_len: &mut usize,
-        workflows: impl Iterator<Item = (usize, &'a WorkFlow)>,
-        key_prefix: &str,
-    ) {
-        for (_, workflow) in workflows {
-            if !workflow.key.starts_with(key_prefix) || !self.is_workflow_valid(workflow) {
-                continue;
-            }
-            *max_key_len = (*max_key_len).max(workflow.key.chars().count());
-            menu_items.push((&workflow.key, &workflow.display));
         }
     }
 
@@ -226,14 +220,28 @@ impl AppEngine {
         }
 
         let mut msg = MenuString::styled("Pick a Target:", MenuStyle::Header);
-        self.complete_menu_string(&mut msg, MenuKind::Dashboard, key_prefix);
+        self.complete_menu_string(
+            &mut msg,
+            &DASH_BOARD_MENU_ITEMS,
+            true,
+            false,
+            true,
+            key_prefix,
+        );
 
         self.draw_menu(&msg);
     }
 
     fn draw_image_action_menu(&self, key_prefix: &str) {
         let mut msg = MenuString::styled("Pick an Action for Image:", MenuStyle::Header);
-        self.complete_menu_string(&mut msg, MenuKind::ImageAction, key_prefix);
+        self.complete_menu_string(
+            &mut msg,
+            &IMAGE_ACTION_MENU_ITEMS,
+            false,
+            false,
+            true,
+            key_prefix,
+        );
 
         self.draw_menu(&msg);
     }
@@ -244,7 +252,14 @@ impl AppEngine {
         head.push("\n\n")
             .push_styled(&text, MenuStyle::Text)
             .push("\n");
-        self.complete_menu_string(&mut head, MenuKind::TextAction, key_prefix);
+        self.complete_menu_string(
+            &mut head,
+            &TEXT_ACTION_MENU_ITEMS,
+            true,
+            true,
+            true,
+            key_prefix,
+        );
 
         self.draw_menu(&head);
     }
@@ -252,7 +267,14 @@ impl AppEngine {
     fn draw_scrolling_menu(&self, key_prefix: &str) {
         if !self.config.hide_scrolling_menu {
             let mut msg = MenuString::styled("Pick a Scrolling Action:", MenuStyle::Header);
-            self.complete_menu_string(&mut msg, MenuKind::Scroll, key_prefix);
+            self.complete_menu_string(
+                &mut msg,
+                &SCROLLBAR_MENU_ITEMS,
+                false,
+                false,
+                false,
+                key_prefix,
+            );
             self.draw_menu(&msg);
         }
     }

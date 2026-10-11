@@ -3,7 +3,7 @@ use glyphlow::{
     TextAction,
     action::text_to_clipboard,
     ax_element::Target,
-    config::{GlyphlowConfig, RoleOfInterest, WorkFlow, WorkFlowAction},
+    config::{GlyphlowConfig, RoleOfInterest, WorkFlow},
 };
 use monio::Key;
 use objc2::MainThreadMarker;
@@ -21,11 +21,6 @@ use tokio::sync::mpsc;
 /// Five words, so the default alphabet gives every word a single-key label:
 /// `alpha` = `A`, `beta` = `B`, `gamma` = `C`, `delta` = `D`, `zeta` = `E`.
 const FIVE_WORDS: &str = "alpha beta gamma delta zeta";
-
-/// The signal a built-in menu row sends: a one-step chain of workflow actions.
-fn run(action: WorkFlowAction) -> AppSignal {
-    AppSignal::RunActions(Box::from([action]))
-}
 
 /// Stands for "no scenario is being serviced", so a notification logged outside
 /// the event loop has no slot to land in.
@@ -117,12 +112,11 @@ impl Scenario {
     /// A key press can reach it too — `C` on the dashboard reads it — but the
     /// scenarios that do that set it as well, which is what this looks for.
     fn uses_clipboard(&self) -> bool {
-        self.events.iter().any(|event| match event {
-            TestEvent::SetClipboard(_) => true,
-            TestEvent::SendSignal(AppSignal::RunActions(actions)) => {
-                actions.contains(&WorkFlowAction::ReadClipboard)
-            }
-            _ => false,
+        self.events.iter().any(|event| {
+            matches!(
+                event,
+                TestEvent::SetClipboard(_) | TestEvent::SendSignal(AppSignal::ReadClipboard)
+            )
         })
     }
 }
@@ -200,30 +194,26 @@ fn main() {
                 TestEvent::SetMode(Mode::Scrolling),
                 TestEvent::ClearSignals,
                 TestEvent::PressKey(Key::KeyJ),
-                TestEvent::ExpectSignal(run(WorkFlowAction::ScrollAction(ScrollAction::DownRight))),
+                TestEvent::ExpectSignal(AppSignal::ScrollAction(ScrollAction::DownRight)),
                 TestEvent::ReleaseKey(Key::KeyJ),
                 TestEvent::ClearSignals,
                 TestEvent::PressKey(Key::KeyK),
-                TestEvent::ExpectSignal(run(WorkFlowAction::ScrollAction(ScrollAction::UpLeft))),
+                TestEvent::ExpectSignal(AppSignal::ScrollAction(ScrollAction::UpLeft)),
                 TestEvent::ReleaseKey(Key::KeyK),
                 TestEvent::ClearSignals,
                 TestEvent::PressKey(Key::KeyI),
-                TestEvent::ExpectSignal(run(WorkFlowAction::ScrollAction(
-                    ScrollAction::IncreaseDistance,
-                ))),
+                TestEvent::ExpectSignal(AppSignal::ScrollAction(ScrollAction::IncreaseDistance)),
                 TestEvent::ReleaseKey(Key::KeyI),
                 TestEvent::ClearSignals,
                 TestEvent::PressKey(Key::KeyD),
-                TestEvent::ExpectSignal(run(WorkFlowAction::ScrollAction(
-                    ScrollAction::DecreaseDistance,
-                ))),
+                TestEvent::ExpectSignal(AppSignal::ScrollAction(ScrollAction::DecreaseDistance)),
                 TestEvent::ReleaseKey(Key::KeyD),
                 TestEvent::ClearSignals,
                 // Prefix building test: press G, then press G again to trigger GG
                 TestEvent::PressKey(Key::KeyG),
                 TestEvent::ReleaseKey(Key::KeyG),
                 TestEvent::PressKey(Key::KeyG),
-                TestEvent::ExpectSignal(run(WorkFlowAction::ScrollAction(ScrollAction::Top))),
+                TestEvent::ExpectSignal(AppSignal::ScrollAction(ScrollAction::Top)),
                 TestEvent::ReleaseKey(Key::KeyG),
             ],
         ),
@@ -242,7 +232,7 @@ fn main() {
                 TestEvent::ExpectMode(Mode::TextActionMenu),
                 TestEvent::ClearSignals,
                 TestEvent::PressKey(Key::KeyC), // Copy action
-                TestEvent::ExpectSignal(run(WorkFlowAction::TextAction(TextAction::Copy))),
+                TestEvent::ExpectSignal(AppSignal::TextAction(TextAction::Copy)),
                 TestEvent::ReleaseKey(Key::KeyC),
             ],
         ),
@@ -279,7 +269,7 @@ fn main() {
                 TestEvent::SetMode(Mode::ImageActionMenu),
                 TestEvent::ClearSignals,
                 TestEvent::PressKey(Key::KeyO), // Image OCR action
-                TestEvent::ExpectSignal(run(WorkFlowAction::FrameOCR)),
+                TestEvent::ExpectSignal(AppSignal::FrameOCR),
                 TestEvent::ReleaseKey(Key::KeyO),
             ],
         ),
@@ -333,7 +323,6 @@ fn main() {
                     key: "Z".into(),
                     valid_app_ids: Some(vec!["com.example.not-the-focused-app".into()]),
                     starting_role: RoleOfInterest::Any,
-                    menu: None,
                     actions: vec![],
                 });
                 config
@@ -356,9 +345,9 @@ fn main() {
             "Scenario 12: Backspace leaves word picking for the text action menu",
             vec![
                 TestEvent::SetClipboard(FIVE_WORDS.to_string()),
-                TestEvent::SendSignal(run(WorkFlowAction::ReadClipboard)),
+                TestEvent::SendSignal(AppSignal::ReadClipboard),
                 TestEvent::ExpectMode(Mode::TextActionMenu),
-                TestEvent::SendSignal(run(WorkFlowAction::TextAction(TextAction::Split))),
+                TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
                 TestEvent::ExpectMode(Mode::WordPicking),
                 // Nothing typed yet, so there is nothing to pop: backspace is the
                 // "go back one level" key.
@@ -371,9 +360,9 @@ fn main() {
             "Scenario 13: Backspace pops the hint key, then the search filter",
             vec![
                 TestEvent::SetClipboard(FIVE_WORDS.to_string()),
-                TestEvent::SendSignal(run(WorkFlowAction::ReadClipboard)),
+                TestEvent::SendSignal(AppSignal::ReadClipboard),
                 TestEvent::ExpectMode(Mode::TextActionMenu),
-                TestEvent::SendSignal(run(WorkFlowAction::TextAction(TextAction::Split))),
+                TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
                 TestEvent::ExpectMode(Mode::WordPicking),
                 // Search for "et": it matches beta and zeta, but not alpha.
                 TestEvent::PressKey(Key::Slash),
@@ -404,9 +393,9 @@ fn main() {
             "Scenario 14: Backspace cancels the selected side of a range",
             vec![
                 TestEvent::SetClipboard(FIVE_WORDS.to_string()),
-                TestEvent::SendSignal(run(WorkFlowAction::ReadClipboard)),
+                TestEvent::SendSignal(AppSignal::ReadClipboard),
                 TestEvent::ExpectMode(Mode::TextActionMenu),
-                TestEvent::SendSignal(run(WorkFlowAction::TextAction(TextAction::Split))),
+                TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
                 TestEvent::ExpectMode(Mode::WordPicking),
                 TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Shift)),
                 // `A` anchors the range at alpha rather than leaving word picking:
@@ -432,9 +421,9 @@ fn main() {
             "Scenario 15: Backspace in search pops the query, then leaves search",
             vec![
                 TestEvent::SetClipboard(FIVE_WORDS.to_string()),
-                TestEvent::SendSignal(run(WorkFlowAction::ReadClipboard)),
+                TestEvent::SendSignal(AppSignal::ReadClipboard),
                 TestEvent::ExpectMode(Mode::TextActionMenu),
-                TestEvent::SendSignal(run(WorkFlowAction::TextAction(TextAction::Split))),
+                TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
                 TestEvent::ExpectMode(Mode::WordPicking),
                 TestEvent::PressKey(Key::Slash),
                 TestEvent::ReleaseKey(Key::Slash),
@@ -495,7 +484,7 @@ fn main() {
                 TestEvent::ClearSignals,
                 // The menu is usable again: the next key is not swallowed by the typo.
                 TestEvent::PressKey(Key::KeyC),
-                TestEvent::ExpectSignal(run(WorkFlowAction::ReadClipboard)),
+                TestEvent::ExpectSignal(AppSignal::ReadClipboard),
                 TestEvent::ReleaseKey(Key::KeyC),
             ],
         ),
@@ -524,9 +513,9 @@ fn main() {
             "Scenario 19: Text at hand takes the tap, whatever the key",
             vec![
                 TestEvent::SetClipboard(FIVE_WORDS.to_string()),
-                TestEvent::SendSignal(run(WorkFlowAction::ReadClipboard)),
+                TestEvent::SendSignal(AppSignal::ReadClipboard),
                 TestEvent::ExpectMode(Mode::TextActionMenu),
-                TestEvent::SendSignal(run(WorkFlowAction::TextAction(TextAction::Split))),
+                TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
                 TestEvent::ExpectMode(Mode::WordPicking),
                 // The target is still the default clickable one, so this pins the
                 // order: the open word picker wins over it.

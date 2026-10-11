@@ -129,7 +129,7 @@ impl AppEngine {
     }
 
     /// Keep the cell the user settled on and run the rest of the workflow.
-    pub(super) async fn accept_grid(&mut self) {
+    pub(super) fn accept_grid(&mut self) {
         let Some(GridSession {
             level,
             overlay,
@@ -147,7 +147,7 @@ impl AppEngine {
             Frame::new(x - 1.0, y - 1.0, x + 1.0, y + 1.0),
         ));
         self.set_mode(prev_mode);
-        self.execute_pending_workflow_actions().await;
+        self.execute_pending_workflow_actions();
     }
 
     pub(super) fn clear_grid(&mut self) {

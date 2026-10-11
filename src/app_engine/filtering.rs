@@ -127,7 +127,7 @@ impl AppEngine {
                 Target::Clickable => {
                     let center = frame.center();
                     self.press_on_element(element, &role, center);
-                    self.resume_or_deactivate().await;
+                    self.resume_or_deactivate();
                 }
                 Target::Image => {
                     self.select(eoi.clone());
@@ -135,7 +135,7 @@ impl AppEngine {
                 }
                 Target::Custom(_) => {
                     self.select(eoi.clone());
-                    self.execute_pending_workflow_actions().await;
+                    self.execute_pending_workflow_actions();
                 }
                 Target::ImageOCR => self.perform_ocr_on_frame(*frame).await,
                 Target::Text => {
@@ -199,7 +199,7 @@ impl AppEngine {
                 Target::Editable => {
                     self.selected = Some(eoi.clone());
                     self.focus_on_element(element);
-                    self.resume_or_deactivate().await;
+                    self.resume_or_deactivate();
                 }
                 Target::Edit => {
                     self.editing = Some(eoi.clone());
@@ -228,9 +228,7 @@ impl AppEngine {
     pub(super) async fn press_sole_hint(&mut self) {
         if self.element_cache.cache.len() == 1 {
             self.hint_prefix.push(self.config.hint_keys.first());
-            // Boxed: this re-enters `filter_by_key`, which can reach it again
-            // through the workflow queue.
-            Box::pin(self.filter_by_key()).await;
+            self.filter_by_key().await;
         }
     }
 
