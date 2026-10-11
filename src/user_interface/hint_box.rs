@@ -72,10 +72,6 @@ impl HintBox {
         }
     }
 
-    pub fn is_colored(&self) -> bool {
-        self.color.is_some()
-    }
-
     /// Replaces the label and lays the box out to match.
     ///
     /// This is the only way a box's size changes, so laying out here is what lets
