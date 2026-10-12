@@ -95,6 +95,22 @@ actions = [
 ]
 ```
 
+For consecutive clicks without interacting with the main menu again and again.
+
+```toml
+[[workflows]]
+actions = [{ Repeat = [99, ["GridMove", "Click"]] }]
+display = "󰋁 Grid Click"
+key = "G"
+starting_role = "Window"
+
+[[workflows]]
+display = " 99 Hint Press"
+key = "9"
+starting_role = "Any"
+actions = [{ Repeat = [99, [{ Activate = "Clickable" }, { Sleep = 1000 }]] }]
+```
+
 The list is not merged with the defaults: defining `[[workflows]]` replaces the
 built-in ones, so repeat any default you still want to keep.
 
