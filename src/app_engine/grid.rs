@@ -3,9 +3,10 @@ use crate::{
     Mode,
     ax_element::ElementOfInterest,
     config::{GridConfig, RoleOfInterest},
-    user_interface::{GridOverlay, cell_frame, parent_frame},
+    user_interface::{GridOverlay, calibrated_origin, cell_frame, parent_frame},
     util::Frame,
 };
+use objc2_core_foundation::CGPoint;
 
 /// Where a recursive-grid run currently is.
 #[derive(Clone, Copy)]
@@ -140,8 +141,15 @@ impl AppEngine {
         };
         overlay.free();
 
+        let (x, y) = if level.depth == 0 {
+            let mouse_loc = objc2_app_kit::NSEvent::mouseLocation();
+            let CGPoint { x, y } = calibrated_origin(mouse_loc.x, mouse_loc.y, &self.overlay_frame);
+            (x, y)
+        } else {
+            level.region.center()
+        };
+
         // Element-relative actions (`Click`) need a frame to aim at.
-        let (x, y) = level.region.center();
         self.selected = Some(ElementOfInterest::pseudo(
             None,
             Frame::new(x - 1.0, y - 1.0, x + 1.0, y + 1.0),
