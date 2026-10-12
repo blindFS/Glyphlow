@@ -24,7 +24,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    sync::mpsc::Sender,
+    sync::{OnceLock, mpsc::Sender},
     time::{Duration, Instant},
 };
 
@@ -162,57 +162,119 @@ impl ElementBasicAttributes {
     }
 }
 
-/// A [`CustomTarget`] with its string fields pre-compiled into [`Regex`]es.
+/// A [`CustomTarget`] whose pattern strings are compiled into [`Regex`]es on
+/// first use.
 ///
-/// Build once per workflow search action, then reuse across the whole element
-/// traversal.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// `Target` is deserialised as part of both the config and the wire, so the
+/// patterns have to stay strings: compiling in `Deserialize` would link the
+/// whole regex engine into `glyphlow-cli`, which only ever reads a config.
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CompiledTarget {
     pub role: String,
     pub subrole: Option<String>,
-    #[serde(with = "serde_regex")]
-    pub label: Option<Regex>,
-    #[serde(with = "serde_regex")]
-    pub value: Option<Regex>,
-    #[serde(with = "serde_regex")]
-    pub title: Option<Regex>,
-    #[serde(with = "serde_regex")]
-    pub description: Option<Regex>,
+    pub label: Option<String>,
+    pub value: Option<String>,
+    pub title: Option<String>,
+    pub description: Option<String>,
     pub size: Option<(f64, f64)>,
     pub action: Option<String>,
+    #[serde(skip)]
+    regexes: OnceLock<Option<Regexes>>,
 }
 
+/// The pattern fields of a [`CompiledTarget`], compiled.
+#[derive(Debug)]
+struct Regexes {
+    label: Option<Regex>,
+    value: Option<Regex>,
+    title: Option<Regex>,
+    description: Option<Regex>,
+}
+
+impl Regexes {
+    fn compile(target: &CompiledTarget) -> Result<Self, regex::Error> {
+        let compile = |pattern: &Option<String>| pattern.as_deref().map(Regex::new).transpose();
+        Ok(Self {
+            label: compile(&target.label)?,
+            value: compile(&target.value)?,
+            title: compile(&target.title)?,
+            description: compile(&target.description)?,
+        })
+    }
+}
+
+impl From<&CustomTarget> for CompiledTarget {
+    fn from(ct: &CustomTarget) -> Self {
+        Self {
+            role: ct.role.clone(),
+            subrole: ct.subrole.clone(),
+            label: ct.label.clone(),
+            value: ct.value.clone(),
+            title: ct.title.clone(),
+            description: ct.description.clone(),
+            size: ct.size,
+            action: ct.action.clone(),
+            regexes: OnceLock::new(),
+        }
+    }
+}
+
+/// The compiled patterns are a cache, so a clone starts out uncompiled.
+impl Clone for CompiledTarget {
+    fn clone(&self) -> Self {
+        Self {
+            role: self.role.clone(),
+            subrole: self.subrole.clone(),
+            label: self.label.clone(),
+            value: self.value.clone(),
+            title: self.title.clone(),
+            description: self.description.clone(),
+            size: self.size,
+            action: self.action.clone(),
+            regexes: OnceLock::new(),
+        }
+    }
+}
+
+/// Compares the patterns as written; the compiled cache is not part of the value.
 impl PartialEq for CompiledTarget {
     fn eq(&self, other: &Self) -> bool {
-        let opt_re_eq = |a: &Option<Regex>, b: &Option<Regex>| match (a, b) {
-            (Some(x), Some(y)) => x.as_str() == y.as_str(),
-            (None, None) => true,
-            _ => false,
-        };
         self.role == other.role
             && self.subrole == other.subrole
-            && opt_re_eq(&self.label, &other.label)
-            && opt_re_eq(&self.value, &other.value)
-            && opt_re_eq(&self.title, &other.title)
-            && opt_re_eq(&self.description, &other.description)
+            && self.label == other.label
+            && self.value == other.value
+            && self.title == other.title
+            && self.description == other.description
             && self.size == other.size
             && self.action == other.action
     }
 }
 
 impl CompiledTarget {
+    /// Compiles the patterns up front, so an invalid one is reported before the
+    /// traversal starts.
     pub fn new(ct: &CustomTarget) -> Result<Self, regex::Error> {
-        let compile_opt = |opt: &Option<String>| opt.as_deref().map(Regex::new).transpose();
+        let target = Self::from(ct);
+        let regexes = Regexes::compile(&target)?;
         Ok(Self {
-            role: ct.role.to_owned(),
-            subrole: ct.subrole.to_owned(),
-            label: compile_opt(&ct.label)?,
-            value: compile_opt(&ct.value)?,
-            title: compile_opt(&ct.title)?,
-            description: compile_opt(&ct.description)?,
-            size: ct.size,
-            action: ct.action.to_owned(),
+            regexes: OnceLock::from(Some(regexes)),
+            ..target
         })
+    }
+
+    /// The compiled patterns, built on first use.
+    ///
+    /// `None` when a pattern is invalid, which is logged once.
+    fn compiled(&self) -> Option<&Regexes> {
+        self.regexes
+            .get_or_init(|| match Regexes::compile(self) {
+                Ok(regexes) => Some(regexes),
+                Err(e) => {
+                    log::error!("Invalid regex in custom target: {e}");
+                    None
+                }
+            })
+            .as_ref()
     }
 }
 
@@ -670,31 +732,34 @@ impl GetAttribute for AXUIElement {
     }
 
     fn match_custom_target(&self, target: &CompiledTarget) -> bool {
+        let Some(compiled) = target.compiled() else {
+            return false;
+        };
         if let Some(sr) = target.subrole.as_ref()
             && !self.subrole().is_ok_and(|s| matches_pattern(sr, &s))
         {
             return false;
         }
-        if let Some(re) = target.description.as_ref()
+        if let Some(re) = compiled.description.as_ref()
             && !self
                 .description()
                 .is_ok_and(|d| re.is_match(&d.to_string()))
         {
             return false;
         }
-        if let Some(re) = target.title.as_ref()
+        if let Some(re) = compiled.title.as_ref()
             && !self.title().is_ok_and(|t| re.is_match(&t.to_string()))
         {
             return false;
         }
-        if let Some(re) = target.label.as_ref()
+        if let Some(re) = compiled.label.as_ref()
             && !self
                 .label_value()
                 .is_ok_and(|l| re.is_match(&l.to_string()))
         {
             return false;
         }
-        if let Some(re) = target.value.as_ref()
+        if let Some(re) = compiled.value.as_ref()
             && !self
                 .value()
                 .ok()
