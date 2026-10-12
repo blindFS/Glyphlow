@@ -105,10 +105,10 @@ key = "G"
 starting_role = "Window"
 
 [[workflows]]
+actions = [{ Repeat = [99, [{ Activate = "Clickable" }, { Sleep = 1000 }]] }]
 display = " 99 Hint Press"
 key = "9"
-starting_role = "Any"
-actions = [{ Repeat = [99, [{ Activate = "Clickable" }, { Sleep = 1000 }]] }]
+starting_role = "Window"
 ```
 
 The list is not merged with the defaults: defining `[[workflows]]` replaces the
