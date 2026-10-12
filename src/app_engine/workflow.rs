@@ -146,9 +146,14 @@ impl AppEngine {
                 }
                 return false;
             }
-            WorkFlowAction::HintPress => {
-                self.activate(Target::Clickable);
-                // Wait for filtering
+            WorkFlowAction::Activate(target) => {
+                self.activate(target.clone());
+                // The queue resumes from `resume_or_deactivate` once the pick lands.
+                return true;
+            }
+            WorkFlowAction::ReadClipboard => {
+                self.read_clipboard();
+                // The text action menu takes over from here.
                 return true;
             }
             WorkFlowAction::Move(x, y) => {
@@ -269,6 +274,17 @@ impl AppEngine {
             };
         }
         self.notify_then_deactivate("Done", Level::Trace);
+    }
+
+    /// End an interaction a workflow was waiting on: carry on with the rest of
+    /// the queue, or deactivate when nothing is left.
+    pub(super) fn resume_or_deactivate(&mut self) {
+        if self.pending_workflow_actions.is_empty() {
+            self.deactivate();
+        } else {
+            self.drawer.clear();
+            self.execute_pending_workflow_actions();
+        }
     }
 
     pub(super) fn execute_workflow(&mut self, idx: usize) {

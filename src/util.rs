@@ -3,7 +3,7 @@ use core_graphics_types::geometry::CGSize;
 use core_text::framesetter::CTFramesetter;
 use objc2::rc::Retained;
 use objc2_core_foundation::{CGPoint, CGRect, CGSize as OCGSize};
-use objc2_foundation::{NSMutableAttributedString, NSSize};
+use objc2_foundation::NSMutableAttributedString;
 use regex::Regex;
 use std::{borrow::Cow, cmp::Ordering};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -90,11 +90,6 @@ impl Frame {
         )
     }
 
-    pub fn ns_size(&self) -> NSSize {
-        let (w, h) = self.size();
-        NSSize::new(w, h)
-    }
-
     pub fn center(&self) -> (f64, f64) {
         (
             (self.top_left.x + self.bottom_right.x) / 2.0,
@@ -136,13 +131,6 @@ impl Frame {
             && self.top_left.y <= other.top_left.y
             && self.bottom_right.x >= other.bottom_right.x
             && self.bottom_right.y >= other.bottom_right.y
-    }
-
-    pub fn contains_point(&self, x: f64, y: f64) -> bool {
-        self.top_left.x <= x
-            && x <= self.bottom_right.x
-            && self.top_left.y <= y
-            && y <= self.bottom_right.y
     }
 }
 

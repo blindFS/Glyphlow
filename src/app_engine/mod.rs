@@ -1,6 +1,6 @@
 use crate::{
     AppSignal, KeyState, Mode, ModifierKey, ScrollAction,
-    action::{OCRResult, WordPicker, screen_shot, text_from_clipboard},
+    action::{OCRResult, WordPicker, screen_shot},
     ax_element::{ElementCache, ElementOfInterest, Target},
     config::{AppOverride, GlyphlowConfig, RoleOfInterest, WorkFlowAction},
     os_util::AppWindowInfo,
@@ -330,17 +330,7 @@ impl AppEngine {
                 }
             }
             AppSignal::FileUpdate(pb) => self.handle_file_update(pb),
-            AppSignal::ReadClipboard => {
-                if let Some(text) = text_from_clipboard() {
-                    self.selected = Some(ElementOfInterest::pseudo(
-                        None,
-                        self.last_app_window_info.frame,
-                    ));
-                    self.update_selected_text_and_show_menu(text);
-                } else {
-                    self.notify_then_deactivate("No text found in clipboard.", Level::Warn);
-                }
-            }
+            AppSignal::ReadClipboard => self.read_clipboard(),
             AppSignal::ClearNotification(id) => {
                 if self.check_mode(Mode::WaitAndDeactivate) {
                     self.deactivate();

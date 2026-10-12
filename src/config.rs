@@ -1,3 +1,4 @@
+use crate::ax_element::Target;
 use monio::Key;
 use objc2::rc::Retained;
 use objc2_app_kit::NSFont;
@@ -83,8 +84,14 @@ pub enum WorkFlowAction {
     /// Search for a [`CustomTarget`] and continue with whatever it finds.
     SearchFor(CustomTarget),
     Sleep(u64),
-    /// Wait for the user to pick a clickable hint, then resume the queue.
-    HintPress,
+    /// Hand the interaction over to a target's hint filtering and resume the
+    /// queue with the pick. Only `Clickable` and `Editable` come back to the
+    /// queue; every other target opens a menu of its own and ends the run.
+    Activate(Target),
+    /// Put the clipboard's text up for action.
+    ReadClipboard,
+    /// Run `actions` `n` times; a step that suspends the queue resumes the
+    /// round on the next pick.
     Repeat(usize, Box<[WorkFlowAction]>),
 }
 
