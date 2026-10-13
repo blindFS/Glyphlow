@@ -316,11 +316,7 @@ impl AppEngine {
                     .map(|eoi| eoi.frame)
                     .unwrap_or(self.last_app_window_info.frame);
                 if screen_shot(&frame).await {
-                    if self.pending_workflow_actions.is_empty() {
-                        self.notify_then_deactivate("Screenshot copied to clipboard.", Level::Info);
-                    } else {
-                        self.execute_pending_workflow_actions();
-                    }
+                    self.resume_or_notify_deactivate("Screenshot copied to clipboard.");
                 } else {
                     self.notify_then_deactivate("Failed to take screenshot.", Level::Error);
                 };

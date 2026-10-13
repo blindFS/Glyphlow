@@ -148,7 +148,7 @@ impl AppEngine {
             }
             WorkFlowAction::Activate(target) => {
                 self.activate(target.clone());
-                // The queue resumes from `resume_or_deactivate` once the pick lands.
+                // The queue resumes
                 return true;
             }
             WorkFlowAction::ReadClipboard => {
@@ -281,6 +281,15 @@ impl AppEngine {
     pub(super) fn resume_or_deactivate(&mut self) {
         if self.pending_workflow_actions.is_empty() {
             self.deactivate();
+        } else {
+            self.drawer.clear();
+            self.execute_pending_workflow_actions();
+        }
+    }
+
+    pub(super) fn resume_or_notify_deactivate(&mut self, text: &str) {
+        if self.pending_workflow_actions.is_empty() {
+            self.notify_then_deactivate(text, Level::Info);
         } else {
             self.drawer.clear();
             self.execute_pending_workflow_actions();
