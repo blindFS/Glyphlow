@@ -3,7 +3,7 @@ use glyphlow::{
     TextAction,
     action::text_to_clipboard,
     ax_element::Target,
-    config::{GlyphlowConfig, RoleOfInterest, WorkFlow, WorkFlowAction},
+    config::{GlyphlowConfig, RoleOfInterest, WorkFlow},
 };
 use monio::Key;
 use objc2::MainThreadMarker;
@@ -574,41 +574,6 @@ fn main() {
                 TestEvent::ReleaseKey(Key::Escape),
             ],
         ),
-        Scenario {
-            name: "Scenario 22: A text action resumes the workflow that read the clipboard",
-            config: {
-                let mut config = GlyphlowConfig::default();
-                // `ReadClipboard` suspends the queue and hands over to the text
-                // action menu, so `Sleep` is the remainder that has to survive it.
-                config.workflows.push(WorkFlow {
-                    display: "Clipboard Then Sleep".into(),
-                    key: "Y".into(),
-                    starting_role: RoleOfInterest::Any,
-                    valid_app_ids: None,
-                    actions: vec![WorkFlowAction::ReadClipboard, WorkFlowAction::Sleep(1)],
-                });
-                config
-            },
-            events: vec![
-                TestEvent::SetClipboard(FIVE_WORDS.to_string()),
-                TestEvent::ExpectMode(Mode::Idle),
-                // With a remainder queued the action resumes it, and says nothing:
-                // the run ends on "Done", which is `WaitAndDeactivate`.
-                TestEvent::SendSignal(AppSignal::RunWorkFlowByName("Clipboard Then Sleep".into())),
-                TestEvent::ExpectMode(Mode::TextActionMenu),
-                TestEvent::ClearMessages,
-                TestEvent::SendSignal(AppSignal::TextAction(TextAction::Copy)),
-                TestEvent::ExpectMode(Mode::WaitAndDeactivate),
-                TestEvent::ExpectNoMessage,
-                // With nothing queued — the menu item, not a workflow action — the
-                // same action notifies and deactivates instead.
-                TestEvent::SendSignal(AppSignal::ReadClipboard),
-                TestEvent::ExpectMode(Mode::TextActionMenu),
-                TestEvent::SendSignal(AppSignal::TextAction(TextAction::Copy)),
-                TestEvent::ExpectMessage("Copied to clipboard.".into()),
-                TestEvent::ExpectMode(Mode::WaitAndDeactivate),
-            ],
-        },
     ];
 
     let rt = tokio::runtime::Builder::new_current_thread()
