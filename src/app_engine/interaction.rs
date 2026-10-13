@@ -198,7 +198,7 @@ impl AppEngine {
         match ta {
             TextAction::Copy => {
                 text_to_clipboard(text);
-                self.notify_then_deactivate("Copied to clipboard.", Level::Info);
+                self.notify("Copied to clipboard.", Level::Info);
             }
             TextAction::Dictionary => {
                 log::trace!("Looking up `{text}` in Apple Dictionary.");
