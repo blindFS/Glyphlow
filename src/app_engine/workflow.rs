@@ -295,7 +295,9 @@ impl AppEngine {
             .expect("Internal Error: workflow index out of bounds.");
 
         if self.is_workflow_valid(workflow) {
-            self.pending_workflow_actions = workflow.actions.clone().into();
+            for act in workflow.actions.iter().rev() {
+                self.pending_workflow_actions.push_front(act.clone());
+            }
             self.execute_pending_workflow_actions();
         } else {
             self.draw_menu(&wrong_key_menu_string());

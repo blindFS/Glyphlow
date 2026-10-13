@@ -192,13 +192,13 @@ impl AppEngine {
             panic!("Internal Error: No selected text in Mode::TextActionMenu.");
         };
 
+        let mut keep_drawing = true;
         // TODO:
         // 1. URL handling
-        let keep_drawing = match ta {
+        match ta {
             TextAction::Copy => {
                 text_to_clipboard(text);
                 self.notify_then_deactivate("Copied to clipboard.", Level::Info);
-                true
             }
             TextAction::Dictionary => {
                 log::trace!("Looking up `{text}` in Apple Dictionary.");
@@ -217,7 +217,6 @@ impl AppEngine {
                 } else {
                     self.notify("No definition found.", Level::Warn);
                 }
-                true
             }
             TextAction::Split => {
                 let text = text.to_string();
@@ -235,7 +234,6 @@ impl AppEngine {
                 self.hint_width = word_picker.digits;
 
                 self.word_picker = Some(word_picker);
-                true
             }
             TextAction::Editor => {
                 if let Err(e) = self.open_editor(text) {
@@ -243,19 +241,17 @@ impl AppEngine {
                         &format!("Failed to open editor: {e}"),
                         Level::Error,
                     );
-                    true
                 } else {
-                    false
+                    keep_drawing = false
                 }
             }
             TextAction::UserDefined(idx) => {
                 self.take_external_action(idx, &text.to_string());
-                true
             }
         };
 
         if !keep_drawing {
-            self.deactivate();
+            self.resume_or_deactivate();
         }
     }
 
@@ -289,7 +285,7 @@ impl AppEngine {
                 .and_then(|v| v.downcast::<CFNumber>())
                 .and_then(|f| f.to_f64())
             else {
-                self.deactivate();
+                self.notify_then_deactivate("Failed to get scroll bar value.", Level::Error);
                 return;
             };
 
@@ -458,7 +454,7 @@ impl AppEngine {
                     );
                 } else {
                     // Normal exit without new context
-                    self.deactivate();
+                    self.resume_or_deactivate();
                 }
             }
             Err(e) => {

@@ -333,7 +333,7 @@ impl AppEngine {
             AppSignal::ReadClipboard => self.read_clipboard(),
             AppSignal::ClearNotification(id) => {
                 if self.check_mode(Mode::WaitAndDeactivate) {
-                    self.deactivate();
+                    self.resume_or_deactivate();
                 } else {
                     self.drawer.clear_notification(id);
                 }
