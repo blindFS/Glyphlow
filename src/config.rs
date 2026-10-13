@@ -84,9 +84,6 @@ pub enum WorkFlowAction {
     /// Search for a [`CustomTarget`] and continue with whatever it finds.
     SearchFor(CustomTarget),
     Sleep(u64),
-    /// Hand the interaction over to a target's hint filtering and resume the
-    /// queue with the pick. Only `Clickable` and `Editable` come back to the
-    /// queue; every other target opens a menu of its own and ends the run.
     Activate(Target),
     /// Put the clipboard's text up for action.
     ReadClipboard,

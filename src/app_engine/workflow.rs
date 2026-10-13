@@ -148,7 +148,7 @@ impl AppEngine {
             }
             WorkFlowAction::Activate(target) => {
                 self.activate(target.clone());
-                // The queue resumes from `resume_or_deactivate` once the pick lands.
+                // The queue resumes
                 return true;
             }
             WorkFlowAction::ReadClipboard => {
@@ -287,6 +287,15 @@ impl AppEngine {
         }
     }
 
+    pub(super) fn resume_or_notify_deactivate(&mut self, text: &str) {
+        if self.pending_workflow_actions.is_empty() {
+            self.notify_then_deactivate(text, Level::Info);
+        } else {
+            self.drawer.clear();
+            self.execute_pending_workflow_actions();
+        }
+    }
+
     pub(super) fn execute_workflow(&mut self, idx: usize) {
         let workflow = self
             .config
@@ -295,7 +304,9 @@ impl AppEngine {
             .expect("Internal Error: workflow index out of bounds.");
 
         if self.is_workflow_valid(workflow) {
-            self.pending_workflow_actions = workflow.actions.clone().into();
+            for act in workflow.actions.iter().rev() {
+                self.pending_workflow_actions.push_front(act.clone());
+            }
             self.execute_pending_workflow_actions();
         } else {
             self.draw_menu(&wrong_key_menu_string());

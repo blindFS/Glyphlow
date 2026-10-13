@@ -100,6 +100,7 @@ impl UIDrawer {
                 ripple_layer.addAnimation_forKey(&anim_group, Some(ns_string!("ripple")));
 
                 CATransaction::commit();
+                CATransaction::flush();
             }
         });
     }
@@ -252,6 +253,7 @@ impl UIDrawer {
                 mask_layer.setLocations(Some(&loc_end));
 
                 CATransaction::commit();
+                CATransaction::flush();
             }
         });
     }
