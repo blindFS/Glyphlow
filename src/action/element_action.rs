@@ -1,6 +1,6 @@
 use std::{
     sync::mpsc::{RecvTimeoutError, channel},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use block2::RcBlock;
@@ -22,6 +22,10 @@ use objc2_vision::{
 };
 
 use crate::util::Frame;
+
+/// The cap on waiting for ScreenCaptureKit's completion handler, which is
+/// documented to fire exactly once but is not enforced.
+const CAPTURE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Screenshot the screen region `rect`.
 ///
@@ -54,12 +58,18 @@ fn capture_rect(rect: CGRect) -> Result<Retained<CGImage>, String> {
         )
     };
 
+    let deadline = Instant::now() + CAPTURE_TIMEOUT;
     loop {
         match rx.recv_timeout(Duration::from_millis(10)) {
             Ok(result) => return result,
-            Err(RecvTimeoutError::Timeout) => unsafe {
-                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, Boolean::from(false));
-            },
+            Err(RecvTimeoutError::Timeout) => {
+                if Instant::now() >= deadline {
+                    return Err("Timed out waiting for the capture.".to_string());
+                }
+                unsafe {
+                    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, Boolean::from(false));
+                }
+            }
             Err(RecvTimeoutError::Disconnected) => return Err("Channel closed.".to_string()),
         }
     }
