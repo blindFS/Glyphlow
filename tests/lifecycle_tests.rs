@@ -22,6 +22,20 @@ use tokio::sync::mpsc;
 /// `alpha` = `A`, `beta` = `B`, `gamma` = `C`, `delta` = `D`, `zeta` = `E`.
 const FIVE_WORDS: &str = "alpha beta gamma delta zeta";
 
+/// The default workflow that puts the clipboard's text up for action.
+///
+/// It is a workflow rather than a signal of its own: the scenarios address it
+/// by name, the dashboard's `C` reaches it by index.
+const READ_CLIPBOARD: &str = "Read Clipboard";
+
+/// The index [`READ_CLIPBOARD`] has in the default workflows, for the signals
+/// the listener emits — it names a workflow by index, not by name.
+fn read_clipboard_idx() -> usize {
+    GlyphlowConfig::default()
+        .find_workflow(READ_CLIPBOARD)
+        .expect("the default config should offer Read Clipboard")
+}
+
 /// Stands for "no scenario is being serviced", so a notification logged outside
 /// the event loop has no slot to land in.
 const NO_SCENARIO: usize = usize::MAX;
@@ -109,14 +123,14 @@ impl Scenario {
 
     /// Whether the scenario reads or writes the system clipboard.
     ///
-    /// A key press can reach it too — `C` on the dashboard reads it — but the
-    /// scenarios that do that set it as well, which is what this looks for.
+    /// A key press can reach it too — `C` on the dashboard runs the Read
+    /// Clipboard workflow — but the scenarios that do that set it as well,
+    /// which is what this looks for.
     fn uses_clipboard(&self) -> bool {
-        self.events.iter().any(|event| {
-            matches!(
-                event,
-                TestEvent::SetClipboard(_) | TestEvent::SendSignal(AppSignal::ReadClipboard)
-            )
+        self.events.iter().any(|event| match event {
+            TestEvent::SetClipboard(_) => true,
+            TestEvent::SendSignal(AppSignal::RunWorkFlowByName(name)) => name == READ_CLIPBOARD,
+            _ => false,
         })
     }
 }
@@ -345,7 +359,7 @@ fn main() {
             "Scenario 12: Backspace leaves word picking for the text action menu",
             vec![
                 TestEvent::SetClipboard(FIVE_WORDS.to_string()),
-                TestEvent::SendSignal(AppSignal::ReadClipboard),
+                TestEvent::SendSignal(AppSignal::RunWorkFlowByName(READ_CLIPBOARD.into())),
                 TestEvent::ExpectMode(Mode::TextActionMenu),
                 TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
                 TestEvent::ExpectMode(Mode::WordPicking),
@@ -360,7 +374,7 @@ fn main() {
             "Scenario 13: Backspace pops the hint key, then the search filter",
             vec![
                 TestEvent::SetClipboard(FIVE_WORDS.to_string()),
-                TestEvent::SendSignal(AppSignal::ReadClipboard),
+                TestEvent::SendSignal(AppSignal::RunWorkFlowByName(READ_CLIPBOARD.into())),
                 TestEvent::ExpectMode(Mode::TextActionMenu),
                 TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
                 TestEvent::ExpectMode(Mode::WordPicking),
@@ -393,7 +407,7 @@ fn main() {
             "Scenario 14: Backspace cancels the selected side of a range",
             vec![
                 TestEvent::SetClipboard(FIVE_WORDS.to_string()),
-                TestEvent::SendSignal(AppSignal::ReadClipboard),
+                TestEvent::SendSignal(AppSignal::RunWorkFlowByName(READ_CLIPBOARD.into())),
                 TestEvent::ExpectMode(Mode::TextActionMenu),
                 TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
                 TestEvent::ExpectMode(Mode::WordPicking),
@@ -421,7 +435,7 @@ fn main() {
             "Scenario 15: Backspace in search pops the query, then leaves search",
             vec![
                 TestEvent::SetClipboard(FIVE_WORDS.to_string()),
-                TestEvent::SendSignal(AppSignal::ReadClipboard),
+                TestEvent::SendSignal(AppSignal::RunWorkFlowByName(READ_CLIPBOARD.into())),
                 TestEvent::ExpectMode(Mode::TextActionMenu),
                 TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
                 TestEvent::ExpectMode(Mode::WordPicking),
@@ -484,7 +498,7 @@ fn main() {
                 TestEvent::ClearSignals,
                 // The menu is usable again: the next key is not swallowed by the typo.
                 TestEvent::PressKey(Key::KeyC),
-                TestEvent::ExpectSignal(AppSignal::ReadClipboard),
+                TestEvent::ExpectSignal(AppSignal::RunWorkFlow(read_clipboard_idx())),
                 TestEvent::ReleaseKey(Key::KeyC),
             ],
         ),
@@ -513,7 +527,7 @@ fn main() {
             "Scenario 19: Text at hand takes the tap, whatever the key",
             vec![
                 TestEvent::SetClipboard(FIVE_WORDS.to_string()),
-                TestEvent::SendSignal(AppSignal::ReadClipboard),
+                TestEvent::SendSignal(AppSignal::RunWorkFlowByName(READ_CLIPBOARD.into())),
                 TestEvent::ExpectMode(Mode::TextActionMenu),
                 TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
                 TestEvent::ExpectMode(Mode::WordPicking),

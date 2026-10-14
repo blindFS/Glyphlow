@@ -1,13 +1,12 @@
 use crate::{
     AppSignal, KeyState, Mode, ModifierKey, ScrollAction,
-    action::{OCRResult, WordPicker, screen_shot},
+    action::{OCRResult, WordPicker},
     ax_element::{ElementCache, ElementOfInterest, Target},
     config::{AppOverride, GlyphlowConfig, RoleOfInterest, WorkFlowAction},
     os_util::AppWindowInfo,
     user_interface::{HintBox, UIDrawer, get_screen_frames},
     util::Frame,
 };
-use log::Level;
 use monio::Key;
 use objc2::MainThreadMarker;
 use std::{
@@ -307,20 +306,6 @@ impl AppEngine {
                     self.set_mode(Mode::DashBoard);
                 }
             }
-            AppSignal::ScreenShot => {
-                self.clear_cache();
-                self.clear_drawing();
-                let frame = self
-                    .selected
-                    .as_ref()
-                    .map(|eoi| eoi.frame)
-                    .unwrap_or(self.last_app_window_info.frame);
-                if screen_shot(&frame).await {
-                    self.resume_or_notify_deactivate("Screenshot copied to clipboard.");
-                } else {
-                    self.notify_then_deactivate("Failed to take screenshot.", Level::Error);
-                };
-            }
             AppSignal::FrameOCR => {
                 if let Some(ElementOfInterest { frame, .. }) = self.selected.as_ref() {
                     self.target = Target::ImageOCR;
@@ -330,7 +315,6 @@ impl AppEngine {
                 }
             }
             AppSignal::FileUpdate(pb) => self.handle_file_update(pb),
-            AppSignal::ReadClipboard => self.read_clipboard(),
             AppSignal::ClearNotification(id) => {
                 if self.check_mode(Mode::WaitAndDeactivate) {
                     self.deactivate();

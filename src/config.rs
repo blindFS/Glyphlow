@@ -69,8 +69,6 @@ pub enum WorkFlowAction {
     Press,
     Hover,
     Move(f64, f64),
-    /// Narrow the cursor down through a recursive grid of labelled cells, until
-    /// Enter accepts the cell or Esc abandons the workflow. See [`GridConfig`].
     GridMove,
     Click,
     RightClick,
@@ -85,10 +83,8 @@ pub enum WorkFlowAction {
     SearchFor(CustomTarget),
     Sleep(u64),
     Activate(Target),
-    /// Put the clipboard's text up for action.
     ReadClipboard,
-    /// Run `actions` `n` times; a step that suspends the queue resumes the
-    /// round on the next pick.
+    ScreenShot,
     Repeat(usize, Box<[WorkFlowAction]>),
 }
 
@@ -983,6 +979,20 @@ fn default_workflows() -> Vec<WorkFlow> {
             starting_role: RoleOfInterest::Window,
             valid_app_ids: None,
             actions: vec![WorkFlowAction::GridMove, WorkFlowAction::Click],
+        },
+        WorkFlow {
+            key: "R".into(),
+            display: "󰆟 ScreenShot".into(),
+            starting_role: RoleOfInterest::Any,
+            valid_app_ids: None,
+            actions: vec![WorkFlowAction::ScreenShot],
+        },
+        WorkFlow {
+            key: "C".into(),
+            display: "󰅇 Read Clipboard".into(),
+            starting_role: RoleOfInterest::Window,
+            valid_app_ids: None,
+            actions: vec![WorkFlowAction::ReadClipboard],
         },
     ]
 }

@@ -1,6 +1,13 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::mpsc::{RecvTimeoutError, channel},
+    time::Duration,
+};
 
 use block2::RcBlock;
+use core_foundation::{
+    base::Boolean,
+    runloop::{CFRunLoopRunInMode, kCFRunLoopDefaultMode},
+};
 use objc2::{
     AnyThread,
     rc::{DefaultRetained, Retained, autoreleasepool},
@@ -13,34 +20,31 @@ use objc2_screen_capture_kit::SCScreenshotManager;
 use objc2_vision::{
     VNImageRequestHandler, VNRecognizeTextRequest, VNRecognizedTextObservation, VNRequest,
 };
-use tokio::sync::oneshot;
 
 use crate::util::Frame;
 
-/// Screenshot the screen region `rect`, bridging ScreenCaptureKit's completion
-/// handler back into an `async` fn.
-async fn capture_rect(rect: CGRect) -> Result<Retained<CGImage>, String> {
-    let (tx, rx) = oneshot::channel();
-    let tx_shared = Arc::new(Mutex::new(Some(tx)));
+/// Screenshot the screen region `rect`.
+///
+/// ScreenCaptureKit only offers a completion-handler API, so the handler is
+/// bridged back through a channel. The wait runs the run loop, because the
+/// handler may be delivered on the main one.
+fn capture_rect(rect: CGRect) -> Result<Retained<CGImage>, String> {
+    let (tx, rx) = channel();
 
     let inner_result_callback = RcBlock::new(move |output: *mut CGImage, error: *mut NSError| {
-        let Some(s) = tx_shared.lock().ok().and_then(|mut x| x.take()) else {
-            return;
-        };
-        if !error.is_null() || output.is_null() {
+        let result = if !error.is_null() || output.is_null() {
             let err = unsafe { Retained::retain(error) };
             let description = err
                 .map(|re| re.localizedDescription().to_string())
                 .unwrap_or_default();
-            let _ = s.send(Err(format!("Capture failed: {description}")));
+            Err(format!("Capture failed: {description}"))
         } else {
-            let cg_image = unsafe { Retained::retain(output) };
-            if let Some(retained) = cg_image {
-                let _ = s.send(Ok(retained));
-            } else {
-                let _ = s.send(Err("No image in screenshot output.".to_string()));
+            match unsafe { Retained::retain(output) } {
+                Some(cg_image) => Ok(cg_image),
+                None => Err("No image in screenshot output.".to_string()),
             }
-        }
+        };
+        let _ = tx.send(result);
     });
 
     unsafe {
@@ -50,13 +54,21 @@ async fn capture_rect(rect: CGRect) -> Result<Retained<CGImage>, String> {
         )
     };
 
-    rx.await.map_err(|_| "Channel closed.".to_string())?
+    loop {
+        match rx.recv_timeout(Duration::from_millis(10)) {
+            Ok(result) => return result,
+            Err(RecvTimeoutError::Timeout) => unsafe {
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, Boolean::from(false));
+            },
+            Err(RecvTimeoutError::Disconnected) => return Err("Channel closed.".to_string()),
+        }
+    }
 }
 
 /// Capture `frame` and put it on the clipboard as JPEG. `false` on failure.
-pub async fn screen_shot(frame: &Frame) -> bool {
+pub fn screen_shot(frame: &Frame) -> bool {
     let rect = frame.to_cgrect();
-    let cg_image = match capture_rect(rect).await {
+    let cg_image = match capture_rect(rect) {
         Ok(img) => img,
         Err(e) => {
             log::error!("{e}");
@@ -99,7 +111,7 @@ pub async fn perform_ocr(
     let rect = frame.to_cgrect();
     let (w, h) = frame.size();
     unsafe {
-        let cg_image = capture_rect(rect).await?;
+        let cg_image = capture_rect(rect)?;
         autoreleasepool(move |_| {
             let request = VNRecognizeTextRequest::default_retained();
             request.setRecognitionLevel(objc2_vision::VNRequestTextRecognitionLevel::Accurate);
