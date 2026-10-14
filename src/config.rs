@@ -901,7 +901,7 @@ fn default_text_actions() -> Vec<CommandAction> {
 fn default_workflows() -> Vec<WorkFlow> {
     vec![
         WorkFlow {
-            key: "R".into(),
+            key: "PR".into(),
             display: " ProofRead".into(),
             starting_role: RoleOfInterest::TextField,
             valid_app_ids: None,
