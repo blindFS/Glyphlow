@@ -156,6 +156,12 @@ impl AppEngine {
                 // The text action menu takes over from here.
                 return true;
             }
+            WorkFlowAction::ScreenShot => {
+                self.take_screenshot();
+                // `take_screenshot` finishes the run: it either deactivates or
+                // carries on with the rest of the queue.
+                return true;
+            }
             WorkFlowAction::Move(x, y) => {
                 self.move_mouse_with_trail(*x, *y);
                 return false;

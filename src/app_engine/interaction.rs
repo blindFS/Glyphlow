@@ -2,7 +2,8 @@ use super::AppEngine;
 use crate::{
     AppSignal, Mode, ScrollAction, TextAction,
     action::{
-        WordPicker, get_dictionary_attributed_string, text_from_clipboard, text_to_clipboard,
+        WordPicker, get_dictionary_attributed_string, screen_shot, text_from_clipboard,
+        text_to_clipboard,
     },
     ax_element::{ElementOfInterest, GetAttribute, SetAttribute},
     config::RoleOfInterest,
@@ -360,6 +361,23 @@ impl AppEngine {
             self.update_selected_text_and_show_menu(text);
         } else {
             self.notify_then_deactivate("No text found in clipboard.", Level::Warn);
+        }
+    }
+
+    /// Screenshot the selection, or the whole focused window when nothing is
+    /// selected, and put it on the clipboard.
+    pub(super) fn take_screenshot(&mut self) {
+        self.clear_cache();
+        self.clear_drawing();
+        let frame = self
+            .selected
+            .as_ref()
+            .map(|eoi| eoi.frame)
+            .unwrap_or(self.last_app_window_info.frame);
+        if screen_shot(&frame) {
+            self.resume_or_notify_deactivate("Screenshot copied to clipboard.");
+        } else {
+            self.notify_then_deactivate("Failed to take screenshot.", Level::Error);
         }
     }
 

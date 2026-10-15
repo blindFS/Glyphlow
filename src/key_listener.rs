@@ -115,8 +115,6 @@ pub enum AppSignal {
     /// Run a workflow addressed by (a fragment of) its display name,
     /// resolved against the server side config. Used by the CLI.
     RunWorkFlowByName(String),
-    ReadClipboard,
-    ScreenShot,
     FrameOCR,
     StartSearch,
     FinishSearch(FilterMode),
@@ -143,7 +141,7 @@ impl MenuItem {
     }
 }
 
-pub const DASH_BOARD_MENU_ITEMS: [MenuItem; 9] = [
+pub const DASH_BOARD_MENU_ITEMS: [MenuItem; 7] = [
     MenuItem::new("󰦨 Text", "T", AppSignal::Activate(Target::Text)),
     MenuItem::new("󰳽 Press", "P", AppSignal::Activate(Target::Clickable)),
     MenuItem::new("󱕒 ScrollBar", "S", AppSignal::Activate(Target::Scrollable)),
@@ -154,9 +152,7 @@ pub const DASH_BOARD_MENU_ITEMS: [MenuItem; 9] = [
         "E",
         AppSignal::Activate(Target::ChildElement),
     ),
-    MenuItem::new("󰆟 ScreenShot", "R", AppSignal::ScreenShot),
     MenuItem::new("󱄺 Image OCR", "O", AppSignal::FrameOCR),
-    MenuItem::new("󰅇 Read Clipboard", "C", AppSignal::ReadClipboard),
 ];
 
 pub const SCROLLBAR_MENU_ITEMS: [MenuItem; 6] = [
