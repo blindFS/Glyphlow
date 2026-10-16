@@ -42,6 +42,13 @@ impl AppEngine {
         self.simulate_click_holding(x, y, button, &[]);
     }
 
+    /// Move the cursor and click, with a ripple at the click point.
+    pub(super) fn simulate_click_with_modifiers(&mut self, x: f64, y: f64, button: Button) {
+        let modifers = self.click_modifiers.keys();
+        self.simulate_click_holding(x, y, button, &modifers);
+        self.click_modifiers.reset();
+    }
+
     /// [`Self::simulate_click`] with `keys` held down for the click itself.
     ///
     /// Left click deliberately picks an out-of-range colour index, so it falls
