@@ -466,6 +466,10 @@ impl KeyListener {
                 true
             }
             Mode::Grid => {
+                if let Some(modifier) = ModifierKey::of(&key) {
+                    self.send(AppSignal::ToggleModifier(modifier));
+                    return true;
+                }
                 match key {
                     Key::Enter => self.send(AppSignal::GridAccept),
                     Key::Backspace | Key::Delete => self.send(AppSignal::GridBack),
