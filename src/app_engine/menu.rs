@@ -27,16 +27,6 @@ pub(super) struct MenuRow<'a> {
     pub(super) action: AppSignal,
 }
 
-/// What a key press means for the menu that is up.
-enum Outcome {
-    /// A row owns the prefix: run it.
-    Run(AppSignal),
-    /// The prefix still completes rows: wait for the next key.
-    Keep,
-    /// No row can complete the prefix: it must not be kept.
-    Reject,
-}
-
 impl MenuScope {
     /// The menu's title line.
     pub(super) fn header(self) -> &'static str {
@@ -215,7 +205,11 @@ impl AppEngine {
             .workflows
             .iter()
             .enumerate()
-            .filter(move |(_, wf)| offers_workflows && self.is_workflow_valid(wf))
+            // Prefix before applicability: the prefix is the cheaper test, and a
+            // row it cannot complete never needs the dearer one.
+            .filter(move |(_, wf)| {
+                offers_workflows && wf.key.starts_with(prefix) && self.is_workflow_valid(wf)
+            })
             .map(|(idx, wf)| MenuRow {
                 key: &wf.key,
                 display: &wf.display,
@@ -266,7 +260,8 @@ impl AppEngine {
     ///
     /// The prefix is typed and untyped in place: a key that reaches no row leaves
     /// it exactly as it found it, so another key can still complete it and
-    /// backspace can still undo it.
+    /// backspace can still undo it. `drawn` is false for a dictionary, which
+    /// answers to the same keys but has no menu to redraw.
     pub(super) fn menu_key(&mut self, key_char: char) {
         let (scope, drawn) = match self.mode() {
             Mode::Menu(scope) => (scope, true),
@@ -275,43 +270,33 @@ impl AppEngine {
         };
 
         self.menu_prefix.push(key_char);
-        match self.interpret(scope, drawn) {
-            Outcome::Run(action) => {
+
+        // One filtered row list serves both the decision and the drawing, and it
+        // is dropped before the prefix is touched: it borrows `self`.
+        let (action, reachable) = {
+            let mut rows = self.menu_rows(scope, &self.menu_prefix);
+
+            // Exact before prefix: a row whose key is the prefix itself owns it,
+            // even when a longer row starts with the same keys. The cost is that
+            // a key which is a proper prefix of another's cannot be reached; no
+            // menu ships such a pair.
+            match rows.clone().find(|row| row.key == self.menu_prefix) {
+                Some(row) => (Some(row.action), true),
+                None if drawn => (None, self.show_menu_rows(scope, &self.menu_prefix, rows)),
+                None => (None, rows.next().is_some()),
+            }
+        };
+
+        match action {
+            Some(action) => {
                 self.menu_prefix.clear();
                 self.run_menu_action(action);
             }
-            Outcome::Keep => (),
-            Outcome::Reject => {
+            // A key that reaches no row is not kept: the prefix is left alone.
+            None if !reachable => {
                 self.menu_prefix.pop();
             }
-        }
-    }
-
-    /// Interpret the key just typed into `menu_prefix`, drawing what it changes.
-    ///
-    /// The one filtered row list serves both the decision and the drawing.
-    /// `drawn` is false for a dictionary: it answers to the same keys but has no
-    /// menu to redraw.
-    fn interpret(&self, scope: MenuScope, drawn: bool) -> Outcome {
-        let mut rows = self.menu_rows(scope, &self.menu_prefix);
-
-        // Exact before prefix: a row whose key is the prefix itself owns it, even
-        // when a longer row starts with the same keys. The cost is that a key
-        // which is a proper prefix of another's cannot be reached; no menu ships
-        // such a pair.
-        if let Some(row) = rows.clone().find(|row| row.key == self.menu_prefix) {
-            return Outcome::Run(row.action);
-        }
-
-        let reachable = if drawn {
-            self.show_menu_rows(scope, &self.menu_prefix, rows)
-        } else {
-            rows.next().is_some()
-        };
-        if reachable {
-            Outcome::Keep
-        } else {
-            Outcome::Reject
+            None => (),
         }
     }
 
