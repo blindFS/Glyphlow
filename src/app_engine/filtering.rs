@@ -131,7 +131,7 @@ impl AppEngine {
                 }
                 Target::Image => {
                     self.select(eoi.clone());
-                    self.show_element_menu("", role);
+                    self.show_element_menu(role);
                 }
                 Target::Custom(_) => {
                     self.select(eoi.clone());
@@ -167,7 +167,7 @@ impl AppEngine {
                         }
                     } else if context.is_some() {
                         self.select(eoi.clone());
-                        self.show_element_menu("", role);
+                        self.show_element_menu(role);
                     }
                 }
                 Target::ChildElement => {
@@ -189,12 +189,12 @@ impl AppEngine {
                             .as_ref()
                             .map(|eoi| eoi.role())
                             .unwrap_or_default();
-                        self.show_element_menu("", role);
+                        self.show_element_menu(role);
                     }
                 }
                 Target::Scrollable => {
                     self.select(eoi.clone());
-                    self.show_element_menu("", RoleOfInterest::ScrollBar);
+                    self.show_element_menu(RoleOfInterest::ScrollBar);
                 }
                 Target::Editable => {
                     self.selected = Some(eoi.clone());
@@ -248,7 +248,7 @@ impl AppEngine {
                 {
                     // Go back to text action menu
                     self.word_picker = None;
-                    self.show_element_menu("", RoleOfInterest::PseudoText);
+                    self.show_element_menu(RoleOfInterest::PseudoText);
                 } else {
                     self.multi_selection.clear_one_side();
                     self.draw_word_picker();

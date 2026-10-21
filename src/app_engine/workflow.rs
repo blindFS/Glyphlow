@@ -116,10 +116,7 @@ impl AppEngine {
             }
             WorkFlowAction::GlyphlowMenu => {
                 match self.selected.as_ref() {
-                    Some(eoi) => {
-                        let scope = self.menu_scope_for(eoi.role());
-                        self.show_menu(scope, "");
-                    }
+                    Some(eoi) => self.show_element_menu(eoi.role()),
                     None => self.draw_dashboard(),
                 }
                 // HACK: break the loop so the notification will be kept,

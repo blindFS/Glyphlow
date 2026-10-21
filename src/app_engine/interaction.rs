@@ -313,11 +313,11 @@ impl AppEngine {
                 }
                 ScrollAction::Top => {
                     self.scroll_to_value(element, 0.0);
-                    self.show_element_menu("", RoleOfInterest::ScrollBar);
+                    self.show_element_menu(RoleOfInterest::ScrollBar);
                 }
                 ScrollAction::Bottom => {
                     self.scroll_to_value(element, 1.0);
-                    self.show_element_menu("", RoleOfInterest::ScrollBar);
+                    self.show_element_menu(RoleOfInterest::ScrollBar);
                 }
             }
         } else {
@@ -337,11 +337,11 @@ impl AppEngine {
                 }
                 ScrollAction::Top => {
                     Self::simulate_scroll(999999.0);
-                    self.show_element_menu("", RoleOfInterest::ScrollBar);
+                    self.show_element_menu(RoleOfInterest::ScrollBar);
                 }
                 ScrollAction::Bottom => {
                     Self::simulate_scroll(-999999.0);
-                    self.show_element_menu("", RoleOfInterest::ScrollBar);
+                    self.show_element_menu(RoleOfInterest::ScrollBar);
                 }
             }
         }
@@ -355,7 +355,7 @@ impl AppEngine {
 
     pub(super) fn update_selected_text_and_show_menu(&mut self, new_text: String) {
         self.update_selected_text(new_text);
-        self.show_element_menu("", RoleOfInterest::PseudoText);
+        self.show_element_menu(RoleOfInterest::PseudoText);
     }
 
     /// Put the clipboard's text up for action, or warn when it is empty.

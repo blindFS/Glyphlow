@@ -252,7 +252,7 @@ fn main() {
                 TestEvent::ReleaseKey(Key::AltLeft),
                 TestEvent::ReleaseKey(Key::KeyG),
                 TestEvent::ExpectMode(Mode::Menu(MenuScope::Dashboard)),
-                TestEvent::PressKey(Key::KeyC), // Read Clipboard -> transitions to TextActionMenu
+                TestEvent::PressKey(Key::KeyC), // Read Clipboard -> the text menu
                 TestEvent::ReleaseKey(Key::KeyC),
                 TestEvent::ExpectMode(Mode::Menu(MenuScope::Text)),
                 TestEvent::ClearSignals,
@@ -271,7 +271,7 @@ fn main() {
                 TestEvent::ReleaseKey(Key::AltLeft),
                 TestEvent::ReleaseKey(Key::KeyG),
                 TestEvent::ExpectMode(Mode::Menu(MenuScope::Dashboard)),
-                TestEvent::PressKey(Key::KeyC), // Read Clipboard -> transitions to TextActionMenu
+                TestEvent::PressKey(Key::KeyC), // Read Clipboard -> the text menu
                 TestEvent::ReleaseKey(Key::KeyC),
                 TestEvent::ExpectMode(Mode::Menu(MenuScope::Text)),
                 TestEvent::PressKey(Key::KeyS), // Split -> transitions to WordPicking

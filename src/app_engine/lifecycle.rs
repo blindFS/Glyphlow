@@ -439,7 +439,7 @@ impl AppEngine {
             // Fallback to mouse scroll if no scrollbar found
             let (x, y) = eoi.frame.center();
             self.move_mouse_with_trail(x, y);
-            self.show_element_menu("", RoleOfInterest::ScrollBar);
+            self.show_element_menu(RoleOfInterest::ScrollBar);
         } else if target != Target::ChildElement {
             self.clear_drawing();
             self.notify_then_deactivate("No relevant UI elements found.", Level::Warn);

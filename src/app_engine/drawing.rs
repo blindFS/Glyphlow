@@ -167,15 +167,11 @@ impl AppEngine {
             .filter(|row| row.key.starts_with(prefix))
             .collect();
 
-        if rows.is_empty() {
+        // No reachable row means the prefix outlives what it named, so this is
+        // the wrong-key message rather than a bare title.
+        let Some(key_width) = rows.iter().map(|row| row.key.chars().count()).max() else {
             return wrong_key_menu_string();
-        }
-
-        let key_width = rows
-            .iter()
-            .map(|row| row.key.chars().count())
-            .max()
-            .unwrap_or(1);
+        };
         for row in rows {
             msg.push_key_map_entry(row.key, row.display, prefix_len, key_width);
         }

@@ -195,7 +195,7 @@ impl AppEngine {
     ///
     /// A text or scroll activation falls back to its own menu even when the
     /// picked element's role would have offered the dashboard.
-    pub(super) fn menu_scope_for(&self, role: RoleOfInterest) -> MenuScope {
+    fn menu_scope_for(&self, role: RoleOfInterest) -> MenuScope {
         match role {
             RoleOfInterest::Image => MenuScope::Image,
             RoleOfInterest::ScrollBar => MenuScope::Scroll,
@@ -292,25 +292,23 @@ impl AppEngine {
             _ => return,
         };
 
-        let mut prefix = self.menu_prefix.clone();
-        prefix.push(key_char);
-
-        match self.resolve(scope, &prefix) {
+        // Typed and untyped in place: a key that reaches no row leaves the
+        // prefix exactly as it found it, so another key can still complete it
+        // and backspace can still undo it.
+        self.menu_prefix.push(key_char);
+        match self.resolve(scope, &self.menu_prefix) {
             Resolution::Exact(action) => {
                 self.menu_prefix.clear();
                 self.run_menu_action(action);
             }
-            Resolution::Prefix => {
-                self.menu_prefix = prefix;
+            Resolution::Prefix if drawn => self.show_menu(scope, &self.menu_prefix),
+            Resolution::Prefix => (),
+            Resolution::Dead => {
+                self.menu_prefix.pop();
                 if drawn {
-                    self.show_menu(scope, &self.menu_prefix);
+                    self.show_wrong_key(scope);
                 }
             }
-            // The key belongs to no row here: leave the prefix alone and say so,
-            // so another key can still complete it and backspace can still undo
-            // it.
-            Resolution::Dead if drawn => self.show_wrong_key(scope),
-            Resolution::Dead => (),
         }
     }
 
@@ -344,8 +342,8 @@ impl AppEngine {
         }
     }
 
-    /// Draw the menu `role` calls for, around `prefix`.
-    pub(super) fn show_element_menu(&self, prefix: &str, role: RoleOfInterest) {
-        self.show_menu(self.menu_scope_for(role), prefix);
+    /// Draw the menu `role` calls for.
+    pub(super) fn show_element_menu(&self, role: RoleOfInterest) {
+        self.show_menu(self.menu_scope_for(role), "");
     }
 }

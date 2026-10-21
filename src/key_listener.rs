@@ -135,7 +135,8 @@ pub enum Mode {
     Idle,
     /// A keyed menu is up, and `MenuScope` says which rows it offers.
     Menu(MenuScope),
-    /// A dictionary is on screen; keys scroll it.
+    /// A dictionary is on screen. Not a menu: it is scrolled by the keys
+    /// [`MenuScope::Scroll`] resolves.
     DictionaryScrolling,
     WordPicking,
     /// A search is open, started from the given filtering mode.
@@ -237,6 +238,9 @@ impl KeyListener {
                             .is_some_and(|r| *k == r || key_state.pressed_keys.contains(&r))
                 }) {
                     self.send(AppSignal::OpenDashboard);
+                    // `draw_dashboard` sets this on the signal, but the keys
+                    // that arrive before the engine handles it have to be eaten
+                    // as menu keys already, so the scope is claimed here too.
                     *state = Mode::Menu(MenuScope::Dashboard);
                     true
                 } else {
