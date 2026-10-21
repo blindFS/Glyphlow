@@ -2,7 +2,6 @@ use super::AppEngine;
 use crate::{
     AppSignal, Mode, ScrollAction, TextAction, ax_element::Target, config::RoleOfInterest,
 };
-use std::collections::HashSet;
 
 /// Which menu is up, and therefore which rows a key is resolved against.
 ///
@@ -172,24 +171,6 @@ const SCROLL_ROWS: &[MenuRow<'static>] = &[
     },
 ];
 
-/// Keep the first row to claim a key, so a menu shows one row per key.
-///
-/// Dropping the later rows is what keeps the drawing and the resolution in step:
-/// a key the menu does not show cannot be reached, and a key it does show always
-/// reaches the row printed next to it.
-fn first_claim_wins(rows: Vec<MenuRow<'_>>) -> Vec<MenuRow<'_>> {
-    let mut claimed = HashSet::new();
-    rows.into_iter()
-        .filter(|row| {
-            let first = claimed.insert(row.key);
-            if !first {
-                log::debug!("Menu key `{}` of `{}` is shadowed", row.key, row.display);
-            }
-            first
-        })
-        .collect()
-}
-
 impl AppEngine {
     /// The menu a selection of `role` calls for.
     ///
@@ -215,52 +196,57 @@ impl AppEngine {
 
     /// The rows `scope` offers the current selection, in resolution order.
     ///
-    /// Applicability is applied here, once: a row that cannot run is not in the
-    /// list, so neither the drawing nor a key press can reach it.
-    pub(super) fn menu_rows(&self, scope: MenuScope) -> Vec<MenuRow<'_>> {
-        let mut rows = Vec::new();
+    /// Applicability is applied here: a row that cannot run is never yielded, so
+    /// neither the drawing nor a key press can reach it. A scope that offers no
+    /// workflows, or no text actions, contributes an empty span, so one chain
+    /// serves them all and nothing is collected on the way.
+    pub(super) fn menu_rows(&self, scope: MenuScope) -> impl Iterator<Item = MenuRow<'_>> {
+        let workflows = self
+            .config
+            .workflows
+            .iter()
+            .enumerate()
+            .filter(move |(_, wf)| scope.offers_workflows() && self.is_workflow_valid(wf))
+            .map(|(idx, wf)| MenuRow {
+                key: &wf.key,
+                display: &wf.display,
+                action: AppSignal::RunWorkFlow(idx),
+            });
 
-        if scope.offers_workflows() {
-            for (idx, wf) in self.config.workflows.iter().enumerate() {
-                if self.is_workflow_valid(wf) {
-                    rows.push(MenuRow {
-                        key: &wf.key,
-                        display: &wf.display,
-                        action: AppSignal::RunWorkFlow(idx),
-                    });
-                }
-            }
-        }
+        let text_actions = (scope == MenuScope::Text)
+            .then(|| {
+                self.config
+                    .text_actions
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, action)| MenuRow {
+                        key: &action.key,
+                        display: &action.display,
+                        action: AppSignal::TextAction(TextAction::UserDefined(idx)),
+                    })
+            })
+            .into_iter()
+            .flatten();
 
-        if scope == MenuScope::Text {
-            for (idx, action) in self.config.text_actions.iter().enumerate() {
-                rows.push(MenuRow {
-                    key: &action.key,
-                    display: &action.display,
-                    action: AppSignal::TextAction(TextAction::UserDefined(idx)),
-                });
-            }
-        }
-
-        if let Some(editor) = self.config.editor.as_ref()
-            && let Some(action) = scope.editor_action()
-        {
-            rows.push(MenuRow {
+        let editor = self
+            .config
+            .editor
+            .as_ref()
+            .zip(scope.editor_action())
+            .into_iter()
+            .map(|(editor, action)| MenuRow {
                 key: &editor.key,
                 display: &editor.display,
                 action,
             });
-        }
 
-        for row in scope.builtin_rows() {
-            rows.push(MenuRow {
-                key: row.key,
-                display: row.display,
-                action: row.action.clone(),
-            });
-        }
+        let builtins = scope.builtin_rows().iter().map(|row| MenuRow {
+            key: row.key,
+            display: row.display,
+            action: row.action.clone(),
+        });
 
-        first_claim_wins(rows)
+        workflows.chain(text_actions).chain(editor).chain(builtins)
     }
 
     /// What `prefix` means in `scope`'s menu.
@@ -269,12 +255,14 @@ impl AppEngine {
     /// keys, which is what lets a menu mix single and multi key rows. The cost
     /// is that a row whose key is a proper prefix of another's can never be
     /// reached; no menu ships such a pair.
+    ///
+    /// No dedupe is needed: `find` returns the first row to claim a key, which
+    /// is the one the drawing shows. [`Self::menu_string`] drops the rest.
     fn resolve(&self, scope: MenuScope, prefix: &str) -> Resolution {
-        let rows = self.menu_rows(scope);
-        if let Some(row) = rows.iter().find(|row| row.key == prefix) {
-            return Resolution::Exact(row.action.clone());
+        if let Some(row) = self.menu_rows(scope).find(|row| row.key == prefix) {
+            return Resolution::Exact(row.action);
         }
-        if rows.iter().any(|row| row.key.starts_with(prefix)) {
+        if self.menu_rows(scope).any(|row| row.key.starts_with(prefix)) {
             Resolution::Prefix
         } else {
             Resolution::Dead

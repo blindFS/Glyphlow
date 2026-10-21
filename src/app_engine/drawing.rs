@@ -146,9 +146,9 @@ impl AppEngine {
     /// The menu for `scope` around `prefix`: a title, the selection when the
     /// scope acts on text, then a row per reachable key.
     ///
-    /// An empty row list means the prefix outlived what it named — a config
-    /// reload can drop the workflow it was typed for — so it says so instead of
-    /// drawing a bare title.
+    /// Drawing no rows means the prefix outlived what it named — a config reload
+    /// can drop the workflow it was typed for — so it says so instead of drawing
+    /// a bare title.
     fn menu_string(&self, scope: MenuScope, prefix: &str) -> MenuString {
         let mut msg = MenuString::styled(scope.header(), MenuStyle::Header);
 
@@ -161,18 +161,29 @@ impl AppEngine {
         }
 
         let prefix_len = prefix.chars().count();
-        let rows: Vec<_> = self
-            .menu_rows(scope)
-            .into_iter()
-            .filter(|row| row.key.starts_with(prefix))
-            .collect();
+        // One row per key: the first to claim it is drawn, and the shadowed
+        // duplicates are dropped here rather than in the resolution, which only
+        // has to take the first. Each pass keeps its own record of what it takes,
+        // so the second pass is the same rows in the same order.
+        let reachable = || {
+            let mut claimed: Vec<&str> = Vec::new();
+            self.menu_rows(scope)
+                .filter(|row| row.key.starts_with(prefix))
+                .filter(move |row| {
+                    if claimed.contains(&row.key) {
+                        log::debug!("Menu key `{}` of `{}` is shadowed", row.key, row.display);
+                        false
+                    } else {
+                        claimed.push(row.key);
+                        true
+                    }
+                })
+        };
 
-        // No reachable row means the prefix outlives what it named, so this is
-        // the wrong-key message rather than a bare title.
-        let Some(key_width) = rows.iter().map(|row| row.key.chars().count()).max() else {
+        let Some(key_width) = reachable().map(|row| row.key.chars().count()).max() else {
             return wrong_key_menu_string();
         };
-        for row in rows {
+        for row in reachable() {
             msg.push_key_map_entry(row.key, row.display, prefix_len, key_width);
         }
         msg
