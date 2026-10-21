@@ -207,17 +207,17 @@ impl AppEngine {
             }
             WorkFlowAction::Click => {
                 let (x, y) = frame.center();
-                self.simulate_click(x, y, Button::Left);
+                self.simulate_click_with_modifiers(x, y, Button::Left);
                 return false;
             }
             WorkFlowAction::RightClick => {
                 let (x, y) = frame.center();
-                self.simulate_click(x, y, Button::Right);
+                self.simulate_click_with_modifiers(x, y, Button::Right);
                 return false;
             }
             WorkFlowAction::MiddleClick => {
                 let (x, y) = frame.center();
-                self.simulate_click(x, y, Button::Middle);
+                self.simulate_click_with_modifiers(x, y, Button::Middle);
                 return false;
             }
             _ => (),
