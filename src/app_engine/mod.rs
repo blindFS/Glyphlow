@@ -23,7 +23,10 @@ mod filtering;
 mod grid;
 mod interaction;
 mod lifecycle;
+mod menu;
 mod workflow;
+
+pub use menu::MenuScope;
 
 /// Tracks the two ends of a multi-selection: the first picked hint, and the role
 /// of the elements picked so far, which keeps both ends the same kind.
@@ -132,6 +135,8 @@ pub struct AppEngine {
     pub(super) word_picker: Option<WordPicker>,
     pub(super) hint_boxes: Vec<HintBox>,
     pub(super) hint_prefix: String,
+    /// The keys typed into the menu that is up, in order.
+    pub(super) menu_prefix: String,
     // Search related
     pub(super) is_searching: bool,
     pub(super) search_prefix: String,
@@ -188,6 +193,7 @@ impl AppEngine {
             word_picker: None,
             hint_boxes: vec![],
             hint_prefix: String::new(),
+            menu_prefix: String::new(),
             is_searching: false,
             search_prefix: String::new(),
             search_targets: vec![],
@@ -223,13 +229,9 @@ impl AppEngine {
             AppSignal::DeActivate => {
                 self.deactivate();
             }
-            AppSignal::MenuRefresh(key_prefix) => {
-                self.menu_refresh(&key_prefix, false);
-            }
-            AppSignal::DashboardRefresh(key_prefix) => {
-                self.draw_dashboard(&key_prefix);
-                self.set_mode(Mode::DashBoard);
-            }
+            AppSignal::MenuKey(key_char) => self.menu_key(key_char),
+            AppSignal::MenuBackspace => self.menu_backspace(),
+            AppSignal::OpenDashboard => self.draw_dashboard(),
             AppSignal::RunWorkFlow(idx) => {
                 self.drawer.clear_menus();
                 self.execute_workflow(idx);
@@ -256,10 +258,6 @@ impl AppEngine {
                 }
             }
             AppSignal::TextAction(ta) => self.perform_text_action(ta),
-            AppSignal::BackToTextActionMenu => {
-                self.set_mode(Mode::TextActionMenu);
-                self.menu_refresh("", false);
-            }
             AppSignal::ToggleModifier(key) => self.toggle_modifier(key),
             AppSignal::GridKey(key) => self.grid_step(key),
             AppSignal::GridAccept => self.accept_grid(),
@@ -302,8 +300,7 @@ impl AppEngine {
                 if self.target == Target::ChildElement {
                     // To act on selected parent node
                     self.clear_cache();
-                    self.draw_dashboard("");
-                    self.set_mode(Mode::DashBoard);
+                    self.draw_dashboard();
                 }
             }
             AppSignal::FrameOCR => {

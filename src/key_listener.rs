@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     path::PathBuf,
     sync::{Mutex, MutexGuard},
 };
@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
 
 use crate::{
+    app_engine::MenuScope,
     ax_element::Target,
     config::{AlphabeticKey, GlyphlowConfig, KeyBinding},
     util::SEARCH_TERM_SEPARATOR,
@@ -99,8 +100,13 @@ pub enum AppSignal {
     GridAccept,
     /// Backspace while the recursive grid was up: widen to the level above.
     GridBack,
-    MenuRefresh(String),
-    DashboardRefresh(String),
+    /// The global key was pressed: put the dashboard up.
+    OpenDashboard,
+    /// A character typed while a menu is up. Which row it completes depends on
+    /// the selection, so the engine resolves it.
+    MenuKey(char),
+    /// Backspace or Delete while a menu is up.
+    MenuBackspace,
     ActOnEnter,
     // Sub state signals
     FileUpdate(PathBuf),
@@ -121,91 +127,16 @@ pub enum AppSignal {
     /// A debounced search re-check. The id is the counter it was scheduled with,
     /// so a timer that has been superseded can be ignored.
     SearchDebounce(usize, FilterMode),
-    BackToTextActionMenu,
 }
 
-#[derive(Debug, PartialEq)]
-pub struct MenuItem {
-    pub description: &'static str,
-    pub key: &'static str,
-    pub action: AppSignal,
-}
-
-impl MenuItem {
-    pub const fn new(description: &'static str, key: &'static str, action: AppSignal) -> MenuItem {
-        MenuItem {
-            description,
-            key,
-            action,
-        }
-    }
-}
-
-pub const DASH_BOARD_MENU_ITEMS: [MenuItem; 7] = [
-    MenuItem::new("󰦨 Text", "T", AppSignal::Activate(Target::Text)),
-    MenuItem::new("󰳽 Press", "P", AppSignal::Activate(Target::Clickable)),
-    MenuItem::new("󱕒 ScrollBar", "S", AppSignal::Activate(Target::Scrollable)),
-    MenuItem::new("󰊄 Input", "I", AppSignal::Activate(Target::Editable)),
-    MenuItem::new("󰋩 Image", "M", AppSignal::Activate(Target::Image)),
-    MenuItem::new(
-        "󰙅 Element Explorer",
-        "E",
-        AppSignal::Activate(Target::ChildElement),
-    ),
-    MenuItem::new("󱄺 Image OCR", "O", AppSignal::FrameOCR),
-];
-
-pub const SCROLLBAR_MENU_ITEMS: [MenuItem; 6] = [
-    MenuItem::new(
-        "> Down/Right",
-        "J",
-        AppSignal::ScrollAction(ScrollAction::DownRight),
-    ),
-    MenuItem::new(
-        "< Up/Left",
-        "K",
-        AppSignal::ScrollAction(ScrollAction::UpLeft),
-    ),
-    MenuItem::new(
-        "+ Distance Increase",
-        "I",
-        AppSignal::ScrollAction(ScrollAction::IncreaseDistance),
-    ),
-    MenuItem::new(
-        "- Distance Decrease",
-        "D",
-        AppSignal::ScrollAction(ScrollAction::DecreaseDistance),
-    ),
-    MenuItem::new("󰢦 Top", "GG", AppSignal::ScrollAction(ScrollAction::Top)),
-    MenuItem::new(
-        "󰢢 Bottom",
-        "󰘶G",
-        AppSignal::ScrollAction(ScrollAction::Bottom),
-    ),
-];
-
-pub const TEXT_ACTION_MENU_ITEMS: [MenuItem; 3] = [
-    MenuItem::new("⮺ Copy", "C", AppSignal::TextAction(TextAction::Copy)),
-    MenuItem::new(
-        "◫ Dictionary",
-        "D",
-        AppSignal::TextAction(TextAction::Dictionary),
-    ),
-    MenuItem::new("󰃻 Split", "S", AppSignal::TextAction(TextAction::Split)),
-];
-
-pub const IMAGE_ACTION_MENU_ITEMS: [MenuItem; 1] =
-    [MenuItem::new("󱄺 Image OCR", "O", AppSignal::FrameOCR)];
-
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Mode {
-    DashBoard,
     Filtering,
     Idle,
-    Scrolling,
+    /// A keyed menu is up, and `MenuScope` says which rows it offers.
+    Menu(MenuScope),
+    /// A dictionary is on screen; keys scroll it.
     DictionaryScrolling,
-    TextActionMenu,
-    ImageActionMenu,
     WordPicking,
     /// A search is open, started from the given filtering mode.
     Searching(FilterMode),
@@ -216,111 +147,19 @@ pub enum Mode {
     WaitAndDeactivate,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
-enum MenuType {
-    Dashboard,
-    TextAction,
-    ImageAction,
-    Scroll,
-}
-
+/// Turns keys into signals.
+///
+/// Nothing here knows about menus: a menu key is forwarded unresolved, because
+/// which row it completes depends on the selection, which only the engine has.
 #[derive(Debug)]
 pub struct KeyListener {
-    menu_actions: HashMap<MenuType, HashMap<String, AppSignal>>,
-    menu_action_max_key_len: HashMap<MenuType, usize>,
     sender: Sender<AppSignal>,
     global_key_binding: KeyBinding,
 }
 
 impl KeyListener {
-    fn iter_from<const N: usize>(
-        items: [MenuItem; N],
-    ) -> impl Iterator<Item = (String, AppSignal)> {
-        items.into_iter().map(|it| (it.key.to_string(), it.action))
-    }
-
-    fn build_menu_actions(
-        menu_type: MenuType,
-        config: &GlyphlowConfig,
-    ) -> (HashMap<String, AppSignal>, usize) {
-        let (base_items, need_workflow, need_text_action, editor_signal) = match menu_type {
-            MenuType::Dashboard => (
-                Self::iter_from(DASH_BOARD_MENU_ITEMS).collect::<HashMap<_, _>>(),
-                true,
-                false,
-                Some(AppSignal::Activate(Target::Edit)),
-            ),
-            MenuType::TextAction => (
-                Self::iter_from(TEXT_ACTION_MENU_ITEMS).collect::<HashMap<_, _>>(),
-                true,
-                true,
-                Some(AppSignal::TextAction(TextAction::Editor)),
-            ),
-            MenuType::ImageAction => (
-                Self::iter_from(IMAGE_ACTION_MENU_ITEMS).collect::<HashMap<_, _>>(),
-                true,
-                false,
-                None,
-            ),
-            MenuType::Scroll => (
-                Self::iter_from(SCROLLBAR_MENU_ITEMS).collect::<HashMap<_, _>>(),
-                false,
-                false,
-                None,
-            ),
-        };
-
-        let mut items = HashMap::new();
-        // Order matters!
-        if need_workflow {
-            for (idx, wf) in config.workflows.iter().enumerate() {
-                items.insert(wf.key.clone(), AppSignal::RunWorkFlow(idx));
-            }
-        }
-
-        if need_text_action {
-            for (idx, act) in config.text_actions.iter().enumerate() {
-                items.insert(
-                    act.key.clone(),
-                    AppSignal::TextAction(TextAction::UserDefined(idx)),
-                );
-            }
-        }
-
-        if let Some(sig) = editor_signal
-            && let Some(editor) = config.editor.as_ref()
-        {
-            items.insert(editor.key.clone(), sig);
-        }
-
-        for (key, sig) in base_items {
-            items.insert(key, sig);
-        }
-
-        let max_key_len = items.keys().map(|k| k.chars().count()).max().unwrap_or(0);
-        (items, max_key_len)
-    }
-
     pub fn new(sender: Sender<AppSignal>, config: &GlyphlowConfig) -> KeyListener {
-        let mut menu_actions = HashMap::new();
-        let mut menu_action_max_key_len = HashMap::new();
-
-        for menu_type in [
-            MenuType::Dashboard,
-            MenuType::TextAction,
-            MenuType::ImageAction,
-            MenuType::Scroll,
-        ]
-        .into_iter()
-        {
-            let (items, max_key_len) = Self::build_menu_actions(menu_type, config);
-            menu_actions.insert(menu_type, items);
-            menu_action_max_key_len.insert(menu_type, max_key_len);
-        }
-
         KeyListener {
-            menu_actions,
-            menu_action_max_key_len,
             sender,
             global_key_binding: config.global_trigger_key.clone(),
         }
@@ -332,42 +171,20 @@ impl KeyListener {
         }
     }
 
-    fn handle_menu_key(
-        &self,
-        key: &Key,
-        menu_type: MenuType,
-        mut state: MutexGuard<'_, Mode>,
-        key_state: &mut KeyState,
-    ) -> bool {
-        let key_char = key.to_char();
-        if *key == Key::Backspace || *key == Key::Delete {
-            if *state == Mode::DictionaryScrolling && key_state.prefix.is_empty() {
-                self.send(AppSignal::BackToTextActionMenu);
-            } else {
-                key_state.pop();
+    fn handle_menu_key(&self, key: &Key, state: &mut Mode) -> bool {
+        match key {
+            Key::Escape | Key::Space => {
+                self.send(AppSignal::DeActivate);
+                *state = Mode::Idle;
             }
-        } else if key_state.prefix.chars().count() < self.menu_action_max_key_len[&menu_type] {
-            key_state.push(key_char);
-        }
-
-        if let Some(signal) = self
-            .menu_actions
-            .get(&menu_type)
-            .and_then(|m| m.get(&key_state.prefix))
-        {
-            self.send(signal.clone());
-            key_state.clear_prefix();
-        } else if key_char == ' ' {
-            *state = Mode::Idle;
-            self.send(AppSignal::DeActivate);
-            key_state.clear_prefix();
-        } else {
-            if *state != Mode::DictionaryScrolling {
-                let signal = match menu_type {
-                    MenuType::Dashboard => AppSignal::DashboardRefresh(key_state.prefix.clone()),
-                    _ => AppSignal::MenuRefresh(key_state.prefix.clone()),
-                };
-                self.send(signal);
+            Key::Backspace | Key::Delete => self.send(AppSignal::MenuBackspace),
+            _ => {
+                // Keys that type nothing cannot complete a row. A bare Shift is
+                // not one of them: it is the `󰘶` in `󰘶G`.
+                let key_char = key.to_char();
+                if key_char != ' ' {
+                    self.send(AppSignal::MenuKey(key_char));
+                }
             }
         }
         true
@@ -406,7 +223,7 @@ impl KeyListener {
     }
 
     /// Returns true if key is effective, and should be swallowed by this app
-    pub fn key_down(&self, key: Key, state: &Mutex<Mode>, key_state: &mut KeyState) -> bool {
+    pub fn key_down(&self, key: Key, state: &Mutex<Mode>, key_state: &KeyState) -> bool {
         let Ok(mut state) = state.try_lock() else {
             return false;
         };
@@ -419,26 +236,17 @@ impl KeyListener {
                         || k.right_alternative()
                             .is_some_and(|r| *k == r || key_state.pressed_keys.contains(&r))
                 }) {
-                    self.send(AppSignal::DashboardRefresh("".into()));
-                    *state = Mode::DashBoard;
+                    self.send(AppSignal::OpenDashboard);
+                    *state = Mode::Menu(MenuScope::Dashboard);
                     true
                 } else {
                     false
                 }
             }
-            Mode::DashBoard => self.handle_menu_key(&key, MenuType::Dashboard, state, key_state),
+            Mode::Menu(_) | Mode::DictionaryScrolling => self.handle_menu_key(&key, &mut state),
             Mode::WordPicking => self.handle_filter_key(&key, state, FilterMode::WordPicking),
             Mode::Filtering => self.handle_filter_key(&key, state, FilterMode::Generic),
             Mode::OCRResultFiltering => self.handle_filter_key(&key, state, FilterMode::OCR),
-            Mode::TextActionMenu => {
-                self.handle_menu_key(&key, MenuType::TextAction, state, key_state)
-            }
-            Mode::ImageActionMenu => {
-                self.handle_menu_key(&key, MenuType::ImageAction, state, key_state)
-            }
-            Mode::Scrolling | Mode::DictionaryScrolling => {
-                self.handle_menu_key(&key, MenuType::Scroll, state, key_state)
-            }
             Mode::Searching(mode) => {
                 match key {
                     Key::Enter => self.send(AppSignal::FinishSearch(mode)),
@@ -500,7 +308,6 @@ impl KeyListener {
 #[derive(Debug, Default)]
 pub struct KeyState {
     pub pressed_keys: HashSet<Key>,
-    pub prefix: String,
     /// Set while Glyphlow is synthesizing keys itself, so the event tap does not
     /// feed its own events back in.
     pub is_simulating: bool,
@@ -513,18 +320,6 @@ impl KeyState {
 
     pub fn key_up(&mut self, key: &Key) {
         self.pressed_keys.remove(key);
-    }
-
-    pub fn clear_prefix(&mut self) {
-        self.prefix.clear();
-    }
-
-    pub fn push(&mut self, key_char: char) {
-        self.prefix.push(key_char);
-    }
-
-    pub fn pop(&mut self) {
-        self.prefix.pop();
     }
 }
 

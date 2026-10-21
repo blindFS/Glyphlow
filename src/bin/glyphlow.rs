@@ -127,7 +127,7 @@ async fn main() {
                 match event.event_type {
                     EventType::KeyPressed => {
                         k_s.key_down(&kb.key);
-                        pass_on = !key_listener.key_down(kb.key, &state, &mut k_s)
+                        pass_on = !key_listener.key_down(kb.key, &state, &k_s)
                     }
                     EventType::KeyReleased => k_s.key_up(&kb.key),
                     _ => (),

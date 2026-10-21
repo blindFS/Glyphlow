@@ -1,6 +1,6 @@
 use glyphlow::{
-    AppEngine, AppSignal, FilterMode, KeyListener, KeyState, Mode, ModifierKey, ScrollAction,
-    TextAction,
+    AppEngine, AppSignal, FilterMode, KeyListener, KeyState, MenuScope, Mode, ModifierKey,
+    ScrollAction, TextAction,
     action::text_to_clipboard,
     ax_element::Target,
     config::{GlyphlowConfig, RoleOfInterest, WorkFlow},
@@ -150,7 +150,7 @@ fn main() {
                 TestEvent::PressKey(Key::KeyG),
                 TestEvent::ReleaseKey(Key::AltLeft),
                 TestEvent::ReleaseKey(Key::KeyG),
-                TestEvent::ExpectMode(Mode::DashBoard),
+                TestEvent::ExpectMode(Mode::Menu(MenuScope::Dashboard)),
                 TestEvent::PressKey(Key::Escape),
                 TestEvent::ReleaseKey(Key::Escape),
                 TestEvent::ExpectMode(Mode::Idle),
@@ -205,9 +205,12 @@ fn main() {
         Scenario::new(
             "Scenario 4: Scrolling Mode Keys",
             vec![
-                TestEvent::SetMode(Mode::Scrolling),
+                TestEvent::SetMode(Mode::Menu(MenuScope::Scroll)),
                 TestEvent::ClearSignals,
+                // A menu key reaches the engine unresolved ...
                 TestEvent::PressKey(Key::KeyJ),
+                TestEvent::ExpectSignal(AppSignal::MenuKey('J')),
+                // ... and comes back as the row it named.
                 TestEvent::ExpectSignal(AppSignal::ScrollAction(ScrollAction::DownRight)),
                 TestEvent::ReleaseKey(Key::KeyJ),
                 TestEvent::ClearSignals,
@@ -229,6 +232,14 @@ fn main() {
                 TestEvent::PressKey(Key::KeyG),
                 TestEvent::ExpectSignal(AppSignal::ScrollAction(ScrollAction::Top)),
                 TestEvent::ReleaseKey(Key::KeyG),
+                TestEvent::ClearSignals,
+                // A bare Shift is the `󰘶` of the `󰘶G` row, not a key that
+                // types nothing.
+                TestEvent::PressKey(Key::ShiftLeft),
+                TestEvent::ReleaseKey(Key::ShiftLeft),
+                TestEvent::PressKey(Key::KeyG),
+                TestEvent::ExpectSignal(AppSignal::ScrollAction(ScrollAction::Bottom)),
+                TestEvent::ReleaseKey(Key::KeyG),
             ],
         ),
         Scenario::new(
@@ -240,10 +251,10 @@ fn main() {
                 TestEvent::PressKey(Key::KeyG),
                 TestEvent::ReleaseKey(Key::AltLeft),
                 TestEvent::ReleaseKey(Key::KeyG),
-                TestEvent::ExpectMode(Mode::DashBoard),
+                TestEvent::ExpectMode(Mode::Menu(MenuScope::Dashboard)),
                 TestEvent::PressKey(Key::KeyC), // Read Clipboard -> transitions to TextActionMenu
                 TestEvent::ReleaseKey(Key::KeyC),
-                TestEvent::ExpectMode(Mode::TextActionMenu),
+                TestEvent::ExpectMode(Mode::Menu(MenuScope::Text)),
                 TestEvent::ClearSignals,
                 TestEvent::PressKey(Key::KeyC), // Copy action
                 TestEvent::ExpectSignal(AppSignal::TextAction(TextAction::Copy)),
@@ -259,10 +270,10 @@ fn main() {
                 TestEvent::PressKey(Key::KeyG),
                 TestEvent::ReleaseKey(Key::AltLeft),
                 TestEvent::ReleaseKey(Key::KeyG),
-                TestEvent::ExpectMode(Mode::DashBoard),
+                TestEvent::ExpectMode(Mode::Menu(MenuScope::Dashboard)),
                 TestEvent::PressKey(Key::KeyC), // Read Clipboard -> transitions to TextActionMenu
                 TestEvent::ReleaseKey(Key::KeyC),
-                TestEvent::ExpectMode(Mode::TextActionMenu),
+                TestEvent::ExpectMode(Mode::Menu(MenuScope::Text)),
                 TestEvent::PressKey(Key::KeyS), // Split -> transitions to WordPicking
                 TestEvent::ReleaseKey(Key::KeyS),
                 TestEvent::ExpectMode(Mode::WordPicking),
@@ -280,7 +291,7 @@ fn main() {
         Scenario::new(
             "Scenario 7: Image Action Menu Mode",
             vec![
-                TestEvent::SetMode(Mode::ImageActionMenu),
+                TestEvent::SetMode(Mode::Menu(MenuScope::Image)),
                 TestEvent::ClearSignals,
                 TestEvent::PressKey(Key::KeyO), // Image OCR action
                 TestEvent::ExpectSignal(AppSignal::FrameOCR),
@@ -292,8 +303,9 @@ fn main() {
             vec![
                 TestEvent::SetMode(Mode::DictionaryScrolling),
                 TestEvent::ClearSignals,
-                TestEvent::PressKey(Key::Backspace), // Backspace when prefix is empty -> Back to TextActionMenu
-                TestEvent::ExpectSignal(AppSignal::BackToTextActionMenu),
+                // Backspace with nothing typed -> back to the text actions
+                TestEvent::PressKey(Key::Backspace),
+                TestEvent::ExpectMode(Mode::Menu(MenuScope::Text)),
                 TestEvent::ReleaseKey(Key::Backspace),
             ],
         ),
@@ -360,14 +372,14 @@ fn main() {
             vec![
                 TestEvent::SetClipboard(FIVE_WORDS.to_string()),
                 TestEvent::SendSignal(AppSignal::RunWorkFlowByName(READ_CLIPBOARD.into())),
-                TestEvent::ExpectMode(Mode::TextActionMenu),
+                TestEvent::ExpectMode(Mode::Menu(MenuScope::Text)),
                 TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
                 TestEvent::ExpectMode(Mode::WordPicking),
                 // Nothing typed yet, so there is nothing to pop: backspace is the
                 // "go back one level" key.
                 TestEvent::PressKey(Key::Backspace),
                 TestEvent::ReleaseKey(Key::Backspace),
-                TestEvent::ExpectMode(Mode::TextActionMenu),
+                TestEvent::ExpectMode(Mode::Menu(MenuScope::Text)),
             ],
         ),
         Scenario::new(
@@ -375,7 +387,7 @@ fn main() {
             vec![
                 TestEvent::SetClipboard(FIVE_WORDS.to_string()),
                 TestEvent::SendSignal(AppSignal::RunWorkFlowByName(READ_CLIPBOARD.into())),
-                TestEvent::ExpectMode(Mode::TextActionMenu),
+                TestEvent::ExpectMode(Mode::Menu(MenuScope::Text)),
                 TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
                 TestEvent::ExpectMode(Mode::WordPicking),
                 // Search for "et": it matches beta and zeta, but not alpha.
@@ -400,7 +412,7 @@ fn main() {
                 TestEvent::ReleaseKey(Key::Backspace),
                 TestEvent::PressKey(Key::KeyA),
                 TestEvent::ReleaseKey(Key::KeyA),
-                TestEvent::ExpectMode(Mode::TextActionMenu),
+                TestEvent::ExpectMode(Mode::Menu(MenuScope::Text)),
             ],
         ),
         Scenario::new(
@@ -408,7 +420,7 @@ fn main() {
             vec![
                 TestEvent::SetClipboard(FIVE_WORDS.to_string()),
                 TestEvent::SendSignal(AppSignal::RunWorkFlowByName(READ_CLIPBOARD.into())),
-                TestEvent::ExpectMode(Mode::TextActionMenu),
+                TestEvent::ExpectMode(Mode::Menu(MenuScope::Text)),
                 TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
                 TestEvent::ExpectMode(Mode::WordPicking),
                 TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Shift)),
@@ -428,7 +440,7 @@ fn main() {
                 // range "beta gamma" and lands on the text action menu.
                 TestEvent::PressKey(Key::KeyC),
                 TestEvent::ReleaseKey(Key::KeyC),
-                TestEvent::ExpectMode(Mode::TextActionMenu),
+                TestEvent::ExpectMode(Mode::Menu(MenuScope::Text)),
             ],
         ),
         Scenario::new(
@@ -436,7 +448,7 @@ fn main() {
             vec![
                 TestEvent::SetClipboard(FIVE_WORDS.to_string()),
                 TestEvent::SendSignal(AppSignal::RunWorkFlowByName(READ_CLIPBOARD.into())),
-                TestEvent::ExpectMode(Mode::TextActionMenu),
+                TestEvent::ExpectMode(Mode::Menu(MenuScope::Text)),
                 TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
                 TestEvent::ExpectMode(Mode::WordPicking),
                 TestEvent::PressKey(Key::Slash),
@@ -455,51 +467,50 @@ fn main() {
             ],
         ),
         Scenario::new(
-            "Scenario 16a: An unmatched key is routed per menu kind",
-            // No selection behind the dashboard, so it must be refreshed through
-            // its own signal — `MenuRefresh` is resolved from a selection and
-            // would draw nothing, leaving the key without an answer.
+            "Scenario 16: A key that reaches no row is swallowed, not acted on",
             vec![
-                TestEvent::SetMode(Mode::DashBoard),
+                TestEvent::SetMode(Mode::Menu(MenuScope::Dashboard)),
                 TestEvent::ClearSignals,
+                // `X` starts no dashboard row ...
                 TestEvent::PressKey(Key::KeyX),
-                TestEvent::ExpectSignal(AppSignal::DashboardRefresh("X".into())),
+                TestEvent::ExpectSignal(AppSignal::MenuKey('X')),
                 TestEvent::ReleaseKey(Key::KeyX),
-            ],
-        ),
-        Scenario::new(
-            "Scenario 16b: A menu with a selection keeps using MenuRefresh",
-            // Its own scenario, because an unmatched key stays in
-            // `KeyState::prefix`: sharing one would prepend the dashboard's `X`
-            // to this one's.
-            vec![
-                TestEvent::SetMode(Mode::TextActionMenu),
+                // ... so nothing ran, and the menu is still up to try again.
+                TestEvent::ExpectMode(Mode::Menu(MenuScope::Dashboard)),
                 TestEvent::ClearSignals,
-                TestEvent::PressKey(Key::KeyX),
-                TestEvent::ExpectSignal(AppSignal::MenuRefresh("X".into())),
-                TestEvent::ReleaseKey(Key::KeyX),
-            ],
-        ),
-        Scenario::new(
-            "Scenario 17: Backspace recovers the dashboard from an unmatched key",
-            vec![
-                TestEvent::SetMode(Mode::DashBoard),
-                TestEvent::ClearSignals,
-                // An unmatched key is answered by rebuilding the dashboard around it ...
-                TestEvent::PressKey(Key::KeyX),
-                TestEvent::ExpectSignal(AppSignal::DashboardRefresh("X".into())),
-                TestEvent::ReleaseKey(Key::KeyX),
-                TestEvent::ClearSignals,
-                // ... and backspace pops that prefix, which is what the answer asks
-                // the user to do.
-                TestEvent::PressKey(Key::Backspace),
-                TestEvent::ExpectSignal(AppSignal::DashboardRefresh("".into())),
-                TestEvent::ReleaseKey(Key::Backspace),
-                TestEvent::ClearSignals,
-                // The menu is usable again: the next key is not swallowed by the typo.
+                // The dead key did not join the prefix either: `C` still
+                // resolves, where `XC` would have reached nothing.
                 TestEvent::PressKey(Key::KeyC),
                 TestEvent::ExpectSignal(AppSignal::RunWorkFlow(read_clipboard_idx())),
                 TestEvent::ReleaseKey(Key::KeyC),
+            ],
+        ),
+        Scenario::new(
+            "Scenario 17: A two-key row needs both keys, and a dead key spends neither",
+            vec![
+                TestEvent::SetMode(Mode::Menu(MenuScope::Scroll)),
+                TestEvent::ClearSignals,
+                // Backspace with nothing typed redraws the menu rather than
+                // popping a key that is not there.
+                TestEvent::PressKey(Key::Backspace),
+                TestEvent::ExpectSignal(AppSignal::MenuBackspace),
+                TestEvent::ExpectMode(Mode::Menu(MenuScope::Scroll)),
+                TestEvent::ReleaseKey(Key::Backspace),
+                TestEvent::ClearSignals,
+                // `G` is only the start of `GG` ...
+                TestEvent::PressKey(Key::KeyG),
+                TestEvent::ExpectSignal(AppSignal::MenuKey('G')),
+                TestEvent::ReleaseKey(Key::KeyG),
+                TestEvent::ClearSignals,
+                // ... a key that reaches nothing leaves that prefix alone ...
+                TestEvent::PressKey(Key::KeyX),
+                TestEvent::ExpectSignal(AppSignal::MenuKey('X')),
+                TestEvent::ReleaseKey(Key::KeyX),
+                TestEvent::ClearSignals,
+                // ... so the second `G` still completes it.
+                TestEvent::PressKey(Key::KeyG),
+                TestEvent::ExpectSignal(AppSignal::ScrollAction(ScrollAction::Top)),
+                TestEvent::ReleaseKey(Key::KeyG),
             ],
         ),
         Scenario::new(
@@ -528,7 +539,7 @@ fn main() {
             vec![
                 TestEvent::SetClipboard(FIVE_WORDS.to_string()),
                 TestEvent::SendSignal(AppSignal::RunWorkFlowByName(READ_CLIPBOARD.into())),
-                TestEvent::ExpectMode(Mode::TextActionMenu),
+                TestEvent::ExpectMode(Mode::Menu(MenuScope::Text)),
                 TestEvent::SendSignal(AppSignal::TextAction(TextAction::Split)),
                 TestEvent::ExpectMode(Mode::WordPicking),
                 // The target is still the default clickable one, so this pins the
@@ -663,7 +674,7 @@ impl Run {
                 match event {
                     TestEvent::PressKey(key) => {
                         sim_key_state.lock().unwrap().key_down(&key);
-                        key_listener.key_down(key, &sim_state, &mut sim_key_state.lock().unwrap());
+                        key_listener.key_down(key, &sim_state, &sim_key_state.lock().unwrap());
                     }
                     TestEvent::ReleaseKey(key) => {
                         sim_key_state.lock().unwrap().key_up(&key);
@@ -673,10 +684,10 @@ impl Run {
                     }
                     TestEvent::ExpectMode(expected_mode) => {
                         let start = std::time::Instant::now();
-                        let mut current_mode = sim_state.lock().unwrap().clone();
+                        let mut current_mode = *sim_state.lock().unwrap();
                         while current_mode != expected_mode && start.elapsed() < wait_timeout {
                             std::thread::sleep(Duration::from_millis(10));
-                            current_mode = sim_state.lock().unwrap().clone();
+                            current_mode = *sim_state.lock().unwrap();
                         }
                         assert_eq!(
                             current_mode, expected_mode,

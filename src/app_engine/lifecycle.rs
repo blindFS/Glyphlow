@@ -41,7 +41,7 @@ impl AppEngine {
     }
 
     pub(super) fn mode(&self) -> Mode {
-        self.state.lock().map(|s| s.clone()).unwrap_or(Mode::Idle)
+        self.state.lock().map(|s| *s).unwrap_or(Mode::Idle)
     }
 
     pub(super) fn deactivate(&mut self) {
@@ -66,6 +66,9 @@ impl AppEngine {
         self.is_searching = false;
         self.multi_selection.reset();
         self.click_modifiers.reset();
+        // A menu key sequence only means something against the selection it was
+        // typed for, so it goes with the cache.
+        self.menu_prefix.clear();
     }
 
     pub(super) fn notify_then_deactivate(&mut self, text: &str, log_level: Level) {
@@ -436,7 +439,7 @@ impl AppEngine {
             // Fallback to mouse scroll if no scrollbar found
             let (x, y) = eoi.frame.center();
             self.move_mouse_with_trail(x, y);
-            self.draw_element_menu("", RoleOfInterest::ScrollBar, true);
+            self.show_element_menu("", RoleOfInterest::ScrollBar);
         } else if target != Target::ChildElement {
             self.clear_drawing();
             self.notify_then_deactivate("No relevant UI elements found.", Level::Warn);
