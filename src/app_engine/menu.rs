@@ -319,16 +319,10 @@ impl AppEngine {
                 self.menu_prefix.pop();
                 self.show_menu(scope, &self.menu_prefix);
             }
-            Mode::DictionaryScrolling => self.leave_dictionary(),
+            Mode::DictionaryScrolling if self.menu_prefix.pop().is_none() => {
+                self.show_menu(MenuScope::Text, "");
+            }
             _ => (),
-        }
-    }
-
-    /// Backspace on a dictionary: drop a key if one was typed, otherwise give
-    /// way to the text actions it was opened from.
-    fn leave_dictionary(&mut self) {
-        if self.menu_prefix.pop().is_none() {
-            self.show_menu(MenuScope::Text, "");
         }
     }
 
