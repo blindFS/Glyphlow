@@ -27,14 +27,14 @@ pub(super) struct MenuRow<'a> {
     pub(super) action: AppSignal,
 }
 
-/// What a key sequence resolves to.
-enum Resolution {
-    /// A row owns this prefix: run it.
-    Exact(AppSignal),
-    /// Some row still starts with this prefix: wait for more keys.
-    Prefix,
-    /// No row can complete this prefix.
-    Dead,
+/// What a key press means for the menu that is up.
+enum Outcome {
+    /// A row owns the prefix: run it.
+    Run(AppSignal),
+    /// The prefix still completes rows: wait for the next key.
+    Keep,
+    /// No row can complete the prefix: it must not be kept.
+    Reject,
 }
 
 impl MenuScope {
@@ -194,19 +194,28 @@ impl AppEngine {
         scope != MenuScope::Scroll || !self.config.hide_scrolling_menu
     }
 
-    /// The rows `scope` offers the current selection, in resolution order.
+    /// The rows `scope` offers the current selection that `prefix` can still
+    /// reach, in resolution order.
     ///
-    /// Applicability is applied here: a row that cannot run is never yielded, so
-    /// neither the drawing nor a key press can reach it. A scope that offers no
-    /// workflows, or no text actions, contributes an empty span, so one chain
-    /// serves them all and nothing is collected on the way.
-    pub(super) fn menu_rows(&self, scope: MenuScope) -> impl Iterator<Item = MenuRow<'_>> {
+    /// Applicability and the prefix are both applied here, once: a row that
+    /// cannot run, or that the prefix cannot complete, is never yielded, so
+    /// neither the drawing nor a key press can reach it. The builtin rows come
+    /// first and the configured ones last, so a config row cannot take a builtin
+    /// key away. `Clone` lets a caller walk the same rows twice — the drawing
+    /// needs the widest key before it writes the first row — without building a
+    /// list.
+    pub(super) fn menu_rows<'a>(
+        &'a self,
+        scope: MenuScope,
+        prefix: &'a str,
+    ) -> impl Iterator<Item = MenuRow<'a>> + Clone + 'a {
+        let offers_workflows = scope.offers_workflows();
         let workflows = self
             .config
             .workflows
             .iter()
             .enumerate()
-            .filter(move |(_, wf)| scope.offers_workflows() && self.is_workflow_valid(wf))
+            .filter(move |(_, wf)| offers_workflows && self.is_workflow_valid(wf))
             .map(|(idx, wf)| MenuRow {
                 key: &wf.key,
                 display: &wf.display,
@@ -246,33 +255,18 @@ impl AppEngine {
             action: row.action.clone(),
         });
 
-        builtins.chain(text_actions).chain(editor).chain(workflows)
-    }
-
-    /// What `prefix` means in `scope`'s menu.
-    ///
-    /// An exact match wins over a longer row that merely starts with the same
-    /// keys, which is what lets a menu mix single and multi key rows. The cost
-    /// is that a row whose key is a proper prefix of another's can never be
-    /// reached; no menu ships such a pair.
-    ///
-    /// No dedupe is needed: `find` returns the first row to claim a key, which
-    /// is the one the drawing shows. [`Self::menu_string`] drops the rest.
-    fn resolve(&self, scope: MenuScope, prefix: &str) -> Resolution {
-        if let Some(row) = self.menu_rows(scope).find(|row| row.key == prefix) {
-            return Resolution::Exact(row.action);
-        }
-        if self.menu_rows(scope).any(|row| row.key.starts_with(prefix)) {
-            Resolution::Prefix
-        } else {
-            Resolution::Dead
-        }
+        builtins
+            .chain(text_actions)
+            .chain(editor)
+            .chain(workflows)
+            .filter(move |row| row.key.starts_with(prefix))
     }
 
     /// A character typed while a menu is up.
     ///
-    /// A dictionary answers to the same keys without being a menu: it resolves
-    /// them, but has nothing to redraw around a prefix.
+    /// The prefix is typed and untyped in place: a key that reaches no row leaves
+    /// it exactly as it found it, so another key can still complete it and
+    /// backspace can still undo it.
     pub(super) fn menu_key(&mut self, key_char: char) {
         let (scope, drawn) = match self.mode() {
             Mode::Menu(scope) => (scope, true),
@@ -280,23 +274,44 @@ impl AppEngine {
             _ => return,
         };
 
-        // Typed and untyped in place: a key that reaches no row leaves the
-        // prefix exactly as it found it, so another key can still complete it
-        // and backspace can still undo it.
         self.menu_prefix.push(key_char);
-        match self.resolve(scope, &self.menu_prefix) {
-            Resolution::Exact(action) => {
+        match self.interpret(scope, drawn) {
+            Outcome::Run(action) => {
                 self.menu_prefix.clear();
                 self.run_menu_action(action);
             }
-            Resolution::Prefix if drawn => self.show_menu(scope, &self.menu_prefix),
-            Resolution::Prefix => (),
-            Resolution::Dead => {
+            Outcome::Keep => (),
+            Outcome::Reject => {
                 self.menu_prefix.pop();
-                if drawn {
-                    self.show_wrong_key(scope);
-                }
             }
+        }
+    }
+
+    /// Interpret the key just typed into `menu_prefix`, drawing what it changes.
+    ///
+    /// The one filtered row list serves both the decision and the drawing.
+    /// `drawn` is false for a dictionary: it answers to the same keys but has no
+    /// menu to redraw.
+    fn interpret(&self, scope: MenuScope, drawn: bool) -> Outcome {
+        let mut rows = self.menu_rows(scope, &self.menu_prefix);
+
+        // Exact before prefix: a row whose key is the prefix itself owns it, even
+        // when a longer row starts with the same keys. The cost is that a key
+        // which is a proper prefix of another's cannot be reached; no menu ships
+        // such a pair.
+        if let Some(row) = rows.clone().find(|row| row.key == self.menu_prefix) {
+            return Outcome::Run(row.action);
+        }
+
+        let reachable = if drawn {
+            self.show_menu_rows(scope, &self.menu_prefix, rows)
+        } else {
+            rows.next().is_some()
+        };
+        if reachable {
+            Outcome::Keep
+        } else {
+            Outcome::Reject
         }
     }
 

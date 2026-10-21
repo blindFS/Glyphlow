@@ -1,4 +1,4 @@
-use super::AppEngine;
+use super::{AppEngine, menu::MenuRow};
 use crate::{
     MenuScope, Mode,
     ax_element::ElementOfInterest,
@@ -143,15 +143,23 @@ impl AppEngine {
         visible_indices
     }
 
-    /// The menu for `scope` around `prefix`: a title, the selection when the
-    /// scope acts on text, then a row per reachable key.
+    /// The menu for `scope` around `prefix`, laid out from the rows it reaches.
     ///
-    /// Drawing no rows means the prefix outlived what it named — a config reload
-    /// can drop the workflow it was typed for — so it says so instead of drawing
-    /// a bare title.
-    fn menu_string(&self, scope: MenuScope, prefix: &str) -> MenuString {
-        let mut msg = MenuString::styled(scope.header(), MenuStyle::Header);
+    /// `None` when it reaches no row at all, which is the caller's cue that the
+    /// key reached nothing.
+    fn menu_string<'a>(
+        &self,
+        scope: MenuScope,
+        prefix: &str,
+        rows: impl Iterator<Item = MenuRow<'a>> + Clone,
+    ) -> Option<MenuString> {
+        // The keys are aligned on the widest one, so the widest has to be known
+        // before the first row is written: the rows are read twice rather than
+        // collected. A duplicate key cannot widen the column, so only the drawing
+        // pass drops duplicates.
+        let key_width = rows.clone().map(|row| row.key.chars().count()).max()?;
 
+        let mut msg = MenuString::styled(scope.header(), MenuStyle::Header);
         if scope == MenuScope::Text
             && let Some(text) = self.selected.as_ref().and_then(|eoi| eoi.context.as_ref())
         {
@@ -161,32 +169,19 @@ impl AppEngine {
         }
 
         let prefix_len = prefix.chars().count();
-        // One row per key: the first to claim it is drawn, and the shadowed
-        // duplicates are dropped here rather than in the resolution, which only
-        // has to take the first. Each pass keeps its own record of what it takes,
-        // so the second pass is the same rows in the same order.
-        let reachable = || {
-            let mut claimed: Vec<&str> = Vec::new();
-            self.menu_rows(scope)
-                .filter(|row| row.key.starts_with(prefix))
-                .filter(move |row| {
-                    if claimed.contains(&row.key) {
-                        log::debug!("Menu key `{}` of `{}` is shadowed", row.key, row.display);
-                        false
-                    } else {
-                        claimed.push(row.key);
-                        true
-                    }
-                })
-        };
-
-        let Some(key_width) = reachable().map(|row| row.key.chars().count()).max() else {
-            return wrong_key_menu_string();
-        };
-        for row in reachable() {
+        let mut claimed: Vec<&str> = Vec::new();
+        for row in rows.filter(|row| {
+            if claimed.contains(&row.key) {
+                log::debug!("Menu key `{}` of `{}` is shadowed", row.key, row.display);
+                false
+            } else {
+                claimed.push(row.key);
+                true
+            }
+        }) {
             msg.push_key_map_entry(row.key, row.display, prefix_len, key_width);
         }
-        msg
+        Some(msg)
     }
 
     pub(super) fn draw_menu(&self, msg: &MenuString) {
@@ -195,17 +190,26 @@ impl AppEngine {
 
     /// Draw `scope`'s menu around `prefix` and make it the current mode.
     pub(super) fn show_menu(&self, scope: MenuScope, prefix: &str) {
-        self.set_mode(Mode::Menu(scope));
-        if self.menu_visible(scope) {
-            self.draw_menu(&self.menu_string(scope, prefix));
-        }
+        self.show_menu_rows(scope, prefix, self.menu_rows(scope, prefix));
     }
 
-    /// Say that the last key reaches nothing, unless the menu is hidden anyway.
-    pub(super) fn show_wrong_key(&self, scope: MenuScope) {
+    /// [`Self::show_menu`] over rows the caller already has.
+    ///
+    /// Returns whether `prefix` reaches any row, which is what decides if the key
+    /// that produced it is worth keeping.
+    pub(super) fn show_menu_rows<'a>(
+        &self,
+        scope: MenuScope,
+        prefix: &str,
+        rows: impl Iterator<Item = MenuRow<'a>> + Clone,
+    ) -> bool {
+        self.set_mode(Mode::Menu(scope));
+        let msg = self.menu_string(scope, prefix, rows);
+        let reachable = msg.is_some();
         if self.menu_visible(scope) {
-            self.draw_menu(&wrong_key_menu_string());
+            self.draw_menu(&msg.unwrap_or_else(wrong_key_menu_string));
         }
+        reachable
     }
 
     /// Draw the dashboard, refreshing the focused window first: the workflows it
