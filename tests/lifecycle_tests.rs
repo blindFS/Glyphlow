@@ -3,7 +3,7 @@ use glyphlow::{
     ScrollAction, TextAction,
     action::text_to_clipboard,
     ax_element::Target,
-    config::{GlyphlowConfig, RoleOfInterest, WorkFlow},
+    config::{GlyphlowConfig, RoleOfInterest, WorkFlow, WorkFlowAction},
 };
 use monio::Key;
 use objc2::MainThreadMarker;
@@ -599,6 +599,57 @@ fn main() {
                 TestEvent::ReleaseKey(Key::Escape),
             ],
         ),
+        Scenario {
+            name: "Scenario 22: The dashboard's `C` runs the row that applies, not the one behind it",
+            // The default config cannot catch this: its two `C` rows are ordered
+            // Copy (index 1, needs an Image) *before* Read Clipboard (index 7),
+            // so a key map that let the last insert win happened to keep the
+            // right row. A real config puts them the other way round, and then
+            // the last `C` — the one that needs an Image — owned the key. Such a
+            // row fails when it runs, and shows "Wrong key sequence".
+            config: GlyphlowConfig {
+                workflows: vec![
+                    WorkFlow {
+                        display: "Read Clipboard".into(),
+                        key: "C".into(),
+                        valid_app_ids: None,
+                        starting_role: RoleOfInterest::Any,
+                        actions: vec![WorkFlowAction::ReadClipboard],
+                    },
+                    WorkFlow {
+                        // Only here to shadow the key above it: with nothing
+                        // picked, an Image row is not offered, so its `C` cannot
+                        // be reached at all.
+                        display: "Copy Image".into(),
+                        key: "C".into(),
+                        valid_app_ids: None,
+                        starting_role: RoleOfInterest::Image,
+                        // Empty, so the row announces itself if it ever does run.
+                        actions: vec![],
+                    },
+                ],
+                ..GlyphlowConfig::default()
+            },
+            events: vec![
+                TestEvent::SetClipboard("clipboard text".to_string()),
+                TestEvent::PressKey(Key::AltLeft),
+                TestEvent::PressKey(Key::KeyG),
+                TestEvent::ReleaseKey(Key::AltLeft),
+                TestEvent::ReleaseKey(Key::KeyG),
+                TestEvent::ExpectMode(Mode::Menu(MenuScope::Dashboard)),
+                TestEvent::ClearSignals,
+                TestEvent::ClearMessages,
+                // The key reaches the engine unresolved, and comes back as the
+                // row that applies: index 0, not the Copy behind it at 1.
+                TestEvent::PressKey(Key::KeyC),
+                TestEvent::ExpectSignal(AppSignal::MenuKey('C')),
+                TestEvent::ExpectSignal(AppSignal::RunWorkFlow(0)),
+                TestEvent::ReleaseKey(Key::KeyC),
+                // The clipboard text being up for action is what proves the row
+                // ran: the shadowing one would have left the dashboard alone.
+                TestEvent::ExpectMode(Mode::Menu(MenuScope::Text)),
+            ],
+        },
     ];
 
     let rt = tokio::runtime::Builder::new_current_thread()

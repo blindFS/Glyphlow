@@ -246,7 +246,7 @@ impl AppEngine {
             action: row.action.clone(),
         });
 
-        workflows.chain(text_actions).chain(editor).chain(builtins)
+        builtins.chain(text_actions).chain(editor).chain(workflows)
     }
 
     /// What `prefix` means in `scope`'s menu.
