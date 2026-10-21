@@ -650,10 +650,6 @@ impl UIDrawer {
         CATransaction::flush();
     }
 
-    pub fn menu_height(&self) -> f64 {
-        self.menu.container.frame().size.height
-    }
-
     pub fn scroll_menu(&self, sa: ScrollAction, scroll_distance: f64) {
         let frame = self.menu.container.frame();
         let box_height = frame.size.height;

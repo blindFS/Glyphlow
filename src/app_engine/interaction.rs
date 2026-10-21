@@ -217,11 +217,10 @@ impl AppEngine {
                 ) {
                     self.drawer
                         .draw_attributed_string(&self.config.theme, attr_string, false);
-                    let menu_h = self.drawer.menu_height();
-                    let screen_h = self.drawer.current_screen_frame.size().1;
-                    if menu_h > screen_h {
-                        self.set_mode(Mode::DictionaryScrolling);
-                    }
+                    // Whatever its height, the dictionary is what the keys are
+                    // about from here. Leaving the text menu in charge would let
+                    // a text action fire under it.
+                    self.set_mode(Mode::DictionaryScrolling);
                 } else {
                     self.notify("No definition found.", Level::Warn);
                 }
