@@ -278,14 +278,10 @@ impl AppEngine {
 
     /// Backspace while a menu is up: undo one key, or go back a menu level.
     pub(super) fn menu_backspace(&mut self) {
+        self.menu_prefix.pop();
         match self.mode() {
-            Mode::Menu(scope) => {
-                self.menu_prefix.pop();
-                self.show_menu(scope, &self.menu_prefix);
-            }
-            Mode::DictionaryScrolling if self.menu_prefix.pop().is_none() => {
-                self.show_menu(MenuScope::Text, "");
-            }
+            Mode::Menu(scope) => self.show_menu(scope, &self.menu_prefix),
+            Mode::DictionaryScrolling => self.show_menu(MenuScope::Text, ""),
             _ => (),
         }
     }
