@@ -1,9 +1,7 @@
-use super::AppEngine;
+use super::{AppEngine, menu::MenuRow};
 use crate::{
-    DASH_BOARD_MENU_ITEMS, IMAGE_ACTION_MENU_ITEMS, MenuItem, Mode, SCROLLBAR_MENU_ITEMS,
-    TEXT_ACTION_MENU_ITEMS,
-    ax_element::{ElementOfInterest, Target},
-    config::RoleOfInterest,
+    MenuScope, Mode,
+    ax_element::ElementOfInterest,
     user_interface::{MenuString, MenuStyle},
     util::search_regex,
 };
@@ -145,185 +143,82 @@ impl AppEngine {
         visible_indices
     }
 
-    /// The menu for `key_prefix`: `head`, whose first line the caller styles as
-    /// the menu's header, then a row per reachable item, with the keys aligned on
-    /// the longest one.
-    fn complete_menu_string(
+    /// The menu for `scope` around `prefix`, laid out from the rows it reaches.
+    ///
+    /// `None` when it reaches no row at all, which is the caller's cue that the
+    /// key reached nothing.
+    fn menu_string<'a>(
         &self,
-        head: &mut MenuString,
-        builtin_menu_items: &[MenuItem],
-        need_editor: bool,
-        need_action: bool,
-        need_workflow: bool,
-        key_prefix: &str,
-    ) {
-        let prefix_len = key_prefix.chars().count();
-        let mut max_key_len = 1;
-        let mut menu_items = Vec::new();
+        scope: MenuScope,
+        prefix: &str,
+        rows: impl Iterator<Item = MenuRow<'a>> + Clone,
+    ) -> Option<MenuString> {
+        // The keys are aligned on the widest one, so the widest has to be known
+        // before the first row is written: the rows are read twice rather than
+        // collected. A duplicate key cannot widen the column, so only the drawing
+        // pass drops duplicates.
+        let key_width = rows.clone().map(|row| row.key.chars().count()).max()?;
 
-        // Skip static single key menu items
-        // when searching for multi-key actions
-        for it in builtin_menu_items {
-            if it.key.starts_with(key_prefix) {
-                max_key_len = max_key_len.max(it.key.chars().count());
-                menu_items.push((it.key, it.description));
-            }
-        }
-
-        // Editor entry
-        if need_editor
-            && let Some(editor) = self.config.editor.as_ref()
-            && editor.key.starts_with(key_prefix)
+        let mut msg = MenuString::styled(scope.header(), MenuStyle::Header);
+        if scope == MenuScope::Text
+            && let Some(text) = self.selected.as_ref().and_then(|eoi| eoi.context.as_ref())
         {
-            max_key_len = max_key_len.max(editor.key.chars().count());
-            menu_items.push((&editor.key, &editor.display));
+            msg.push("\n\n")
+                .push_styled(&preview_line(text), MenuStyle::Text)
+                .push("\n");
         }
 
-        // TODO: refactor this if we introduce actions for elements other than text
-        if need_action {
-            for action in self.config.text_actions.iter() {
-                if action.key.starts_with(key_prefix) {
-                    max_key_len = max_key_len.max(action.key.chars().count());
-                    menu_items.push((&action.key, &action.display));
-                }
+        let prefix_len = prefix.chars().count();
+        let mut claimed: Vec<&str> = Vec::new();
+        for row in rows.filter(|row| {
+            if claimed.contains(&row.key) {
+                log::debug!("Menu key `{}` of `{}` is shadowed", row.key, row.display);
+                false
+            } else {
+                claimed.push(row.key);
+                true
             }
+        }) {
+            msg.push_key_map_entry(row.key, row.display, prefix_len, key_width);
         }
-
-        // Workflows valid for current selected element
-        if need_workflow {
-            for workflow in self.config.workflows.iter() {
-                if workflow.key.starts_with(key_prefix) && self.is_workflow_valid(workflow) {
-                    max_key_len = max_key_len.max(workflow.key.chars().count());
-                    menu_items.push((&workflow.key, &workflow.display));
-                }
-            }
-        }
-
-        if menu_items.is_empty() {
-            *head = wrong_key_menu_string();
-        }
-
-        for (key, display) in menu_items {
-            head.push_key_map_entry(key, display, prefix_len, max_key_len);
-        }
+        Some(msg)
     }
 
     pub(super) fn draw_menu(&self, msg: &MenuString) {
         self.drawer.draw_menu(msg, &self.config.theme);
     }
 
-    pub(super) fn draw_dashboard(&mut self, key_prefix: &str) {
-        // NOTE: need `self.last_app_window_info` for `is_workflow_valid` check,
-        // but shouldn't set `self.selected` yet
+    /// Draw `scope`'s menu around `prefix` and make it the current mode.
+    pub(super) fn show_menu(&self, scope: MenuScope, prefix: &str) {
+        self.show_menu_rows(scope, prefix, self.menu_rows(scope, prefix));
+    }
+
+    /// [`Self::show_menu`] over rows the caller already has.
+    ///
+    /// Returns whether `prefix` reaches any row, which is what decides if the key
+    /// that produced it is worth keeping.
+    pub(super) fn show_menu_rows<'a>(
+        &self,
+        scope: MenuScope,
+        prefix: &str,
+        rows: impl Iterator<Item = MenuRow<'a>> + Clone,
+    ) -> bool {
+        self.set_mode(Mode::Menu(scope));
+        let msg = self.menu_string(scope, prefix, rows);
+        let reachable = msg.is_some();
+        if self.menu_visible(scope) {
+            self.draw_menu(&msg.unwrap_or_else(wrong_key_menu_string));
+        }
+        reachable
+    }
+
+    /// Draw the dashboard, refreshing the focused window first: the workflows it
+    /// offers are filtered by app.
+    pub(super) fn draw_dashboard(&mut self) {
         if self.selected.is_none() {
             self.get_app_window_info();
         }
-
-        let mut msg = MenuString::styled("Pick a Target:", MenuStyle::Header);
-        self.complete_menu_string(
-            &mut msg,
-            &DASH_BOARD_MENU_ITEMS,
-            true,
-            false,
-            true,
-            key_prefix,
-        );
-
-        self.draw_menu(&msg);
-    }
-
-    fn draw_image_action_menu(&self, key_prefix: &str) {
-        let mut msg = MenuString::styled("Pick an Action for Image:", MenuStyle::Header);
-        self.complete_menu_string(
-            &mut msg,
-            &IMAGE_ACTION_MENU_ITEMS,
-            false,
-            false,
-            true,
-            key_prefix,
-        );
-
-        self.draw_menu(&msg);
-    }
-
-    fn draw_text_action_menu(&self, text: &str, key_prefix: &str) {
-        let text = preview_line(text);
-        let mut head = MenuString::styled("Pick an Action for Text:", MenuStyle::Header);
-        head.push("\n\n")
-            .push_styled(&text, MenuStyle::Text)
-            .push("\n");
-        self.complete_menu_string(
-            &mut head,
-            &TEXT_ACTION_MENU_ITEMS,
-            true,
-            true,
-            true,
-            key_prefix,
-        );
-
-        self.draw_menu(&head);
-    }
-
-    fn draw_scrolling_menu(&self, key_prefix: &str) {
-        if !self.config.hide_scrolling_menu {
-            let mut msg = MenuString::styled("Pick a Scrolling Action:", MenuStyle::Header);
-            self.complete_menu_string(
-                &mut msg,
-                &SCROLLBAR_MENU_ITEMS,
-                false,
-                false,
-                false,
-                key_prefix,
-            );
-            self.draw_menu(&msg);
-        }
-    }
-
-    pub(super) fn draw_element_menu(
-        &mut self,
-        key_prefix: &str,
-        role: RoleOfInterest,
-        set_mode: bool,
-    ) {
-        // Set mode before drawing to make it more responsive
-        if set_mode {
-            match role {
-                RoleOfInterest::Image => self.set_mode(Mode::ImageActionMenu),
-                RoleOfInterest::ScrollBar => self.set_mode(Mode::Scrolling),
-                RoleOfInterest::TextField
-                | RoleOfInterest::StaticText
-                | RoleOfInterest::PseudoText => self.set_mode(Mode::TextActionMenu),
-                _ if self.target == Target::Text => self.set_mode(Mode::TextActionMenu),
-                _ if self.target == Target::Scrollable => self.set_mode(Mode::Scrolling),
-                _ => self.set_mode(Mode::DashBoard),
-            }
-        }
-
-        let text_action_helper = || {
-            let text = self
-                .selected
-                .as_ref()
-                .and_then(|eoi| eoi.context.as_ref())
-                .expect("Internal Error: selected text should be ready for text action menu");
-            self.draw_text_action_menu(text, key_prefix);
-        };
-
-        match role {
-            RoleOfInterest::Image => self.draw_image_action_menu(key_prefix),
-            RoleOfInterest::ScrollBar => self.draw_scrolling_menu(key_prefix),
-            RoleOfInterest::TextField | RoleOfInterest::StaticText | RoleOfInterest::PseudoText => {
-                text_action_helper();
-            }
-            _ if self.target == Target::Text => text_action_helper(),
-            _ if self.target == Target::Scrollable => self.draw_scrolling_menu(key_prefix),
-            _ => self.draw_dashboard(key_prefix),
-        }
-    }
-
-    pub(super) fn menu_refresh(&mut self, key_prefix: &str, set_mode: bool) {
-        if let Some(eoi) = self.selected.as_ref() {
-            self.draw_element_menu(key_prefix, eoi.role(), set_mode);
-        }
+        self.show_menu(MenuScope::Dashboard, "");
     }
 
     pub(super) fn draw_word_picker(&mut self) {

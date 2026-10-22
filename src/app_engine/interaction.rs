@@ -197,7 +197,7 @@ impl AppEngine {
             ..
         }) = self.selected.as_ref()
         else {
-            panic!("Internal Error: No selected text in Mode::TextActionMenu.");
+            panic!("Internal Error: No selected text in the text action menu.");
         };
 
         let mut keep_drawing = true;
@@ -217,11 +217,10 @@ impl AppEngine {
                 ) {
                     self.drawer
                         .draw_attributed_string(&self.config.theme, attr_string, false);
-                    let menu_h = self.drawer.menu_height();
-                    let screen_h = self.drawer.current_screen_frame.size().1;
-                    if menu_h > screen_h {
-                        self.set_mode(Mode::DictionaryScrolling);
-                    }
+                    // Whatever its height, the dictionary is what the keys are
+                    // about from here. Leaving the text menu in charge would let
+                    // a text action fire under it.
+                    self.set_mode(Mode::DictionaryScrolling);
                 } else {
                     self.notify("No definition found.", Level::Warn);
                 }
@@ -313,11 +312,11 @@ impl AppEngine {
                 }
                 ScrollAction::Top => {
                     self.scroll_to_value(element, 0.0);
-                    self.draw_element_menu("", RoleOfInterest::ScrollBar, false);
+                    self.show_element_menu(RoleOfInterest::ScrollBar);
                 }
                 ScrollAction::Bottom => {
                     self.scroll_to_value(element, 1.0);
-                    self.draw_element_menu("", RoleOfInterest::ScrollBar, false);
+                    self.show_element_menu(RoleOfInterest::ScrollBar);
                 }
             }
         } else {
@@ -337,11 +336,11 @@ impl AppEngine {
                 }
                 ScrollAction::Top => {
                     Self::simulate_scroll(999999.0);
-                    self.draw_element_menu("", RoleOfInterest::ScrollBar, false);
+                    self.show_element_menu(RoleOfInterest::ScrollBar);
                 }
                 ScrollAction::Bottom => {
                     Self::simulate_scroll(-999999.0);
-                    self.draw_element_menu("", RoleOfInterest::ScrollBar, false);
+                    self.show_element_menu(RoleOfInterest::ScrollBar);
                 }
             }
         }
@@ -355,7 +354,7 @@ impl AppEngine {
 
     pub(super) fn update_selected_text_and_show_menu(&mut self, new_text: String) {
         self.update_selected_text(new_text);
-        self.draw_element_menu("", RoleOfInterest::PseudoText, true);
+        self.show_element_menu(RoleOfInterest::PseudoText);
     }
 
     /// Put the clipboard's text up for action, or warn when it is empty.

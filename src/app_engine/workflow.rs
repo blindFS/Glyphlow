@@ -1,6 +1,5 @@
 use super::{AppEngine, drawing::wrong_key_menu_string};
 use crate::{
-    Mode,
     ax_element::{CompiledTarget, GetAttribute, SetAttribute, Target},
     config::{CustomTarget, KeyBinding, RoleOfInterest, WorkFlow, WorkFlowAction},
 };
@@ -10,8 +9,11 @@ use std::time::Duration;
 
 impl AppEngine {
     /// Whether a workflow can run against the current selection and app.
+    ///
+    /// Runs for every row of every menu, so it stays free of the formatting
+    /// [`Self::workflow_invalid_reason`] does; the two must agree.
     pub(super) fn is_workflow_valid(&self, wf: &WorkFlow) -> bool {
-        self.workflow_invalid_reason(wf).is_none()
+        self.app_id_allows(wf) && self.role_satisfied(wf)
     }
 
     /// Whether the workflow's `valid_app_ids` restriction admits the focused app.
@@ -113,11 +115,9 @@ impl AppEngine {
                 return false;
             }
             WorkFlowAction::GlyphlowMenu => {
-                if self.selected.is_some() {
-                    self.menu_refresh("", true);
-                } else {
-                    self.draw_dashboard("");
-                    self.set_mode(Mode::DashBoard);
+                match self.selected.as_ref() {
+                    Some(eoi) => self.show_element_menu(eoi.role()),
+                    None => self.draw_dashboard(),
                 }
                 // HACK: break the loop so the notification will be kept,
                 // basically `GlyphlowMenu` should be a terminal op
