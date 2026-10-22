@@ -36,7 +36,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Update flake.nix
+      - name: Update flake.nix and bump Cargo.toml
         run: |
           # One shared version, plus one hash per release archive.
           # Line-anchored so a comment mentioning `version = ` can never match.
@@ -46,6 +46,18 @@ jobs:
           /usr/bin/sed -i '' "/glyphlow\.tar\.gz/{n;s|hash = .*;|hash = \"${{ inputs.hash }}\";|;}" flake.nix
           /usr/bin/sed -i '' "/glyphlow-cli\.tar\.gz/{n;s|hash = .*;|hash = \"${{ inputs.cli_hash }}\";|;}" flake.nix
 
+          # Cargo.toml holds the version `glyphlow-cli --version` reports, and the
+          # release build rewrites it from the tag in its own checkout only. Bump
+          # it to the next patch here so main carries the upcoming version rather
+          # than the one just released. Derived from the released version, not
+          # from the committed one, so drift heals itself.
+          VERSION="${{ inputs.version }}"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "::error::version '$VERSION' is not plain X.Y.Z"; exit 1; }
+          IFS=. read -r major minor patch <<< "$VERSION"
+          NEXT_VERSION="$major.$minor.$((patch + 1))"
+          /usr/bin/sed -i '' "s|^version = \".*\"|version = \"$NEXT_VERSION\"|" Cargo.toml
+
           # Fail loudly rather than silently committing an unchanged file.
           grep -qF "version = \"${{ inputs.version }}\";" flake.nix \
             || { echo "::error::flake.nix was not updated with the new version"; exit 1; }
@@ -53,9 +65,11 @@ jobs:
             || { echo "::error::flake.nix was not updated with the server hash"; exit 1; }
           grep -qF "hash = \"${{ inputs.cli_hash }}\";" flake.nix \
             || { echo "::error::flake.nix was not updated with the client hash"; exit 1; }
+          grep -qx "version = \"$NEXT_VERSION\"" Cargo.toml \
+            || { echo "::error::Cargo.toml was not bumped to $NEXT_VERSION"; exit 1; }
 
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add flake.nix
-          git commit -m "chore: update flake.nix to version ${{ inputs.version }}" || echo "No changes to commit"
+          git add flake.nix Cargo.toml
+          git commit -m "chore: update flake.nix to version ${{ inputs.version }} and bump Cargo.toml to $NEXT_VERSION" || echo "No changes to commit"
           git push origin HEAD:main
