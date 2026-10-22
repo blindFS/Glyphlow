@@ -9,8 +9,7 @@ use accessibility_sys::{
     kAXHiddenAttribute, kAXImageRole, kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute,
     kAXPressAction, kAXRoleAttribute, kAXRowRole, kAXScrollAreaRole, kAXScrollBarRole,
     kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
-    kAXTextFieldRole, kAXTitleAttribute, kAXValueTypeCFRange, kAXValueTypeCGPoint,
-    kAXValueTypeCGSize, kAXWindowRole,
+    kAXTextFieldRole, kAXValueTypeCFRange, kAXValueTypeCGPoint, kAXValueTypeCGSize, kAXWindowRole,
 };
 use core_foundation::{
     array::{CFArray, CFArrayRef},
@@ -565,7 +564,6 @@ fn role_to_interest(role: &str) -> RoleOfInterest {
 
 pub trait GetAttribute {
     fn get_attribute(&self, attribute_name: &str) -> Option<CFType>;
-    fn get_attribute_string(&self, attribute_name: &str) -> Option<String>;
     fn get_string_value_or_description(&self) -> Option<String>;
     /// The element's frame clipped to `default_frame`, or `default_frame` itself
     /// when its position or size is unavailable.
@@ -583,12 +581,6 @@ impl GetAttribute for AXUIElement {
     fn get_attribute(&self, attribute_name: &str) -> Option<CFType> {
         self.attribute(&AXAttribute::new(&CFString::new(attribute_name)))
             .ok()
-    }
-
-    fn get_attribute_string(&self, attribute_name: &str) -> Option<String> {
-        self.get_attribute(attribute_name)
-            .and_then(|val| val.downcast::<CFString>())
-            .map(|cf| cf.to_string())
     }
 
     fn get_string_value_or_description(&self) -> Option<String> {
@@ -1177,9 +1169,13 @@ fn traverse_elements(
         },
         kAXMenuItemRole => match target {
             Target::Text => {
-                if let Some(title) = element.get_attribute_string(kAXTitleAttribute) {
-                    found!(RoleOfInterest::MenuItem, Some(title));
-                }
+                let text = element
+                    .title()
+                    .map(|v| v.to_string())
+                    .ok()
+                    .filter(|t| !t.is_empty())
+                    .or_else(|| element.get_string_value_or_description());
+                found!(RoleOfInterest::MenuItem, text);
             }
             Target::Clickable => found!(RoleOfInterest::MenuItem),
             _ => (),
