@@ -12,11 +12,8 @@ use crate::{
 pub enum MenuScope {
     /// Nothing picked yet: targets, and workflows that apply anywhere.
     Dashboard,
-    /// A text selection: text actions, the editor and text workflows.
     Text,
-    /// A picked image.
     Image,
-    /// A scroll bar, or a scrollable element scrolled by wheel.
     Scroll,
 }
 
@@ -43,10 +40,6 @@ impl MenuScope {
         self != Self::Scroll
     }
 
-    /// What the editor row runs in this menu, if it has one.
-    ///
-    /// The same key means two things: the dashboard opens the editor on a text
-    /// element it still has to find, the text menu edits the selection at hand.
     fn editor_action(self) -> Option<AppSignal> {
         match self {
             Self::Dashboard => Some(AppSignal::Activate(Target::Edit)),
@@ -55,7 +48,6 @@ impl MenuScope {
         }
     }
 
-    /// The rows this menu offers whatever the selection is.
     fn builtin_rows(self) -> &'static [MenuRow<'static>] {
         match self {
             Self::Dashboard => DASHBOARD_ROWS,
@@ -163,9 +155,6 @@ const SCROLL_ROWS: &[MenuRow<'static>] = &[
 
 impl AppEngine {
     /// The menu a selection of `role` calls for.
-    ///
-    /// A text or scroll activation falls back to its own menu even when the
-    /// picked element's role would have offered the dashboard.
     fn menu_scope_for(&self, role: RoleOfInterest) -> MenuScope {
         match role {
             RoleOfInterest::Image => MenuScope::Image,
@@ -186,14 +175,6 @@ impl AppEngine {
 
     /// The rows `scope` offers the current selection that `prefix` can still
     /// reach, in resolution order.
-    ///
-    /// Applicability and the prefix are both applied here, once: a row that
-    /// cannot run, or that the prefix cannot complete, is never yielded, so
-    /// neither the drawing nor a key press can reach it. The builtin rows come
-    /// first and the configured ones last, so a config row cannot take a builtin
-    /// key away. `Clone` lets a caller walk the same rows twice — the drawing
-    /// needs the widest key before it writes the first row — without building a
-    /// list.
     pub(super) fn menu_rows<'a>(
         &'a self,
         scope: MenuScope,
@@ -257,11 +238,6 @@ impl AppEngine {
     }
 
     /// A character typed while a menu is up.
-    ///
-    /// The prefix is typed and untyped in place: a key that reaches no row leaves
-    /// it exactly as it found it, so another key can still complete it and
-    /// backspace can still undo it. `drawn` is false for a dictionary, which
-    /// answers to the same keys but has no menu to redraw.
     pub(super) fn menu_key(&mut self, key_char: char) {
         let (scope, drawn) = match self.mode() {
             Mode::Menu(scope) => (scope, true),
@@ -314,17 +290,12 @@ impl AppEngine {
         }
     }
 
-    /// Queue the action a row resolved to.
-    ///
-    /// Going through the queue keeps one dispatch path for menu keys and for
-    /// every other signal; the engine cannot await its own handler.
     fn run_menu_action(&self, action: AppSignal) {
         if let Err(e) = self.signal_sender.try_send(action) {
             log::error!("Failed to queue menu action: {e}");
         }
     }
 
-    /// Draw the menu `role` calls for.
     pub(super) fn show_element_menu(&self, role: RoleOfInterest) {
         self.show_menu(self.menu_scope_for(role), "");
     }
