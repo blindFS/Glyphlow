@@ -64,11 +64,12 @@ you can
 
 ### Sticky modifiers
 
-While picking a hint, tapping `Shift`, `Ctrl` or `Alt` toggles that modifier on
-for the pick, so a button can be reached the way `Shift + click`, `Ctrl + click`
-or `Ctrl + Alt + click` would. Tapping the key again rolls its modifier back
-off, and a notification shows the combination in effect. On a text target
+While picking a hint or moving with the Grid, tapping `Shift`, `Ctrl`, `Alt` or
+`Cmd` holds that modifier for the pick, so a button can be reached the way
+`Shift + click`, `Ctrl + click` or `Ctrl + Alt + click` would. On a text target,
 `Shift` keeps its multi-selection meaning instead.
+
+Tapping `Tab` on a clickable target switches the pick to a right click.
 
 ### Workflow
 

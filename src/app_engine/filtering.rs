@@ -404,7 +404,8 @@ impl AppEngine {
             self.toggle_multiselection();
         } else if self.target == Target::Clickable {
             self.click_modifiers.toggle(key);
-            let mut msg = MenuString::from("Click modifiers: ");
+            let mut msg = MenuString::styled(self.click_modifiers.click_type(), MenuStyle::Header);
+            msg.push(" click modifiers: ");
             msg.push_styled(&self.click_modifiers.label(), MenuStyle::Key);
             self.notify_styled(msg, Level::Info);
         }

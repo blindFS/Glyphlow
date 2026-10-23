@@ -7,7 +7,7 @@ use crate::{
     user_interface::{HintBox, UIDrawer, get_screen_frames},
     util::Frame,
 };
-use monio::Key;
+use monio::{Button, Key};
 use objc2::MainThreadMarker;
 use std::{
     collections::VecDeque,
@@ -64,15 +64,14 @@ impl MultiSelectionState {
     }
 }
 
-/// The modifier keys the user has tapped while filtering. Each toggles on its
-/// own, and whatever is on is held for the click that picks a hint — a tap has
-/// no way to reach an accessibility press, so the pick has to carry it.
+/// The modifier keys the user has tapped while filtering/grid-moving.
 #[derive(Debug, Default, Clone, Copy)]
 pub(super) struct ClickModifiers {
     shift: bool,
     ctrl: bool,
     alt: bool,
     meta: bool,
+    tab: bool,
 }
 
 impl ClickModifiers {
@@ -83,12 +82,17 @@ impl ClickModifiers {
             ModifierKey::Ctrl => &mut self.ctrl,
             ModifierKey::Alt => &mut self.alt,
             ModifierKey::Meta => &mut self.meta,
+            ModifierKey::Tab => &mut self.tab,
         };
         *slot = !*slot;
     }
 
     pub(super) fn reset(&mut self) {
         *self = Self::default();
+    }
+
+    pub(super) fn is_active(&self) -> bool {
+        self.shift || self.ctrl || self.alt || self.meta || self.tab
     }
 
     /// The keys to hold down around a click, in the order they are written.
@@ -103,6 +107,18 @@ impl ClickModifiers {
         .filter(|(on, _)| *on)
         .map(|(_, key)| key.key())
         .collect()
+    }
+
+    pub(super) fn click_type(&self) -> &'static str {
+        if self.tab { "Right" } else { "Left" }
+    }
+
+    pub(super) fn button(&self) -> Button {
+        if self.tab {
+            Button::Right
+        } else {
+            Button::Left
+        }
     }
 
     /// The combination as it is written, or `None` when nothing is held.

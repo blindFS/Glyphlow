@@ -520,18 +520,30 @@ fn main() {
                 TestEvent::SetMode(Mode::Filtering),
                 TestEvent::ClearMessages,
                 TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Shift)),
-                TestEvent::ExpectMessage("Click modifiers: Shift".into()),
+                TestEvent::ExpectMessage("Left click modifiers: Shift".into()),
                 // Each key toggles on its own, in a fixed written order ...
                 TestEvent::ClearMessages,
                 TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Meta)),
-                TestEvent::ExpectMessage("Click modifiers: Shift+Meta".into()),
+                TestEvent::ExpectMessage("Left click modifiers: Shift+Meta".into()),
                 // ... and a second tap rolls that one back off.
                 TestEvent::ClearMessages,
                 TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Shift)),
-                TestEvent::ExpectMessage("Click modifiers: Meta".into()),
+                TestEvent::ExpectMessage("Left click modifiers: Meta".into()),
                 TestEvent::ClearMessages,
                 TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Meta)),
-                TestEvent::ExpectMessage("Click modifiers: None".into()),
+                TestEvent::ExpectMessage("Left click modifiers: None".into()),
+                // `Tab` is not held down like the others: it switches the pick
+                // to a right click, and the modifiers carry over to it.
+                TestEvent::ClearMessages,
+                TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Tab)),
+                TestEvent::ExpectMessage("Right click modifiers: None".into()),
+                TestEvent::ClearMessages,
+                TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Shift)),
+                TestEvent::ExpectMessage("Right click modifiers: Shift".into()),
+                // A second tap turns it back into a left click.
+                TestEvent::ClearMessages,
+                TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Tab)),
+                TestEvent::ExpectMessage("Left click modifiers: Shift".into()),
             ],
         ),
         Scenario::new(
