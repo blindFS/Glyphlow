@@ -45,6 +45,11 @@ impl AppEngine {
     /// Move the cursor and click, with a ripple at the click point.
     pub(super) fn simulate_click_with_modifiers(&mut self, x: f64, y: f64, button: Button) {
         let modifers = self.click_modifiers.keys();
+        let button = if self.click_modifiers.tab && button == Button::Left {
+            Button::Right
+        } else {
+            button
+        };
         self.simulate_click_holding(x, y, button, &modifers);
         self.click_modifiers.reset();
     }
@@ -116,6 +121,10 @@ impl AppEngine {
         // An accessibility press cannot hold a modifier, so a sticky one sends
         // the pick through a synthetic click instead.
         let modifiers = self.click_modifiers.keys();
+        if self.click_modifiers.tab {
+            self.simulate_click_holding(x, y, Button::Right, &modifiers);
+            return;
+        }
         if self.last_app_window_info.is_electron
             || *role == RoleOfInterest::Cell
             || !modifiers.is_empty()

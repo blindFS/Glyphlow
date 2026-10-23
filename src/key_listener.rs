@@ -59,6 +59,7 @@ pub enum ModifierKey {
     Ctrl,
     Alt,
     Meta,
+    Tab,
 }
 
 impl ModifierKey {
@@ -69,6 +70,7 @@ impl ModifierKey {
             Key::ControlLeft | Key::ControlRight => Some(Self::Ctrl),
             Key::AltLeft | Key::AltRight => Some(Self::Alt),
             Key::MetaLeft | Key::MetaRight => Some(Self::Meta),
+            Key::Tab => Some(Self::Tab),
             _ => None,
         }
     }
@@ -80,6 +82,7 @@ impl ModifierKey {
             Self::Ctrl => Key::ControlLeft,
             Self::Alt => Key::AltLeft,
             Self::Meta => Key::MetaLeft,
+            Self::Tab => Key::Tab,
         }
     }
 }

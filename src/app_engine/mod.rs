@@ -73,6 +73,7 @@ pub(super) struct ClickModifiers {
     ctrl: bool,
     alt: bool,
     meta: bool,
+    tab: bool,
 }
 
 impl ClickModifiers {
@@ -83,6 +84,7 @@ impl ClickModifiers {
             ModifierKey::Ctrl => &mut self.ctrl,
             ModifierKey::Alt => &mut self.alt,
             ModifierKey::Meta => &mut self.meta,
+            ModifierKey::Tab => &mut self.tab,
         };
         *slot = !*slot;
     }
@@ -103,6 +105,10 @@ impl ClickModifiers {
         .filter(|(on, _)| *on)
         .map(|(_, key)| key.key())
         .collect()
+    }
+
+    pub(super) fn click_type(&self) -> &'static str {
+        if self.tab { "Right" } else { "Left" }
     }
 
     /// The combination as it is written, or `None` when nothing is held.
