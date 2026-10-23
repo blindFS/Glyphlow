@@ -113,18 +113,14 @@ impl AppEngine {
         let (x, y) = center;
         self.focus_on_element(element);
 
-        // An accessibility press cannot hold a modifier, so a sticky one sends
-        // the pick through a synthetic click instead.
-        let modifiers = self.click_modifiers.keys();
-        if self.click_modifiers.tab {
-            self.simulate_click_holding(x, y, Button::Right, &modifiers);
-            return;
-        }
         if self.last_app_window_info.is_electron
             || *role == RoleOfInterest::Cell
-            || !modifiers.is_empty()
+            || self.click_modifiers.is_active()
         {
-            self.simulate_click_holding(x, y, Button::Left, &modifiers);
+            // An accessibility press cannot hold a modifier, so a sticky one sends
+            // the pick through a synthetic click instead.
+            let modifiers = self.click_modifiers.keys();
+            self.simulate_click_holding(x, y, self.click_modifiers.button(), &modifiers);
         } else if let Err(e) = element.press() {
             log::warn!("Failed to do UI press on element: {e}");
             match e {
