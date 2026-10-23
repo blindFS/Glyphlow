@@ -343,7 +343,7 @@ pub fn hint_boxes_from_frames(
 
 pub const MAX_COLLISION_OPS: usize = 150;
 
-/// Nudge overlapping boxes apart.
+/// Nudge overlapping boxes apart, and keep the label under the pointer readable.
 ///
 /// The thresholds are estimated from the font rather than measured, because this
 /// also runs before the boxes are laid out.
@@ -352,7 +352,66 @@ pub fn resolve_collisions(boxes: &mut [HintBox], digits: u32, theme: &GlyphlowTh
     let x_thres =
         theme.hint_font.pointSize() * digits as f64 * 0.8 + 2.0 * theme.hint_margin_size as f64;
     let y_thres = theme.hint_font.pointSize() * 1.5 + 2.0 * theme.hint_margin_size as f64;
+    // A test has no pointer worth respecting, and reading the real one would make
+    // the layout depend on where the mouse happens to be.
+    #[cfg(not(test))]
+    if let Some(pointer) = pointer_frame() {
+        push_off_pointer(boxes, &pointer, x_thres, y_thres, theme);
+    }
     resolve_collisions_reactive(boxes, x_thres, y_thres, MAX_COLLISION_OPS);
+}
+
+/// Where the pointer is, in AX coordinates.
+#[cfg(not(test))]
+fn pointer_frame() -> Option<Frame> {
+    // Roughly how far the arrow reaches below-right of its hotspot, in points.
+    const POINTER_SIZE: f64 = 18.0;
+
+    // Global display coordinates are already the AX system: top-left origin.
+    let event = objc2_core_graphics::CGEvent::new(None)?;
+    let loc = objc2_core_graphics::CGEvent::location(Some(&event));
+    Some(Frame::new(
+        loc.x,
+        loc.y,
+        loc.x + POINTER_SIZE,
+        loc.y + POINTER_SIZE,
+    ))
+}
+
+/// Move any box the pointer covers down until its label is clear of it.
+///
+/// A background process cannot hide the cursor (the display API needs the caller
+/// to be the foreground application), so the box gives way instead. Moving the
+/// anchor and `delta` together is the move the reactive pass already makes, which
+/// is what keeps the triangle reaching the element it points at.
+#[cfg(not(test))]
+fn push_off_pointer(
+    boxes: &mut [HintBox],
+    pointer: &Frame,
+    x_thres: f64,
+    y_thres: f64,
+    theme: &GlyphlowTheme,
+) {
+    // How far below the pointer a pushed box keeps its label, in points.
+    const POINTER_CLEARANCE: f64 = 2.0;
+
+    let (_, tri_height) = HintBox::geometry(theme);
+    for hb in boxes.iter_mut().filter(|hb| !hb.disabled) {
+        // A box hangs below its anchor: triangle first, then the label.
+        let box_top = hb.y + tri_height;
+        let box_frame = Frame::new(
+            hb.x - x_thres / 2.0,
+            box_top,
+            hb.x + x_thres / 2.0,
+            box_top + y_thres,
+        );
+        if box_frame.intersect(pointer).is_none() {
+            continue;
+        }
+        let shift = pointer.bottom_right.y - box_top + POINTER_CLEARANCE;
+        hb.y += shift;
+        hb.delta.1 += shift;
+    }
 }
 
 /// The reactive part: a spatial grid to find neighbours cheaply, and a work
