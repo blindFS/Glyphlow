@@ -207,7 +207,12 @@ impl AppEngine {
             }
             WorkFlowAction::Click => {
                 let (x, y) = frame.center();
-                self.simulate_click_with_modifiers(x, y, Button::Left);
+                let button = if self.click_modifiers.tab {
+                    Button::Right
+                } else {
+                    Button::Left
+                };
+                self.simulate_click_with_modifiers(x, y, button);
                 return false;
             }
             WorkFlowAction::RightClick => {
