@@ -7,6 +7,7 @@ use crate::{
     },
     ax_element::{ElementOfInterest, GetAttribute, SetAttribute},
     config::RoleOfInterest,
+    user_interface::pointer_position,
 };
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
 use accessibility_sys::{
@@ -20,13 +21,13 @@ impl AppEngine {
     pub(super) const KEY_OP_INTERVAL_IN_MS: u64 = 20;
     /// Move the mouse to `(end_x, end_y)` with a fading triangle cursor trail animation.
     pub(super) fn move_mouse_with_trail(&self, end_x: f64, end_y: f64) {
-        // Get current mouse position (Cocoa bottom-left origin)
-        let mouse_loc = objc2_app_kit::NSEvent::mouseLocation();
-
-        if self.config.theme.enable_animation {
+        // Both ends in AX coordinates, so `draw_trail` calibrates them alike.
+        if self.config.theme.enable_animation
+            && let Some((start_x, start_y)) = pointer_position()
+        {
             self.drawer.draw_trail(
-                mouse_loc.x,
-                mouse_loc.y,
+                start_x,
+                start_y,
                 end_x,
                 end_y,
                 &self.config.theme.hint_bg_color,

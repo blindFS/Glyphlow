@@ -72,6 +72,11 @@ impl HintBox {
         }
     }
 
+    /// A box standing in for something that is not a hint: the pointer.
+    fn pseudo(x: f64, y: f64) -> Self {
+        Self::new(usize::MAX, String::new(), x, y, Frame::default(), None)
+    }
+
     /// Replaces the label and lays the box out to match.
     ///
     /// This is the only way a box's size changes, so laying out here is what lets
@@ -307,34 +312,35 @@ pub fn hint_boxes_from_frames(
     let color_num = theme.frame_colors.len();
     let mut color_idx = 0;
 
-    let mut boxes = frames
-        .enumerate()
-        .map(|(idx, frame)| {
-            let frame = frame.intersect(screen_frame).unwrap_or(*screen_frame);
+    // One spare slot for the pointer's stand-in. `collect` would size this
+    // exactly, and the push in `resolve_collisions` would then have to grow it,
+    // copying every box.
+    let mut boxes = Vec::with_capacity(len + 1);
+    boxes.extend(frames.enumerate().map(|(idx, frame)| {
+        let frame = frame.intersect(screen_frame).unwrap_or(*screen_frame);
 
-            let (x, y) = frame.center();
-            let (w, h) = frame.size();
+        let (x, y) = frame.center();
+        let (w, h) = frame.size();
 
-            // Draw frames for large enough elements
-            let is_large = w.max(h) >= colored_frame_min_size;
-            if is_large {
-                color_idx += 1;
-            };
+        // Draw frames for large enough elements
+        let is_large = w.max(h) >= colored_frame_min_size;
+        if is_large {
+            color_idx += 1;
+        };
 
-            let color = (color_num > 0 && is_large)
-                .then(|| theme.frame_colors.get(color_idx % color_num).cloned())
-                .flatten();
+        let color = (color_num > 0 && is_large)
+            .then(|| theme.frame_colors.get(color_idx % color_num).cloned())
+            .flatten();
 
-            HintBox::new(
-                idx,
-                hint_keys.label_for_index(idx, Some(digits)),
-                x,
-                y,
-                frame,
-                color,
-            )
-        })
-        .collect::<Vec<_>>();
+        HintBox::new(
+            idx,
+            hint_keys.label_for_index(idx, Some(digits)),
+            x,
+            y,
+            frame,
+            color,
+        )
+    }));
 
     resolve_collisions(&mut boxes, digits, theme);
 
@@ -343,16 +349,54 @@ pub fn hint_boxes_from_frames(
 
 pub const MAX_COLLISION_OPS: usize = 150;
 
-/// Nudge overlapping boxes apart.
+/// Nudge overlapping boxes apart, with the pointer taking part as one more box.
 ///
 /// The thresholds are estimated from the font rather than measured, because this
 /// also runs before the boxes are laid out.
-pub fn resolve_collisions(boxes: &mut [HintBox], digits: u32, theme: &GlyphlowTheme) {
+pub fn resolve_collisions(boxes: &mut Vec<HintBox>, digits: u32, theme: &GlyphlowTheme) {
     // Estimate box size
     let x_thres =
         theme.hint_font.pointSize() * digits as f64 * 0.8 + 2.0 * theme.hint_margin_size as f64;
     let y_thres = theme.hint_font.pointSize() * 1.5 + 2.0 * theme.hint_margin_size as f64;
+    // A test has no pointer worth respecting, and reading the real one would make
+    // the layout depend on where the mouse happens to be.
+    #[cfg(not(test))]
+    let pointer = pointer_position();
+    #[cfg(test)]
+    let pointer: Option<(f64, f64)> = None;
+
+    if let Some((x, y)) = pointer {
+        boxes.push(HintBox::pseudo(x, y));
+    }
+
     resolve_collisions_reactive(boxes, x_thres, y_thres, MAX_COLLISION_OPS);
+
+    // The pointer cannot be hidden — a background process may not change the
+    // cursor's visibility — so it is solved as one more box and then moved to
+    // wherever the solve put it. Either way it leaves the list again.
+    if let Some(before) = pointer
+        && let Some(after) = boxes.pop()
+        && (after.x, after.y) != before
+    {
+        move_pointer(after.x, after.y);
+    }
+}
+
+/// Where the pointer is, in AX coordinates.
+///
+/// Global display coordinates are already that system: top-left origin, with the
+/// other displays placed relative to the main one, negative coordinates and all.
+pub fn pointer_position() -> Option<(f64, f64)> {
+    let event = objc2_core_graphics::CGEvent::new(None)?;
+    let loc = objc2_core_graphics::CGEvent::location(Some(&event));
+    Some((loc.x, loc.y))
+}
+
+/// Move the pointer to `(x, y)` in AX coordinates.
+fn move_pointer(x: f64, y: f64) {
+    if let Err(e) = monio::mouse_move(x, y) {
+        log::error!("Failed to move pointer to ({x}, {y}): {e}");
+    }
 }
 
 /// The reactive part: a spatial grid to find neighbours cheaply, and a work
