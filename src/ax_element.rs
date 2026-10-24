@@ -877,11 +877,6 @@ impl WalkState {
     }
 }
 
-/// Some apps, like App Store, list an element among its own children.
-fn is_self_reference(child: &AXUIElement, element: &AXUIElement) -> bool {
-    child == element
-}
-
 /// Walks the tree under `ts_elem` depth-first, reporting every element that
 /// matches `target` on `result_tx`.
 ///
@@ -946,7 +941,7 @@ fn traverse_elements(
             return;
         };
         for child in &children {
-            if is_self_reference(&child, element) {
+            if *child == *element {
                 continue;
             }
             if let Some(child_fp) = ElementBasicAttributes::from(&child)
@@ -1170,7 +1165,7 @@ fn traverse_elements(
 
     if let Ok(children) = element.children() {
         for child in &children {
-            if is_self_reference(&child, element) {
+            if *child == *element {
                 continue;
             }
             let safe_child = ThreadSafeElement(child.to_owned());
