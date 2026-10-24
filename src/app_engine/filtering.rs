@@ -410,26 +410,23 @@ impl AppEngine {
     /// A tap means multi-selection wherever there is text to select, a sticky
     /// click modifier on a clickable target, and nothing anywhere else.
     pub(super) fn toggle_modifier(&mut self, key: ModifierKey) {
-        if self.target == Target::Text || self.word_picker.is_some() {
-            self.toggle_multiselection();
-        } else if self.target == Target::Clickable {
+        if self.target == Target::Clickable || self.mode() == Mode::Grid {
             self.click_modifiers.toggle(key);
             let mut msg = MenuString::styled(self.click_modifiers.click_type(), MenuStyle::Header);
             msg.push(" click modifiers: ");
             msg.push_styled(&self.click_modifiers.label(), MenuStyle::Key);
             self.notify_styled(msg, Level::Info);
+        } else if self.target == Target::Text || self.word_picker.is_some() {
+            // Toggle multi-selection
+            self.multi_selection.toggle();
+            let on_off = if self.multi_selection.is_on {
+                "on"
+            } else {
+                "off"
+            };
+            let mut msg = MenuString::from("Multi-selection is now ");
+            msg.push_styled(on_off, MenuStyle::Key).push(".");
+            self.notify_styled(msg, Level::Info);
         }
-    }
-
-    pub(super) fn toggle_multiselection(&mut self) {
-        self.multi_selection.toggle();
-        let on_off = if self.multi_selection.is_on {
-            "on"
-        } else {
-            "off"
-        };
-        let mut msg = MenuString::from("Multi-selection is now ");
-        msg.push_styled(on_off, MenuStyle::Key).push(".");
-        self.notify_styled(msg, Level::Info);
     }
 }
