@@ -13,7 +13,7 @@ use accessibility_sys::{
 };
 use core_foundation::{
     array::{CFArray, CFArrayRef},
-    base::{CFRange, CFType, CFTypeRef, FromVoid, TCFType},
+    base::{CFRange, CFType, CFTypeRef, TCFType},
     boolean::CFBoolean,
     string::CFString,
 };
@@ -52,6 +52,27 @@ thread_local! {
         CFString::new(kAXPositionAttribute),
         CFString::new(kAXSizeAttribute),
     ]);
+}
+
+/// Reads `attributes` off `element` in one call, or `None` when the API fails.
+fn copy_attribute_values(
+    element: &AXUIElement,
+    attributes: &CFArray<CFString>,
+) -> Option<CFArray<CFType>> {
+    let mut values_ref: CFArrayRef = std::ptr::null();
+    let err = unsafe {
+        AXUIElementCopyMultipleAttributeValues(
+            element.as_concrete_TypeRef(),
+            attributes.as_concrete_TypeRef(),
+            // Don't stop on error
+            0,
+            &mut values_ref,
+        )
+    };
+    if err != kAXErrorSuccess || values_ref.is_null() {
+        return None;
+    }
+    Some(unsafe { CFArray::wrap_under_create_rule(values_ref) })
 }
 
 pub enum ElementSignal {
@@ -102,23 +123,7 @@ impl ElementBasicAttributes {
 
     fn from(element: &AXUIElement) -> Option<Self> {
         BASIC_ATTRIBUTES_CF.with(|cf_attributes| {
-            let mut values_ref: CFArrayRef = std::ptr::null();
-            let err = unsafe {
-                AXUIElementCopyMultipleAttributeValues(
-                    element.as_concrete_TypeRef(),
-                    cf_attributes.as_concrete_TypeRef(),
-                    // Don't stop on error
-                    0,
-                    &mut values_ref,
-                )
-            };
-
-            if err != kAXErrorSuccess || values_ref.is_null() {
-                return None;
-            }
-
-            let values_array: CFArray<CFType> =
-                unsafe { CFArray::wrap_under_create_rule(values_ref) };
+            let values_array = copy_attribute_values(element, cf_attributes)?;
             let values = values_array.get_all_values();
 
             let role_cf = values_array.get(0).and_then(|v| v.downcast::<CFString>())?;
@@ -568,7 +573,6 @@ pub trait GetAttribute {
     /// The element's frame clipped to `default_frame`, or `default_frame` itself
     /// when its position or size is unavailable.
     fn get_frame(&self, default: Frame) -> Frame;
-    fn get_dom_classes(&self) -> Option<Vec<String>>;
     fn inspect(&self, bundle_id: &str) -> String;
     fn search_target(&self) -> String;
     fn is_clickable(&self) -> bool;
@@ -593,23 +597,7 @@ impl GetAttribute for AXUIElement {
 
     fn get_frame(&self, default_frame: Frame) -> Frame {
         let frame = FRAME_ATTRIBUTES_CF.with(|cf_attributes| {
-            let mut values_ref: CFArrayRef = std::ptr::null();
-            let err = unsafe {
-                AXUIElementCopyMultipleAttributeValues(
-                    self.as_concrete_TypeRef(),
-                    cf_attributes.as_concrete_TypeRef(),
-                    // Don't stop on error
-                    0,
-                    &mut values_ref,
-                )
-            };
-
-            if err != kAXErrorSuccess || values_ref.is_null() {
-                return None;
-            }
-
-            let values_array: CFArray<CFType> =
-                unsafe { CFArray::wrap_under_create_rule(values_ref) };
+            let values_array = copy_attribute_values(self, cf_attributes)?;
             let values = values_array.get_all_values();
 
             let pos = values
@@ -707,20 +695,6 @@ impl GetAttribute for AXUIElement {
         self.children()
             .ok()
             .is_some_and(|children| !children.is_empty())
-    }
-
-    fn get_dom_classes(&self) -> Option<Vec<String>> {
-        let cf_vals = self
-            .get_attribute("AXDOMClassList")?
-            .downcast::<CFArray>()?;
-
-        let mut classes: Vec<String> = Vec::new();
-        for val in cf_vals.iter() {
-            let s = unsafe { CFString::from_void(*val) };
-            classes.push(s.to_string());
-        }
-
-        Some(classes)
     }
 
     fn match_custom_target(&self, target: &CompiledTarget) -> bool {
@@ -903,13 +877,17 @@ impl WalkState {
     }
 }
 
+/// Some apps, like App Store, list an element among its own children.
+fn is_self_reference(child: &AXUIElement, element: &AXUIElement) -> bool {
+    child == element
+}
+
 /// Walks the tree under `ts_elem` depth-first, reporting every element that
 /// matches `target` on `result_tx`.
 ///
-/// `parent_frame` is the frame children are clipped to and must shrink
-/// monotonically on the way down; `window_frame` narrows at window-ish nodes so
-/// that Electron content scrolled out of view can be told apart from content
-/// that is simply outside the window.
+/// `parent_frame` is the frame children are clipped to and must shrink on the way
+/// down; `window_frame` narrows at window-ish nodes, which is what tells Electron
+/// content scrolled out of view apart from content outside the window.
 fn traverse_elements(
     ts_elem: ThreadSafeElement,
     parent_frame: &Frame,
@@ -968,8 +946,7 @@ fn traverse_elements(
             return;
         };
         for child in &children {
-            // NOTE: Some apps, like App Store, have circular referencing
-            if *child == *element {
+            if is_self_reference(&child, element) {
                 continue;
             }
             if let Some(child_fp) = ElementBasicAttributes::from(&child)
@@ -1193,8 +1170,7 @@ fn traverse_elements(
 
     if let Ok(children) = element.children() {
         for child in &children {
-            // NOTE: Some apps, like App Store, have circular referencing
-            if *child == *element {
+            if is_self_reference(&child, element) {
                 continue;
             }
             let safe_child = ThreadSafeElement(child.to_owned());

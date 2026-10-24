@@ -67,16 +67,9 @@ impl AppEngine {
 
     /// Settle every label once the final hint count is known.
     ///
-    /// The digit width grows mid-traversal (the 27th hint needs two characters).
-    /// This runs *after* collision resolution on purpose:
-    /// [`HintBox::set_label`](crate::user_interface::HintBox::set_label) re-lays
-    /// the box out, so relabelling earlier would set a layer frame once
-    /// here and again in [`Self::finalize_hints`]. Two frame changes in two
-    /// transactions means the second restarts the first's animation, and the box
-    /// jumps instead of growing smoothly.
-    ///
-    /// Comparing the label against the one already in place costs a `String` and
-    /// no measurement, so a traversal that never widens lays nothing out again.
+    /// Must run *after* collision resolution: `HintBox::set_label` re-lays the
+    /// box out, so relabelling earlier would move the layer twice and restart
+    /// its animation.
     pub(super) fn relabel_hints(&mut self) {
         for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
             let label = self

@@ -25,6 +25,13 @@ const CURSOR_OFFSET_Y: f64 = 15.0;
 const HINT_FADE_OUT_DURATION: f64 = 0.5;
 const HINT_DIM_OPACITY: f32 = 0.25;
 
+/// Remove `layer` from its superlayer once the running transaction's animations
+/// finish, which is the only way to clean up a layer that animated itself out.
+fn remove_after_animation(layer: Retained<CAShapeLayer>) {
+    let block = RcBlock::new(move || layer.removeFromSuperlayer());
+    unsafe { CATransaction::setCompletionBlock(Some(&block)) };
+}
+
 impl UIDrawer {
     /// Draw a ripple at `(x, y)`, in the given colour.
     pub fn draw_ripple(&self, x: f64, y: f64, color: &CFRetained<CGColor>) {
@@ -60,12 +67,8 @@ impl UIDrawer {
             unsafe {
                 CATransaction::begin();
 
-                // Use CATransaction completion block to remove the layer after the animation finishes
-                let layer_to_remove = ripple_layer.clone();
-                let completion_block = RcBlock::new(move || {
-                    layer_to_remove.removeFromSuperlayer();
-                });
-                CATransaction::setCompletionBlock(Some(&completion_block));
+                // Remove the layer after the animation finishes
+                remove_after_animation(ripple_layer.clone());
 
                 // Create the Scale Animation (Expanding)
                 let scale_anim =
@@ -212,11 +215,7 @@ impl UIDrawer {
 
                 CATransaction::begin();
 
-                let layer_to_remove = trail_layer.clone();
-                let completion_block = RcBlock::new(move || {
-                    layer_to_remove.removeFromSuperlayer();
-                });
-                CATransaction::setCompletionBlock(Some(&completion_block));
+                remove_after_animation(trail_layer);
 
                 // Animate locations of the gradient mask to create the spatial fade effect.
                 // At t=0, locations are [-1.0, 0.0], meaning the entire range [0, 1] is opaque.
@@ -254,14 +253,13 @@ impl HintBox {
     /// Fade the hint box out; `hide_box` fades the box itself away too, instead
     /// of leaving it dimmed.
     pub fn fade_out(&self, hide_box: bool) {
-        let mut layers = self.frame_layer.iter().collect::<Vec<_>>();
-        let mut ending_opacity = HINT_DIM_OPACITY;
-        if hide_box {
-            layers.push(&self.box_layer);
-            ending_opacity = 0.0;
-        }
+        let (ending_opacity, extra) = if hide_box {
+            (0.0, Some(&self.box_layer))
+        } else {
+            (HINT_DIM_OPACITY, None)
+        };
 
-        for layer in layers {
+        for layer in self.frame_layer.iter().chain(extra) {
             // Set the model opacity to 0 before the animation so the layer
             // stays hidden after the animation is removed.
             layer.setOpacity(ending_opacity);

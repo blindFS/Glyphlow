@@ -13,12 +13,10 @@ use tabled::Tabled;
 
 /// What kind of element a target or a workflow is about.
 ///
-/// [`Any`](Self::Any), [`Some`](Self::Some) and [`Generic`](Self::Generic) are
-/// sentinels a workflow may use as its `starting_role` instead of naming a real
-/// role. They are progressively stricter — `Any` always matches, `Generic` needs
-/// a selection backed by an accessibility element — and
-/// [`CustomTarget`](Self::CustomTarget) is the fourth sentinel. The remaining
-/// variants mirror accessibility roles.
+/// [`Any`](Self::Any), [`Some`](Self::Some), [`Generic`](Self::Generic) and
+/// [`CustomTarget`](Self::CustomTarget) are sentinels a workflow may use as its
+/// `starting_role`; they get progressively stricter. The rest mirror
+/// accessibility roles.
 #[derive(Debug, Default, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub enum RoleOfInterest {
     Button,
@@ -90,10 +88,9 @@ pub enum WorkFlowAction {
 
 /// A pre-defined workflow: a key, the apps it applies to and the actions it runs.
 ///
-/// The [`Tabled`] derive is what lets `glyphlow-cli workflow list` print these
-/// directly. Three fields need a `display` function because their stored shape
-/// is not worth showing, and `order` puts `valid_app_ids` after the role even
-/// though it is declared next to `key`.
+/// [`Tabled`] is what lets `glyphlow-cli workflow list` print these directly;
+/// three fields need a `display` function because their stored shape is not
+/// worth showing.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Tabled)]
 pub struct WorkFlow {
     #[tabled(rename = "NAME", order = 0)]
@@ -111,12 +108,9 @@ pub struct WorkFlow {
 
 /// Table cell for [`WorkFlow::starting_role`].
 ///
-/// The variant name doubles as the string a workflow writes in `config.toml`:
-/// [`RoleOfInterest`] has no `#[serde(rename)]`, so this `Debug` output and the
-/// accepted config spelling are the same text. Renaming a variant — or adding a
-/// serde rename — makes this column name a role the parser will reject, so the
-/// two must move together. `AppEngine::workflow_invalid_reason`'s "needs a …
-/// selection" message reads the same way.
+/// The variant name doubles as the `config.toml` spelling: there is no
+/// `#[serde(rename)]`, so this `Debug` output and what the parser accepts are
+/// the same text, and renaming a variant must move both.
 fn role_label(role: &RoleOfInterest) -> String {
     format!("{role:?}")
 }
@@ -314,146 +308,6 @@ pub trait AlphabeticKey {
     /// `META + X` binding never fires with the right Cmd key. Its only consumer
     /// is the global-trigger matcher in `key_listener`.
     fn right_alternative(&self) -> Option<Key>;
-}
-
-/// Builds [`AlphabeticKey::to_char`] and [`AlphabeticKey::shifted_char`] from a
-/// single table, so the two views of one keyboard layout cannot drift apart.
-/// Keys that type nothing are left out and fall through to `' '`.
-macro_rules! key_char_table {
-    ($($key:ident => $plain:literal / $shifted:literal),* $(,)?) => {
-        fn to_char(&self) -> char {
-            match self {
-                $(Key::$key => $plain,)*
-                // Stand-ins for keys that are not characters at all.
-                Key::Backspace | Key::Delete => '󰁮',
-                Key::ShiftLeft | Key::ShiftRight => '󰘶',
-                _ => ' ',
-            }
-        }
-
-        fn shifted_char(&self) -> char {
-            match self {
-                $(Key::$key => $shifted,)*
-                Key::Backspace | Key::Delete => '󰁮',
-                _ => ' ',
-            }
-        }
-    };
-}
-
-impl AlphabeticKey for Key {
-    key_char_table! {
-        // Letters report themselves either way: the key listener delivers the
-        // base key, never the character Shift would have produced.
-        KeyA => 'A' / 'A',
-        KeyB => 'B' / 'B',
-        KeyC => 'C' / 'C',
-        KeyD => 'D' / 'D',
-        KeyE => 'E' / 'E',
-        KeyF => 'F' / 'F',
-        KeyG => 'G' / 'G',
-        KeyH => 'H' / 'H',
-        KeyI => 'I' / 'I',
-        KeyJ => 'J' / 'J',
-        KeyK => 'K' / 'K',
-        KeyL => 'L' / 'L',
-        KeyM => 'M' / 'M',
-        KeyN => 'N' / 'N',
-        KeyO => 'O' / 'O',
-        KeyP => 'P' / 'P',
-        KeyQ => 'Q' / 'Q',
-        KeyR => 'R' / 'R',
-        KeyS => 'S' / 'S',
-        KeyT => 'T' / 'T',
-        KeyU => 'U' / 'U',
-        KeyV => 'V' / 'V',
-        KeyW => 'W' / 'W',
-        KeyX => 'X' / 'X',
-        KeyY => 'Y' / 'Y',
-        KeyZ => 'Z' / 'Z',
-        // The digit row, unshifted and shifted.
-        Num1 => '1' / '!',
-        Num2 => '2' / '@',
-        Num3 => '3' / '#',
-        Num4 => '4' / '$',
-        Num5 => '5' / '%',
-        Num6 => '6' / '^',
-        Num7 => '7' / '&',
-        Num8 => '8' / '*',
-        Num9 => '9' / '(',
-        Num0 => '0' / ')',
-        Grave => '`' / '~',
-        Minus => '-' / '_',
-        Equal => '=' / '+',
-        BracketLeft => '[' / '{',
-        BracketRight => ']' / '}',
-        Backslash => '\\' / '|',
-        Semicolon => ';' / ':',
-        Quote => '\'' / '"',
-        Comma => ',' / '<',
-        Period => '.' / '>',
-        // `/` starts a text search in filtering mode, so it never reaches the
-        // hint filter — but it is still a character the key reports.
-        Slash => '/' / '?',
-    }
-
-    fn to_str(&self) -> String {
-        match self {
-            Key::AltLeft | Key::AltRight => "ALT".to_string(),
-            Key::ControlLeft | Key::ControlRight => "CTRL".to_string(),
-            Key::MetaLeft | Key::MetaRight => "META".to_string(),
-            Key::ShiftLeft | Key::ShiftRight => "SHIFT".to_string(),
-            Key::Space => "SPACE".to_string(),
-            _ => self.to_char().to_string(),
-        }
-    }
-
-    fn from_str(c: &str) -> Option<Self> {
-        match c.to_uppercase().as_str() {
-            "A" => Some(Key::KeyA),
-            "B" => Some(Key::KeyB),
-            "C" => Some(Key::KeyC),
-            "D" => Some(Key::KeyD),
-            "E" => Some(Key::KeyE),
-            "F" => Some(Key::KeyF),
-            "G" => Some(Key::KeyG),
-            "H" => Some(Key::KeyH),
-            "I" => Some(Key::KeyI),
-            "J" => Some(Key::KeyJ),
-            "K" => Some(Key::KeyK),
-            "L" => Some(Key::KeyL),
-            "M" => Some(Key::KeyM),
-            "N" => Some(Key::KeyN),
-            "O" => Some(Key::KeyO),
-            "P" => Some(Key::KeyP),
-            "Q" => Some(Key::KeyQ),
-            "R" => Some(Key::KeyR),
-            "S" => Some(Key::KeyS),
-            "T" => Some(Key::KeyT),
-            "U" => Some(Key::KeyU),
-            "V" => Some(Key::KeyV),
-            "W" => Some(Key::KeyW),
-            "X" => Some(Key::KeyX),
-            "Y" => Some(Key::KeyY),
-            "Z" => Some(Key::KeyZ),
-            "ALT" => Some(Key::AltLeft),
-            "CTRL" => Some(Key::ControlLeft),
-            "SHIFT" => Some(Key::ShiftLeft),
-            "META" => Some(Key::MetaLeft),
-            "SPACE" => Some(Key::Space),
-            _ => None,
-        }
-    }
-
-    fn right_alternative(&self) -> Option<Key> {
-        match self {
-            Key::AltLeft => Some(Key::AltRight),
-            Key::ControlLeft => Some(Key::ControlRight),
-            Key::ShiftLeft => Some(Key::ShiftRight),
-            Key::ShiftRight => Some(Key::MetaRight),
-            _ => None,
-        }
-    }
 }
 
 /// Characters that can reach the hint filter as a plain keystroke.
@@ -805,10 +659,10 @@ pub struct GlyphlowConfig {
 impl GlyphlowConfig {
     /// Reconcile a freshly loaded config (`other`) with the running one (`self`).
     ///
-    /// The global trigger, the editor, the text actions and the workflows are all
-    /// baked into the key listener at startup, so their keys cannot change at
-    /// runtime: for each one that differs, the running value is forced back into
-    /// `other` and `false` is returned, telling the caller to ask for a restart.
+    /// The global trigger, editor, text actions and workflows are baked into the
+    /// key listener at startup, so their keys cannot change at runtime: each one
+    /// that differs is forced back into `other` and `false` is returned, telling
+    /// the caller to ask for a restart.
     pub fn safe_reload(&self, other: &mut GlyphlowConfig) -> bool {
         let mut compatible = true;
 
@@ -829,24 +683,12 @@ impl GlyphlowConfig {
             _ => (),
         }
 
-        if self.text_actions.len() != other.text_actions.len()
-            || self
-                .text_actions
-                .iter()
-                .zip(other.text_actions.iter())
-                .any(|(a1, a2)| a1.key != a2.key)
-        {
+        if keys_differ(&self.text_actions, &other.text_actions, |a| &a.key) {
             compatible = false;
             other.text_actions = self.text_actions.clone();
         }
 
-        if self.workflows.len() != other.workflows.len()
-            || self
-                .workflows
-                .iter()
-                .zip(other.workflows.iter())
-                .any(|(w1, w2)| w1.key != w2.key)
-        {
+        if keys_differ(&self.workflows, &other.workflows, |w| &w.key) {
             compatible = false;
             other.workflows = self.workflows.clone();
         }
@@ -879,6 +721,12 @@ impl GlyphlowConfig {
             ),
         }
     }
+}
+
+/// Whether two lists bind their keys differently, which is what makes them
+/// impossible to swap in under a running key listener.
+fn keys_differ<T>(old: &[T], new: &[T], key: impl Fn(&T) -> &str) -> bool {
+    old.len() != new.len() || old.iter().zip(new).any(|(a, b)| key(a) != key(b))
 }
 
 /// Write `value` over `slot` when set, handing back what was there.

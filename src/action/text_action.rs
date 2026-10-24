@@ -1,4 +1,4 @@
-use crate::config::GlyphlowTheme;
+use crate::{config::GlyphlowTheme, util::apply_line_spacing};
 use core_foundation::{
     array::{CFArray, CFArrayGetCount, CFArrayGetValueAtIndex, CFArrayRef},
     base::{CFTypeRef, TCFType},
@@ -6,13 +6,12 @@ use core_foundation::{
     string::{CFString, CFStringRef},
 };
 use objc2::{
-    rc::{DefaultRetained, Retained, autoreleasepool},
+    rc::{Retained, autoreleasepool},
     runtime::{AnyObject, ProtocolObject},
 };
 use objc2_app_kit::{
     NSDocumentTypeDocumentAttribute, NSForegroundColorAttributeName, NSHTMLTextDocumentType,
-    NSMutableAttributedStringDocumentFormats, NSMutableParagraphStyle,
-    NSParagraphStyleAttributeName, NSPasteboard, NSPasteboardTypeString,
+    NSMutableAttributedStringDocumentFormats, NSPasteboard, NSPasteboardTypeString,
 };
 use objc2_foundation::{
     NSArray, NSDictionary, NSMutableAttributedString, NSRange, NSString, NSUTF8StringEncoding,
@@ -156,16 +155,7 @@ pub fn html_to_attributed_string(
             .readFromData_options_documentAttributes_error(&data, &options, None)
             .ok()?;
 
-        // HACK: For multilingual text, height is underestimated due to fallback fonts.
-        // This ensures more vertical spacing.
-        let style = NSMutableParagraphStyle::default_retained();
-        style.setLineSpacing(1.0);
-        // style.setLineHeightMultiple(1.2);
-        attr_str.addAttribute_value_range(
-            NSParagraphStyleAttributeName,
-            &style,
-            NSRange::new(0, attr_str.length()),
-        );
+        apply_line_spacing(&attr_str, NSRange::new(0, attr_str.length()));
 
         Some(attr_str)
     }

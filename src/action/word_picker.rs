@@ -297,9 +297,8 @@ fn multilingual_split(input: &str) -> (Vec<String>, Vec<usize>) {
             buffer.push(c);
         } else {
             if !buffer.is_empty() {
-                l3_res.push(buffer.clone());
+                l3_res.push(std::mem::take(&mut buffer));
                 l3_off.push(base_offset + buffer_start);
-                buffer.clear();
             }
             l3_res.push(c.to_string());
             l3_off.push(base_offset + i);

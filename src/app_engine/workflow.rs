@@ -198,26 +198,26 @@ impl AppEngine {
             return true;
         };
 
-        let frame = selected.frame;
+        let center = selected.frame.center();
         match act {
             WorkFlowAction::Hover => {
-                let (x, y) = frame.center();
-                self.move_mouse_with_trail(x, y);
+                self.move_mouse_with_trail(center.0, center.1);
                 return false;
             }
             WorkFlowAction::Click => {
-                let (x, y) = frame.center();
-                self.simulate_click_with_modifiers(x, y, self.click_modifiers.button());
+                self.simulate_click_with_modifiers(
+                    center.0,
+                    center.1,
+                    self.click_modifiers.button(),
+                );
                 return false;
             }
             WorkFlowAction::RightClick => {
-                let (x, y) = frame.center();
-                self.simulate_click_with_modifiers(x, y, Button::Right);
+                self.simulate_click_with_modifiers(center.0, center.1, Button::Right);
                 return false;
             }
             WorkFlowAction::MiddleClick => {
-                let (x, y) = frame.center();
-                self.simulate_click_with_modifiers(x, y, Button::Middle);
+                self.simulate_click_with_modifiers(center.0, center.1, Button::Middle);
                 return false;
             }
             _ => (),
@@ -240,11 +240,9 @@ impl AppEngine {
                 self.focus_on_element(element);
             }
             WorkFlowAction::Press => {
-                let center = frame.center();
                 self.press_on_element(element, &role, center);
             }
             WorkFlowAction::ShowMenu => {
-                let center = frame.center();
                 self.right_click_menu_on_element(element, center);
             }
             WorkFlowAction::GoParent => {
@@ -321,10 +319,9 @@ impl AppEngine {
 
     /// Run a workflow addressed by (a fragment of) its display name.
     ///
-    /// When the workflow is only blocked by its `starting_role`, the elements
-    /// matching that role are offered for picking and the workflow runs on
-    /// whichever one gets picked. This reuses the very same machinery as the
-    /// `SearchFor` action: a custom target plus queued workflow actions.
+    /// When only its `starting_role` blocks it, the elements matching that role
+    /// are offered for picking and the workflow runs on whichever gets picked —
+    /// the same machinery as `SearchFor`: a custom target plus queued actions.
     pub(super) fn run_workflow_by_name(&mut self, name: &str) {
         let Some(idx) = self.config.find_workflow(name) else {
             let msg = format!(

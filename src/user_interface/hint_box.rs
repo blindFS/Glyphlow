@@ -1,4 +1,5 @@
 use crate::config::{GlyphlowTheme, HintKeys};
+use crate::os_util::move_pointer;
 use crate::user_interface::calibrated_origin;
 use crate::util::{Frame, estimate_frame_for_text};
 use objc2::{AnyThread, rc::Retained};
@@ -79,11 +80,9 @@ impl HintBox {
 
     /// Replaces the label and lays the box out to match.
     ///
-    /// This is the only way a box's size changes, so laying out here is what lets
-    /// every later [`Self::refresh`] skip the question entirely.
-    ///
-    /// Call it once the box's position is final — the layout moves the layer, and
-    /// a subsequent move would restart the animation it just started.
+    /// This is the only way a box's size changes, which is what lets every later
+    /// [`Self::refresh`] skip measuring. Call it once the position is final: the
+    /// layout moves the layer, and a later move restarts the animation.
     pub fn set_label(&mut self, label: String, overlay_frame: &Frame, theme: &GlyphlowTheme) {
         self.label = label;
         self.layout(overlay_frame, theme);
@@ -193,12 +192,9 @@ impl HintBox {
         }
     }
 
-    /// The one place that measures the label.
-    ///
-    /// The size is a pure function of the label text — a `W` is wider than an
-    /// `I`, so it cannot be derived from the alphabet or the digit count — which
-    /// makes this the single answer to "how big is this hint". It therefore runs
-    /// where the label is created or replaced, and never on a redraw.
+    /// Measure the label and place the box. The size cannot be derived from the
+    /// digit count — a `W` is wider than an `I` — so this runs wherever the
+    /// label changes, and never on a redraw.
     fn layout(&self, overlay_frame: &Frame, theme: &GlyphlowTheme) {
         let attr_string = self.attributed_string(0, theme);
         let (text_size, _) = estimate_frame_for_text(
@@ -296,6 +292,27 @@ impl HintBox {
     }
 }
 
+/// The colour for a frame of this size, advancing `color_idx` past the large
+/// ones so consecutive large frames cycle through the palette.
+pub fn frame_color(
+    theme: &GlyphlowTheme,
+    color_idx: &mut usize,
+    size: (f64, f64),
+    min_size: f64,
+) -> Option<CFRetained<CGColor>> {
+    let (w, h) = size;
+    let is_large = w.max(h) >= min_size;
+    if is_large {
+        *color_idx += 1;
+    }
+    let color_num = theme.frame_colors.len();
+    if color_num > 0 && is_large {
+        theme.frame_colors.get(*color_idx % color_num).cloned()
+    } else {
+        None
+    }
+}
+
 /// Build hint boxes for `len` frames, labelled and collision-resolved.
 pub fn hint_boxes_from_frames(
     len: usize,
@@ -309,7 +326,6 @@ pub fn hint_boxes_from_frames(
         return (0, Vec::new());
     }
     let digits = hint_keys.digits_for_len(len);
-    let color_num = theme.frame_colors.len();
     let mut color_idx = 0;
 
     // One spare slot for the pointer's stand-in. `collect` would size this
@@ -320,17 +336,7 @@ pub fn hint_boxes_from_frames(
         let frame = frame.intersect(screen_frame).unwrap_or(*screen_frame);
 
         let (x, y) = frame.center();
-        let (w, h) = frame.size();
-
-        // Draw frames for large enough elements
-        let is_large = w.max(h) >= colored_frame_min_size;
-        if is_large {
-            color_idx += 1;
-        };
-
-        let color = (color_num > 0 && is_large)
-            .then(|| theme.frame_colors.get(color_idx % color_num).cloned())
-            .flatten();
+        let color = frame_color(theme, &mut color_idx, frame.size(), colored_frame_min_size);
 
         HintBox::new(
             idx,
@@ -361,7 +367,7 @@ pub fn resolve_collisions(boxes: &mut Vec<HintBox>, digits: u32, theme: &Glyphlo
     // A test has no pointer worth respecting, and reading the real one would make
     // the layout depend on where the mouse happens to be.
     #[cfg(not(test))]
-    let pointer = pointer_position();
+    let pointer = crate::os_util::pointer_position();
     #[cfg(test)]
     let pointer: Option<(f64, f64)> = None;
 
@@ -379,23 +385,6 @@ pub fn resolve_collisions(boxes: &mut Vec<HintBox>, digits: u32, theme: &Glyphlo
         && (after.x, after.y) != before
     {
         move_pointer(after.x, after.y);
-    }
-}
-
-/// Where the pointer is, in AX coordinates.
-///
-/// Global display coordinates are already that system: top-left origin, with the
-/// other displays placed relative to the main one, negative coordinates and all.
-pub fn pointer_position() -> Option<(f64, f64)> {
-    let event = objc2_core_graphics::CGEvent::new(None)?;
-    let loc = objc2_core_graphics::CGEvent::location(Some(&event));
-    Some((loc.x, loc.y))
-}
-
-/// Move the pointer to `(x, y)` in AX coordinates.
-fn move_pointer(x: f64, y: f64) {
-    if let Err(e) = monio::mouse_move(x, y) {
-        log::error!("Failed to move pointer to ({x}, {y}): {e}");
     }
 }
 

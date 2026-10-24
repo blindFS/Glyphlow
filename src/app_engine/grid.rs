@@ -3,7 +3,8 @@ use crate::{
     Mode,
     ax_element::ElementOfInterest,
     config::{GridConfig, RoleOfInterest},
-    user_interface::{GridOverlay, cell_frame, parent_frame, pointer_position},
+    os_util::pointer_position,
+    user_interface::{GridOverlay, cell_frame, parent_frame},
     util::Frame,
 };
 
