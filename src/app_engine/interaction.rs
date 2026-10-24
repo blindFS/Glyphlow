@@ -17,6 +17,8 @@ use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber, strin
 use log::Level;
 use monio::{Button, Event, Key, ScrollDirection};
 
+const SCALE_FACTOR: f64 = 1.5;
+
 impl AppEngine {
     pub(super) const KEY_OP_INTERVAL_IN_MS: u64 = 20;
     /// Move the mouse to `(end_x, end_y)` with a fading triangle cursor trail animation.
@@ -263,8 +265,8 @@ impl AppEngine {
     /// scroll action, which the caller still has to handle.
     pub(super) fn scale_scroll_distance(&mut self, sa: ScrollAction) -> bool {
         match sa {
-            ScrollAction::IncreaseDistance => self.config.scroll_distance *= 1.5,
-            ScrollAction::DecreaseDistance => self.config.scroll_distance /= 1.5,
+            ScrollAction::IncreaseDistance => self.config.scroll_distance *= SCALE_FACTOR,
+            ScrollAction::DecreaseDistance => self.config.scroll_distance /= SCALE_FACTOR,
             _ => return false,
         }
         true
