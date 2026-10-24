@@ -224,6 +224,7 @@ impl KeyListener {
                 *state = Mode::Searching(mode)
             }
             Key::Enter if mode == FilterMode::Generic => self.send(AppSignal::ActOnEnter),
+            Key::Enter => (),
             _ => {
                 let key_char = key.to_char();
                 if key_char == ' ' {
