@@ -310,6 +310,10 @@ pub trait AlphabeticKey {
     fn right_alternative(&self) -> Option<Key>;
 }
 
+/// What [`AlphabeticKey::to_char`] reports for `Backspace` and `Delete`: they
+/// type nothing, so they travel as this stand-in glyph instead.
+pub(crate) const BACKSPACE_CHAR: char = '\u{f006e}';
+
 /// Builds [`AlphabeticKey::to_char`] and [`AlphabeticKey::shifted_char`] from a
 /// single table, so the two views of one keyboard layout cannot drift apart.
 /// Keys that type nothing are left out and fall through to `' '`.
@@ -319,7 +323,7 @@ macro_rules! key_char_table {
             match self {
                 $(Key::$key => $plain,)*
                 // Stand-ins for keys that are not characters at all.
-                Key::Backspace | Key::Delete => '󰁮',
+                Key::Backspace | Key::Delete => BACKSPACE_CHAR,
                 Key::ShiftLeft | Key::ShiftRight => '󰘶',
                 _ => ' ',
             }
@@ -328,7 +332,7 @@ macro_rules! key_char_table {
         fn shifted_char(&self) -> char {
             match self {
                 $(Key::$key => $shifted,)*
-                Key::Backspace | Key::Delete => '󰁮',
+                Key::Backspace | Key::Delete => BACKSPACE_CHAR,
                 _ => ' ',
             }
         }
@@ -1307,8 +1311,8 @@ mod tests {
     #[case::slash(Key::Slash, '/', '?')]
     // Not characters: they report a stand-in glyph instead. Shift has none, so
     // it falls back to the blank.
-    #[case::backspace(Key::Backspace, '󰁮', '󰁮')]
-    #[case::delete_reports_the_same(Key::Delete, '󰁮', '󰁮')]
+    #[case::backspace(Key::Backspace, BACKSPACE_CHAR, BACKSPACE_CHAR)]
+    #[case::delete_reports_the_same(Key::Delete, BACKSPACE_CHAR, BACKSPACE_CHAR)]
     #[case::shift(Key::ShiftLeft, '󰘶', ' ')]
     // Everything else is blank.
     #[case::escape(Key::Escape, ' ', ' ')]

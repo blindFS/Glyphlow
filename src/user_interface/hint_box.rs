@@ -1,6 +1,6 @@
+use super::calibrated_origin;
 use crate::config::{GlyphlowTheme, HintKeys};
 use crate::os_util::move_pointer;
-use crate::user_interface::calibrated_origin;
 use crate::util::{Frame, estimate_frame_for_text};
 use objc2::{AnyThread, rc::Retained};
 use objc2_core_foundation::{CFRetained, CGSize};

@@ -1,7 +1,6 @@
-use super::drawer::without_animations;
+use super::{calibrated_origin, drawer::without_animations};
 use crate::{
     config::GridConfig,
-    user_interface::calibrated_origin,
     util::{Frame, estimate_frame_for_text},
 };
 use objc2::{

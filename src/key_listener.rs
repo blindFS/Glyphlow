@@ -43,7 +43,7 @@ pub enum FilterMode {
 }
 
 impl FilterMode {
-    pub fn to_app_mode(&self) -> Mode {
+    pub(crate) fn to_app_mode(self) -> Mode {
         match self {
             FilterMode::WordPicking => Mode::WordPicking,
             FilterMode::Generic => Mode::Filtering,
@@ -106,7 +106,7 @@ pub enum AppSignal {
     /// A key was typed while filtering hints.
     HintFilter(char, FilterMode),
     /// A key was typed while searching. A space arrives as
-    /// [`crate::util::SEARCH_TERM_SEPARATOR`], not as `' '`.
+    /// `SEARCH_TERM_SEPARATOR`, not as `' '`.
     SearchFilter(char, FilterMode),
     /// A key was typed while the recursive grid was up.
     GridKey(char),

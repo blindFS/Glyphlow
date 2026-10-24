@@ -3,7 +3,7 @@ use crate::{
     AppSignal, FilterMode, Mode, ModifierKey,
     action::{OCRResult, perform_ocr},
     ax_element::{ElementOfInterest, Target},
-    config::RoleOfInterest,
+    config::{BACKSPACE_CHAR, RoleOfInterest},
     user_interface::{HintBox, MenuString, MenuStyle, hint_boxes_from_frames},
     util::{Frame, lower_ascii, select_text_range},
 };
@@ -295,16 +295,15 @@ impl AppEngine {
         };
     }
 
-    /// Type `key_char` into the hint prefix; `󰁮` deletes, or goes back when the
-    /// prefix is already empty.
+    /// Type `key_char` into the hint prefix; `BACKSPACE_CHAR` deletes, or goes
+    /// back when the prefix is already empty.
     pub(super) async fn filter_by_hint(&mut self, key_char: char, mode: FilterMode) {
-        if key_char == '󰁮' {
+        if key_char == BACKSPACE_CHAR {
             if self.hint_prefix.is_empty() {
                 self.go_back_in_filtering(mode);
                 return;
-            } else {
-                self.hint_prefix.pop();
             }
+            self.hint_prefix.pop();
         } else if self.hint_prefix.len() < self.hint_width as usize {
             self.hint_prefix.push(key_char);
         }
@@ -314,7 +313,7 @@ impl AppEngine {
 
     /// Type into the search prefix, debouncing the re-filter that follows.
     pub(super) async fn filter_by_search(&mut self, key_char: char, mode: FilterMode) {
-        if key_char == '󰁮' {
+        if key_char == BACKSPACE_CHAR {
             if self.search_prefix.is_empty() {
                 self.is_searching = false;
                 self.set_mode(mode.to_app_mode());
@@ -326,9 +325,8 @@ impl AppEngine {
                     self.update_hints();
                 }
                 return;
-            } else {
-                self.search_prefix.pop();
             }
+            self.search_prefix.pop();
         } else {
             self.search_prefix.push(key_char.to_ascii_lowercase());
         }

@@ -124,18 +124,17 @@ impl ElementBasicAttributes {
     fn from(element: &AXUIElement) -> Option<Self> {
         BASIC_ATTRIBUTES_CF.with(|cf_attributes| {
             let values_array = copy_attribute_values(element, cf_attributes)?;
-            let values = values_array.get_all_values();
 
             let role_cf = values_array.get(0).and_then(|v| v.downcast::<CFString>())?;
             let role = role_cf.to_string();
 
-            let pos = values
-                .get(1)
-                .and_then(|pos_ptr| cftype_to_rust_type::<CGPoint>(*pos_ptr, kAXValueTypeCGPoint));
+            let pos = values_array.get(1).and_then(|v| {
+                cftype_to_rust_type::<CGPoint>(v.as_concrete_TypeRef(), kAXValueTypeCGPoint)
+            });
 
-            let size = values
-                .get(2)
-                .and_then(|size_ptr| cftype_to_rust_type::<CGSize>(*size_ptr, kAXValueTypeCGSize));
+            let size = values_array.get(2).and_then(|v| {
+                cftype_to_rust_type::<CGSize>(v.as_concrete_TypeRef(), kAXValueTypeCGSize)
+            });
 
             let frame = match (pos, size) {
                 (Some(p), Some(s)) => Some(Frame::new(p.x, p.y, p.x + s.width, p.y + s.height)),

@@ -2,6 +2,7 @@ use super::{AppEngine, menu::MenuRow};
 use crate::{
     MenuScope, Mode,
     ax_element::ElementOfInterest,
+    config::BACKSPACE_CHAR,
     user_interface::{MenuString, MenuStyle},
     util::search_regex,
 };
@@ -20,14 +21,12 @@ fn preview_line(text: &str) -> Cow<'_, str> {
     }
 }
 
-const BACK_KEY: &str = "󰁮";
-
 /// The message for a key sequence that reaches no item: it says so, then offers
 /// the way out.
 pub(super) fn wrong_key_menu_string() -> MenuString {
     let mut msg = MenuString::styled("Wrong key sequence", MenuStyle::Header);
     msg.push("\nPress ")
-        .push_styled(BACK_KEY, MenuStyle::Key)
+        .push_styled(BACKSPACE_CHAR.encode_utf8(&mut [0; 4]), MenuStyle::Key)
         .push(" to go back");
     msg
 }
@@ -127,7 +126,7 @@ impl AppEngine {
 
             if !self.is_searching && nothing_visible {
                 let mut msg = MenuString::styled("Nothing matches, press ", MenuStyle::Header);
-                msg.push_styled(BACK_KEY, MenuStyle::Key)
+                msg.push_styled(BACKSPACE_CHAR.encode_utf8(&mut [0; 4]), MenuStyle::Key)
                     .push_styled(" to go back", MenuStyle::Header);
                 self.notify_styled(msg, log::Level::Warn);
             }

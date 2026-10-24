@@ -88,7 +88,7 @@ impl Frame {
         w * h
     }
 
-    pub fn to_cgrect(&self) -> CGRect {
+    pub fn to_cgrect(self) -> CGRect {
         let (w, h) = self.size();
         CGRect::new(self.top_left, OCGSize::new(w, h))
     }

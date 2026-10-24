@@ -11,7 +11,7 @@ use objc2_quartz_core::{
     CAMediaTimingFunction, CAShapeLayer, CATransaction, kCAMediaTimingFunctionEaseOut,
 };
 
-use crate::user_interface::{HintBox, UIDrawer, calibrated_origin};
+use super::{HintBox, UIDrawer, calibrated_origin};
 
 const RIPPLE_DURATION: f64 = 0.4;
 const RIPPLE_INIT_RADIUS: f64 = 5.0;
