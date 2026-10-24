@@ -198,26 +198,22 @@ impl AppEngine {
             return true;
         };
 
-        let center = selected.frame.center();
+        let (x, y) = selected.frame.center();
         match act {
             WorkFlowAction::Hover => {
-                self.move_mouse_with_trail(center.0, center.1);
+                self.move_mouse_with_trail(x, y);
                 return false;
             }
             WorkFlowAction::Click => {
-                self.simulate_click_with_modifiers(
-                    center.0,
-                    center.1,
-                    self.click_modifiers.button(),
-                );
+                self.simulate_click_with_modifiers(x, y, self.click_modifiers.button());
                 return false;
             }
             WorkFlowAction::RightClick => {
-                self.simulate_click_with_modifiers(center.0, center.1, Button::Right);
+                self.simulate_click_with_modifiers(x, y, Button::Right);
                 return false;
             }
             WorkFlowAction::MiddleClick => {
-                self.simulate_click_with_modifiers(center.0, center.1, Button::Middle);
+                self.simulate_click_with_modifiers(x, y, Button::Middle);
                 return false;
             }
             _ => (),
@@ -240,10 +236,10 @@ impl AppEngine {
                 self.focus_on_element(element);
             }
             WorkFlowAction::Press => {
-                self.press_on_element(element, &role, center);
+                self.press_on_element(element, &role, (x, y));
             }
             WorkFlowAction::ShowMenu => {
-                self.right_click_menu_on_element(element, center);
+                self.right_click_menu_on_element(element, (x, y));
             }
             WorkFlowAction::GoParent => {
                 let flag = self.select_parent();
