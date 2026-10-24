@@ -67,8 +67,6 @@ impl AppEngine {
         self.is_searching = false;
         self.multi_selection.reset();
         self.click_modifiers.reset();
-        // A menu key sequence only means something against the selection it was
-        // typed for, so it goes with the cache.
         self.menu_prefix.clear();
     }
 

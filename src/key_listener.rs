@@ -223,12 +223,11 @@ impl KeyListener {
                 self.send(AppSignal::StartSearch);
                 *state = Mode::Searching(mode)
             }
-            Key::Enter => self.send(AppSignal::ActOnEnter),
+            Key::Enter if mode == FilterMode::Generic => self.send(AppSignal::ActOnEnter),
             _ => {
                 let key_char = key.to_char();
                 if key_char == ' ' {
                     self.send(AppSignal::DeActivate);
-                    *state = Mode::Idle;
                 } else {
                     self.send(AppSignal::HintFilter(key_char, mode));
                 }
