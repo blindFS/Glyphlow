@@ -90,7 +90,7 @@ impl AppEngine {
         self.set_mode(Mode::Grid);
     }
 
-    /// Narrow the grid to the cell `key` labels, moving the cursor there.
+    /// Narrow the grid to the cell `key` labels.
     pub(super) fn grid_step(&mut self, key: char) {
         let Some(level) = self
             .grid
@@ -102,8 +102,8 @@ impl AppEngine {
         self.show_grid(level);
     }
 
-    /// Widen the grid back to the level above, moving the cursor there. Nothing
-    /// sits above the region the recursion started from, so that is a no-op.
+    /// Widen the grid back to the level above. Nothing sits above the region the
+    /// recursion started from, so that is a no-op.
     pub(super) fn grid_back(&mut self) {
         let Some(level) = self
             .grid
@@ -115,11 +115,8 @@ impl AppEngine {
         self.show_grid(level);
     }
 
-    /// Move the cursor to `level` and redraw the cells over it.
+    /// Redraw the cells over `level`.
     fn show_grid(&mut self, level: GridLevel) {
-        let (x, y) = level.region.center();
-        self.move_mouse_with_trail(x, y);
-
         let Some(session) = self.grid.as_mut() else {
             return;
         };
@@ -142,10 +139,13 @@ impl AppEngine {
         overlay.free();
 
         // At depth zero nothing was narrowed, so the pointer itself is the target.
+        // Otherwise the cursor only travels now, once, to the settled cell.
         let (x, y) = if level.depth == 0 {
             pointer_position().unwrap_or_else(|| level.region.center())
         } else {
-            level.region.center()
+            let (x, y) = level.region.center();
+            self.move_mouse_with_trail(x, y);
+            (x, y)
         };
 
         // Element-relative actions (`Click`) need a frame to aim at.
