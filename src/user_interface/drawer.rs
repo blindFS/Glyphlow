@@ -549,7 +549,9 @@ impl UIDrawer {
     fn reposition_search_bar(&self) {
         if self.menu.container.isHidden() {
             let (x, y) = self.current_screen_frame.center();
-            self.search_bar.container.setPosition(NSPoint::new(x, y));
+            self.search_bar
+                .container
+                .setPosition(calibrated_origin(x, y, &self.overlay_frame));
             return;
         }
         let menu_frame = self.menu.container.frame();
@@ -658,11 +660,11 @@ impl UIDrawer {
             return;
         }
 
-        // Calculate screen top and bottom in Cocoa y
-        let screen_top_cocoa_y =
-            self.overlay_frame.bottom_right.y - self.current_screen_frame.top_left.y;
-        let screen_bottom_cocoa_y =
-            self.overlay_frame.bottom_right.y - self.current_screen_frame.bottom_right.y;
+        let screen_top_cocoa_y = flip_y(self.current_screen_frame.top_left.y, &self.overlay_frame);
+        let screen_bottom_cocoa_y = flip_y(
+            self.current_screen_frame.bottom_right.y,
+            &self.overlay_frame,
+        );
 
         let initial_y = screen_top_cocoa_y - box_height;
         let bottom_y = screen_bottom_cocoa_y;
@@ -777,14 +779,17 @@ impl GlyphlowDrawingLayer for CALayer {
     }
 }
 
+/// The vertical flip alone: AX y into layer y. A frame edge needs this without
+/// the horizontal shift.
+fn flip_y(y: f64, overlay_frame: &Frame) -> f64 {
+    overlay_frame.bottom_right.y - y
+}
+
 /// Screen coordinates (top-left origin) into layer coordinates (bottom-left):
 /// shift by the overlay origin, then flip the y axis. The overlay is the union of
 /// every screen frame, so its origin is not necessarily `(0, 0)`.
 pub fn calibrated_origin(x: f64, y: f64, overlay_frame: &Frame) -> NSPoint {
-    NSPoint::new(
-        x - overlay_frame.top_left.x,
-        overlay_frame.bottom_right.y - y,
-    )
+    NSPoint::new(x - overlay_frame.top_left.x, flip_y(y, overlay_frame))
 }
 
 /// The ranges of `spans` to repaint, with the style to paint them in; `None`

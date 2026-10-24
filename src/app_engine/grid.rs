@@ -3,10 +3,9 @@ use crate::{
     Mode,
     ax_element::ElementOfInterest,
     config::{GridConfig, RoleOfInterest},
-    user_interface::{GridOverlay, calibrated_origin, cell_frame, parent_frame},
+    user_interface::{GridOverlay, cell_frame, parent_frame, pointer_position},
     util::Frame,
 };
-use objc2_core_foundation::CGPoint;
 
 /// Where a recursive-grid run currently is.
 #[derive(Clone, Copy)]
@@ -141,10 +140,9 @@ impl AppEngine {
         };
         overlay.free();
 
+        // At depth zero nothing was narrowed, so the pointer itself is the target.
         let (x, y) = if level.depth == 0 {
-            let mouse_loc = objc2_app_kit::NSEvent::mouseLocation();
-            let CGPoint { x, y } = calibrated_origin(mouse_loc.x, mouse_loc.y, &self.overlay_frame);
-            (x, y)
+            pointer_position().unwrap_or_else(|| level.region.center())
         } else {
             level.region.center()
         };
