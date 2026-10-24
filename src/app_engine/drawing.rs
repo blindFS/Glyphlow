@@ -2,6 +2,7 @@ use super::{AppEngine, menu::MenuRow};
 use crate::{
     MenuScope, Mode,
     ax_element::ElementOfInterest,
+    config::BACKSPACE_CHAR,
     user_interface::{MenuString, MenuStyle},
     util::search_regex,
 };
@@ -20,14 +21,12 @@ fn preview_line(text: &str) -> Cow<'_, str> {
     }
 }
 
-const BACK_KEY: &str = "󰁮";
-
 /// The message for a key sequence that reaches no item: it says so, then offers
 /// the way out.
 pub(super) fn wrong_key_menu_string() -> MenuString {
     let mut msg = MenuString::styled("Wrong key sequence", MenuStyle::Header);
     msg.push("\nPress ")
-        .push_styled(BACK_KEY, MenuStyle::Key)
+        .push_styled(BACKSPACE_CHAR.encode_utf8(&mut [0; 4]), MenuStyle::Key)
         .push(" to go back");
     msg
 }
@@ -67,16 +66,9 @@ impl AppEngine {
 
     /// Settle every label once the final hint count is known.
     ///
-    /// The digit width grows mid-traversal (the 27th hint needs two characters).
-    /// This runs *after* collision resolution on purpose:
-    /// [`HintBox::set_label`](crate::user_interface::HintBox::set_label) re-lays
-    /// the box out, so relabelling earlier would set a layer frame once
-    /// here and again in [`Self::finalize_hints`]. Two frame changes in two
-    /// transactions means the second restarts the first's animation, and the box
-    /// jumps instead of growing smoothly.
-    ///
-    /// Comparing the label against the one already in place costs a `String` and
-    /// no measurement, so a traversal that never widens lays nothing out again.
+    /// Must run *after* collision resolution: `HintBox::set_label` re-lays the
+    /// box out, so relabelling earlier would move the layer twice and restart
+    /// its animation.
     pub(super) fn relabel_hints(&mut self) {
         for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
             let label = self
@@ -134,7 +126,7 @@ impl AppEngine {
 
             if !self.is_searching && nothing_visible {
                 let mut msg = MenuString::styled("Nothing matches, press ", MenuStyle::Header);
-                msg.push_styled(BACK_KEY, MenuStyle::Key)
+                msg.push_styled(BACKSPACE_CHAR.encode_utf8(&mut [0; 4]), MenuStyle::Key)
                     .push_styled(" to go back", MenuStyle::Header);
                 self.notify_styled(msg, log::Level::Warn);
             }

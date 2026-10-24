@@ -12,8 +12,8 @@ pub mod config;
 pub mod ipc;
 mod key_listener;
 pub mod os_util;
-pub mod user_interface;
-pub mod util;
+pub(crate) mod user_interface;
+pub(crate) mod util;
 
 pub use app_engine::*;
 pub use key_listener::*;

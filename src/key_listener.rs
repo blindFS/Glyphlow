@@ -25,7 +25,7 @@ pub enum TextAction {
     UserDefined(usize),
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub enum ScrollAction {
     UpLeft,
     DownRight,
@@ -43,7 +43,7 @@ pub enum FilterMode {
 }
 
 impl FilterMode {
-    pub fn to_app_mode(&self) -> Mode {
+    pub(crate) fn to_app_mode(self) -> Mode {
         match self {
             FilterMode::WordPicking => Mode::WordPicking,
             FilterMode::Generic => Mode::Filtering,
@@ -85,6 +85,17 @@ impl ModifierKey {
             Self::Tab => Key::Tab,
         }
     }
+
+    /// The name this modifier is written as.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Shift => "Shift",
+            Self::Ctrl => "Ctrl",
+            Self::Alt => "Alt",
+            Self::Meta => "Meta",
+            Self::Tab => "Tab",
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -95,7 +106,7 @@ pub enum AppSignal {
     /// A key was typed while filtering hints.
     HintFilter(char, FilterMode),
     /// A key was typed while searching. A space arrives as
-    /// [`crate::util::SEARCH_TERM_SEPARATOR`], not as `' '`.
+    /// `SEARCH_TERM_SEPARATOR`, not as `' '`.
     SearchFilter(char, FilterMode),
     /// A key was typed while the recursive grid was up.
     GridKey(char),

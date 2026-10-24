@@ -108,10 +108,10 @@ fn get_system_alarm_window(screen_frame: Frame) -> Option<AppWindowInfo> {
 
 /// The focused window and the app it belongs to.
 ///
-/// Precedence is deliberate: a system alert panel first, then a popover (e.g.
-/// the Apple Music search field), then the focused window. `last_info` must be
-/// the previous result — an Electron app whose pid changed gets a short sleep so
-/// its UI tree can appear.
+/// Precedence is deliberate: system alert panel, then popover (e.g. the Apple
+/// Music search field), then focused window. `last_info` must be the previous
+/// result — an Electron app whose pid changed gets a short sleep so its UI tree
+/// can appear.
 pub fn get_focused_window(
     screen_frame: Frame,
     last_info: &AppWindowInfo,
@@ -162,6 +162,23 @@ pub fn get_focused_window(
         bundle_id,
         frame,
     })
+}
+
+/// Where the pointer is, in AX coordinates.
+///
+/// Global display coordinates are already that system: top-left origin, with the
+/// other displays placed relative to the main one, negative coordinates and all.
+pub fn pointer_position() -> Option<(f64, f64)> {
+    let event = objc2_core_graphics::CGEvent::new(None)?;
+    let loc = objc2_core_graphics::CGEvent::location(Some(&event));
+    Some((loc.x, loc.y))
+}
+
+/// Move the pointer to `(x, y)` in AX coordinates.
+pub fn move_pointer(x: f64, y: f64) {
+    if let Err(e) = monio::mouse_move(x, y) {
+        log::error!("Failed to move pointer to ({x}, {y}): {e}");
+    }
 }
 
 /// Prompts the user for permission when it has not been granted yet.

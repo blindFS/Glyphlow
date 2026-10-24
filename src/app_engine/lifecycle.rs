@@ -1,4 +1,4 @@
-use super::AppEngine;
+use super::{AppEngine, delay};
 use crate::{
     AppSignal, Mode,
     ax_element::{
@@ -6,7 +6,9 @@ use crate::{
     },
     config::{GlyphlowConfig, RoleOfInterest, VisibilityCheckingLevel},
     os_util::{AppWindowInfo, element_at_point, get_focused_window},
-    user_interface::{HintBox, MenuString, MenuStyle, find_overlaps, resolve_collisions},
+    user_interface::{
+        HintBox, MenuString, MenuStyle, find_overlaps, frame_color, resolve_collisions,
+    },
 };
 use accessibility::{AXUIElement, AXUIElementAttributes};
 use accessibility_sys::AXUIElementRef;
@@ -14,8 +16,7 @@ use core_foundation::base::TCFType;
 use log::Level;
 use objc2::rc::autoreleasepool;
 use objc2_quartz_core::CATransaction;
-use std::{path::PathBuf, sync::mpsc::Receiver, time::Duration};
-use tokio::sync::mpsc::Sender;
+use std::{path::PathBuf, sync::mpsc::Receiver};
 
 /// How long a notification stays on screen, in milliseconds.
 const SHORT_TIMEOUT_MS: u64 = 1_000;
@@ -101,10 +102,10 @@ impl AppEngine {
 
     /// Refresh the focused window information.
     ///
-    /// Returns `false` when the focused window could not be determined, in
-    /// which case `last_app_window_info` is left untouched (it may still be the
-    /// sentinel default, whose window is the *system-wide* element). Callers
-    /// that derive a selection from it must check this.
+    /// Returns `false` when the focused window could not be determined, leaving
+    /// `last_app_window_info` untouched — possibly still the sentinel default,
+    /// whose window is the *system-wide* element. Callers deriving a selection
+    /// from it must check this.
     pub fn get_app_window_info(&mut self) -> bool {
         let Some(app_win_info) = get_focused_window(
             self.overlay_frame,
@@ -366,24 +367,12 @@ impl AppEngine {
             let frame = eoi.frame.intersect(&screen_frame).unwrap_or(screen_frame);
 
             let (x, y) = frame.center();
-            let (w, h) = frame.size();
-
-            let color_num = self.config.theme.frame_colors.len();
-
-            // Draw frames for large enough elements
-            let is_large = w.max(h) >= self.config.colored_frame_min_size as f64;
-            if is_large {
-                *color_idx += 1;
-            };
-            let color = (color_num > 0 && is_large)
-                .then(|| {
-                    self.config
-                        .theme
-                        .frame_colors
-                        .get(*color_idx % color_num)
-                        .cloned()
-                })
-                .flatten();
+            let color = frame_color(
+                &self.config.theme,
+                color_idx,
+                frame.size(),
+                self.config.colored_frame_min_size as f64,
+            );
 
             let label = self.config.hint_keys.label_for_index(idx, None);
             let mut hb = HintBox::new(idx, label, x, y, eoi.frame, color);
@@ -479,9 +468,4 @@ impl AppEngine {
             }
         };
     }
-}
-
-pub async fn delay<T>(sender: Sender<T>, id: T, timeout_millis: u64) {
-    tokio::time::sleep(Duration::from_millis(timeout_millis)).await;
-    let _ = sender.send(id).await;
 }

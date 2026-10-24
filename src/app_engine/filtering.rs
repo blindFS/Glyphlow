@@ -1,10 +1,9 @@
-use super::AppEngine;
+use super::{AppEngine, delay};
 use crate::{
     AppSignal, FilterMode, Mode, ModifierKey,
-    action::perform_ocr,
-    app_engine::lifecycle::delay,
+    action::{OCRResult, perform_ocr},
     ax_element::{ElementOfInterest, Target},
-    config::RoleOfInterest,
+    config::{BACKSPACE_CHAR, RoleOfInterest},
     user_interface::{HintBox, MenuString, MenuStyle, hint_boxes_from_frames},
     util::{Frame, lower_ascii, select_text_range},
 };
@@ -13,12 +12,34 @@ use log::Level;
 const DEBOUNCE_TIMEOUT: u64 = 150;
 
 impl AppEngine {
+    /// Take the picked range as the selection and offer the text menu for it.
+    fn commit_range(&mut self, text: String, frame: Frame) {
+        self.select(ElementOfInterest::pseudo(None, frame));
+        self.clear_hints();
+        self.update_selected_text_and_show_menu(text);
+    }
+
+    /// The only visible hint, when the typed prefix is complete enough to act
+    /// on it.
+    fn sole_hint(&self, visible: &[usize]) -> Option<usize> {
+        (self.ready_for_unique() && visible.len() == 1).then(|| visible[0])
+    }
+
+    /// The OCR result, complaining when a hint path asks for one that was never
+    /// loaded.
+    fn ocr_result(&self) -> Option<&OCRResult> {
+        let ocr_res = self.ocr_cache.as_ref();
+        if ocr_res.is_none() {
+            log::warn!("build_ocr_hints called but OCR cache is not set.");
+        }
+        ocr_res
+    }
+
     /// Build hint boxes from the OCR result once, then filter them like any
     /// other hints.
     fn build_ocr_hints(&mut self) {
         if self.hint_boxes.is_empty() {
-            let Some(ocr_res) = self.ocr_cache.as_ref() else {
-                log::warn!("build_ocr_hints called but OCR cache is not set.");
+            let Some(ocr_res) = self.ocr_result() else {
                 return;
             };
             let (digits, ocr_hints) = {
@@ -39,45 +60,38 @@ impl AppEngine {
         } else {
             let filtered_idx = self.update_hints();
 
-            if self.ready_for_unique()
-                && filtered_idx.len() == 1
-                && let Some(&hb_idx) = filtered_idx.first()
-            {
-                if self.multi_selection.is_on {
-                    if let Some((idx1, idx2)) = self.multi_selection.set_one_side(hb_idx) {
-                        let Some(ocr_res) = self.ocr_cache.as_ref() else {
-                            log::warn!("build_ocr_hints called but OCR cache is not set.");
-                            return;
-                        };
-                        let choices: Vec<(&str, Frame, bool)> = ocr_res
-                            .iter()
-                            .map(|(s, rect)| (s.as_str(), Frame::from_cgrect(rect), true))
-                            .collect::<Vec<_>>();
-                        let (text, frame) = select_text_range(&choices, idx1, idx2)
-                            .expect("Internal Error: wrong ocr hint indexing.");
-                        self.select(ElementOfInterest::pseudo(None, frame));
-                        self.clear_hints();
-                        self.update_selected_text_and_show_menu(text);
-                    } else {
-                        self.hint_prefix.clear();
-                        self.search_prefix.clear();
-                        self.update_hints();
-                    }
-                } else {
-                    let Some(ocr_res) = self.ocr_cache.as_ref() else {
-                        log::warn!("build_ocr_hints called but OCR cache is not set.");
+            let Some(hb_idx) = self.sole_hint(&filtered_idx) else {
+                return;
+            };
+
+            if self.multi_selection.is_on {
+                if let Some((idx1, idx2)) = self.multi_selection.set_one_side(hb_idx) {
+                    let Some(ocr_res) = self.ocr_result() else {
                         return;
                     };
-                    let (selected_text, cg_rect) = ocr_res
-                        .get(hb_idx)
+                    let choices: Vec<(&str, Frame, bool)> = ocr_res
+                        .iter()
+                        .map(|(s, rect)| (s.as_str(), Frame::from_cgrect(rect), true))
+                        .collect();
+                    let (text, frame) = select_text_range(&choices, idx1, idx2)
                         .expect("Internal Error: wrong ocr hint indexing.");
-                    let selected_text = selected_text.clone();
-                    let frame = Frame::from_cgrect(cg_rect);
-                    // Context initialized as None, but updated right after
-                    self.select(ElementOfInterest::pseudo(None, frame));
-                    self.clear_hints();
-                    self.update_selected_text_and_show_menu(selected_text);
+                    self.commit_range(text, frame);
+                } else {
+                    self.hint_prefix.clear();
+                    self.search_prefix.clear();
+                    self.update_hints();
                 }
+            } else {
+                let Some(ocr_res) = self.ocr_result() else {
+                    return;
+                };
+                let (selected_text, cg_rect) = ocr_res
+                    .get(hb_idx)
+                    .expect("Internal Error: wrong ocr hint indexing.");
+                let selected_text = selected_text.clone();
+                let frame = Frame::from_cgrect(cg_rect);
+                // Context initialized as None, but updated right after
+                self.commit_range(selected_text, frame);
             }
         }
     }
@@ -109,10 +123,8 @@ impl AppEngine {
         let filtered_indices = self.update_hints();
 
         // Only 1 remaining, take some actions
-        if self.ready_for_unique()
-            && filtered_indices.len() == 1
-            && let Some(hb_idx) = filtered_indices.first()
-            && let Some(HintBox { idx, .. }) = self.hint_boxes.get(*hb_idx)
+        if let Some(hb_idx) = self.sole_hint(&filtered_indices)
+            && let Some(HintBox { idx, .. }) = self.hint_boxes.get(hb_idx)
             && let Some(eoi) = self.element_cache.cache.get(*idx)
             && let Some(element) = eoi.element()
         {
@@ -156,9 +168,7 @@ impl AppEngine {
                                 .element_cache
                                 .select_range(idx1, idx2, role_ref)
                                 .expect("Internal Error: wrong indexing of hints.");
-                            self.select(ElementOfInterest::pseudo(None, frame));
-                            self.clear_hints();
-                            self.update_selected_text_and_show_menu(text);
+                            self.commit_range(text, frame);
                         } else {
                             self.multi_selection.role = Some(role);
                             self.hint_prefix.clear();
@@ -285,16 +295,15 @@ impl AppEngine {
         };
     }
 
-    /// Type `key_char` into the hint prefix; `󰁮` deletes, or goes back when the
-    /// prefix is already empty.
+    /// Type `key_char` into the hint prefix; `BACKSPACE_CHAR` deletes, or goes
+    /// back when the prefix is already empty.
     pub(super) async fn filter_by_hint(&mut self, key_char: char, mode: FilterMode) {
-        if key_char == '󰁮' {
+        if key_char == BACKSPACE_CHAR {
             if self.hint_prefix.is_empty() {
                 self.go_back_in_filtering(mode);
                 return;
-            } else {
-                self.hint_prefix.pop();
             }
+            self.hint_prefix.pop();
         } else if self.hint_prefix.len() < self.hint_width as usize {
             self.hint_prefix.push(key_char);
         }
@@ -304,7 +313,7 @@ impl AppEngine {
 
     /// Type into the search prefix, debouncing the re-filter that follows.
     pub(super) async fn filter_by_search(&mut self, key_char: char, mode: FilterMode) {
-        if key_char == '󰁮' {
+        if key_char == BACKSPACE_CHAR {
             if self.search_prefix.is_empty() {
                 self.is_searching = false;
                 self.set_mode(mode.to_app_mode());
@@ -316,9 +325,8 @@ impl AppEngine {
                     self.update_hints();
                 }
                 return;
-            } else {
-                self.search_prefix.pop();
             }
+            self.search_prefix.pop();
         } else {
             self.search_prefix.push(key_char.to_ascii_lowercase());
         }
@@ -397,29 +405,36 @@ impl AppEngine {
         }
     }
 
-    /// A tap means multi-selection wherever there is text to select, a sticky
-    /// click modifier on a clickable target, and nothing anywhere else.
+    /// A tap is a sticky click modifier in the grid and on a clickable target,
+    /// multi-selection wherever there is text to select, and nothing anywhere
+    /// else.
+    ///
+    /// The grid wins over text: it is about clicking cells, and a grid opened
+    /// over a text selection still has that text behind it.
     pub(super) fn toggle_modifier(&mut self, key: ModifierKey) {
-        if self.target == Target::Text || self.word_picker.is_some() {
-            self.toggle_multiselection();
-        } else if self.target == Target::Clickable {
-            self.click_modifiers.toggle(key);
-            let mut msg = MenuString::styled(self.click_modifiers.click_type(), MenuStyle::Header);
-            msg.push(" click modifiers: ");
-            msg.push_styled(&self.click_modifiers.label(), MenuStyle::Key);
+        if self.mode() == Mode::Grid {
+            self.toggle_click_modifier(key);
+        } else if self.target == Target::Text || self.word_picker.is_some() {
+            self.multi_selection.toggle();
+            let on_off = if self.multi_selection.is_on {
+                "on"
+            } else {
+                "off"
+            };
+            let mut msg = MenuString::from("Multi-selection is now ");
+            msg.push_styled(on_off, MenuStyle::Key).push(".");
             self.notify_styled(msg, Level::Info);
+        } else if self.target == Target::Clickable {
+            self.toggle_click_modifier(key);
         }
     }
 
-    pub(super) fn toggle_multiselection(&mut self) {
-        self.multi_selection.toggle();
-        let on_off = if self.multi_selection.is_on {
-            "on"
-        } else {
-            "off"
-        };
-        let mut msg = MenuString::from("Multi-selection is now ");
-        msg.push_styled(on_off, MenuStyle::Key).push(".");
+    /// Toggle `key` in the sticky click modifiers and say what is held now.
+    fn toggle_click_modifier(&mut self, key: ModifierKey) {
+        self.click_modifiers.toggle(key);
+        let mut msg = MenuString::styled(self.click_modifiers.click_type(), MenuStyle::Header);
+        msg.push(" click modifiers: ");
+        msg.push_styled(&self.click_modifiers.label(), MenuStyle::Key);
         self.notify_styled(msg, Level::Info);
     }
 }

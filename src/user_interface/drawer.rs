@@ -1,16 +1,15 @@
 use crate::{
     ScrollAction,
     config::{GlyphlowTheme, cgcolor_to_rgba},
-    util::{Frame, estimate_frame_for_text, format_fixed_width},
+    util::{Frame, apply_line_spacing, estimate_frame_for_text, format_fixed_width},
 };
 use objc2::{
     AnyThread, MainThreadMarker, MainThreadOnly,
-    rc::{DefaultRetained, Retained, autoreleasepool},
+    rc::{Retained, autoreleasepool},
 };
 use objc2_app_kit::{
     NSBackingStoreType, NSColor, NSFont, NSFontAttributeName, NSForegroundColorAttributeName,
-    NSMutableParagraphStyle, NSParagraphStyleAttributeName, NSScreen, NSWindow,
-    NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSScreen, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 use objc2_core_foundation::{CFRetained, CGSize};
 use objc2_core_graphics::CGColor;
@@ -19,12 +18,11 @@ use objc2_quartz_core::{CALayer, CATextLayer, CATransaction};
 use std::cell::Cell;
 use std::ops::Range;
 
-/// Runs `body` with Core Animation actions disabled, so the layer changes it
-/// makes take effect on the next frame instead of animating.
+/// Runs `body` with Core Animation actions disabled, so its layer changes take
+/// effect on the next frame instead of animating.
 ///
-/// `begin` and `commit` have to be paired, and a stray `begin` leaves the
-/// transaction open for every later change on the thread. Keeping the pair
-/// inside one construct is the point.
+/// The pair must not be split: a stray `begin` leaves the transaction open for
+/// every later change on the thread.
 macro_rules! without_animations {
     ($($body:tt)*) => {{
         CATransaction::begin();
@@ -62,11 +60,10 @@ fn dimmed(color: &CFRetained<CGColor>) -> CFRetained<CGColor> {
 }
 
 impl MenuStyle {
-    /// The colours to paint a span with: a foreground, plus a background when
-    /// the style inverts the text.
+    /// The foreground colour to paint a span with.
     ///
-    /// `dim` is passed in because it is derived from the theme's foreground
-    /// rather than stored in it, so one is built per string, not per span.
+    /// `dim` is passed in rather than stored in the theme, so it is built once
+    /// per string instead of once per span.
     fn colors<'a>(
         self,
         theme: &'a GlyphlowTheme,
@@ -239,16 +236,7 @@ impl Menu {
             self.menu_string
                 .addAttribute_value_range(NSFontAttributeName, font, full_range);
 
-            // HACK: For multilingual text, height is underestimated due to fallback fonts.
-            // This ensures more vertical spacing.
-            let style = NSMutableParagraphStyle::default_retained();
-            style.setLineSpacing(1.0);
-            // style.setLineHeightMultiple(1.2);
-            self.menu_string.addAttribute_value_range(
-                NSParagraphStyleAttributeName,
-                &style,
-                full_range,
-            );
+            apply_line_spacing(&self.menu_string, full_range);
         }
     }
 
@@ -793,11 +781,10 @@ pub fn calibrated_origin(x: f64, y: f64, overlay_frame: &Frame) -> NSPoint {
 }
 
 /// The ranges of `spans` to repaint, with the style to paint them in; `None`
-/// puts a range back to the foreground colour the whole string was given.
+/// puts a range back to the string's foreground colour.
 ///
-/// Both lists are sorted and disjoint, so every one of their boundaries starts a
-/// run whose style is fixed on either side, and only a run whose two sides
-/// disagree has to be repainted.
+/// Only a run whose style differs on its two sides is emitted, which is what
+/// keeps a redraw proportional to what changed.
 fn restyle_plan(
     previous: &[(Range<usize>, MenuStyle)],
     spans: &[(Range<usize>, MenuStyle)],
@@ -830,10 +817,8 @@ fn restyle_plan(
 /// The style covering `at` in a sorted, disjoint span list, advancing `cursor`
 /// past every span that ends before it.
 ///
-/// Only constant amortized: one call walks as many spans as it has to skip, so
-/// the caller has to ask for ascending positions — which is what keeps a whole
-/// walk linear, since then each span is skipped once and the cursor never
-/// rewinds.
+/// Amortized constant only if the caller asks for ascending positions, so each
+/// span is skipped once and the cursor never rewinds.
 fn style_at(
     spans: &[(Range<usize>, MenuStyle)],
     cursor: &mut usize,
@@ -850,11 +835,8 @@ mod calibrated_origin_tests {
     use super::*;
     use rstest::rstest;
 
-    /// Core Animation places layers in a bottom-left origin space while the rest
-    /// of the app works in screen (top-left) coordinates, so a vertical flip is
-    /// always needed. The overlay is not necessarily anchored at the origin —
-    /// with more than one display it is the union of every screen frame — hence
-    /// the shift as well.
+    /// The overlay is not always anchored at the origin, so both the shift and
+    /// the flip have to be exercised.
     #[rstest]
     // A single 1920x1080 display at the origin: the shift is the identity.
     #[case::top_left_corner(0.0, 0.0, (0.0, 0.0, 1920.0, 1080.0), (0.0, 1080.0))]
@@ -881,12 +863,8 @@ mod restyle_plan_tests {
     use super::*;
     use rstest::rstest;
 
-    /// `restyle_plan` turns "what was painted" plus "what should be painted" into
-    /// the shortest list of runs to repaint. Both lists are sorted and disjoint, so
-    /// every boundary in either list begins a run whose style is fixed on both
-    /// sides, and only a run whose two sides disagree is emitted. A span covers
-    /// `start..end` half-open, and a run that was styled but is not any more
-    /// carries `None`, putting it back to the string's foreground colour.
+    /// Cases cover the early return, the first pass, a dropped span and a
+    /// changed style; `None` means "back to the foreground colour".
     #[rstest]
     // The same list twice: the early return, and the common redraw that changes no
     // styling at all.

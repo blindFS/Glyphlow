@@ -76,7 +76,7 @@ fn capture_rect(rect: CGRect) -> Result<Retained<CGImage>, String> {
 }
 
 /// Capture `frame` and put it on the clipboard as JPEG. `false` on failure.
-pub fn screen_shot(frame: &Frame) -> bool {
+pub(crate) fn screen_shot(frame: &Frame) -> bool {
     let rect = frame.to_cgrect();
     let cg_image = match capture_rect(rect) {
         Ok(img) => img,
@@ -109,12 +109,12 @@ pub fn screen_shot(frame: &Frame) -> bool {
 }
 
 /// Recognised text, with the screen rect it was found in.
-pub type OCRResult = Vec<(String, CGRect)>;
+pub(crate) type OCRResult = Vec<(String, CGRect)>;
 
 /// OCR `frame` and map every observation back to screen coordinates.
 ///
 /// Vision reports normalised bottom-left boxes, so the y axis is flipped here.
-pub async fn perform_ocr(
+pub(crate) async fn perform_ocr(
     frame: &Frame,
     languages: &[String],
 ) -> Result<OCRResult, Box<dyn std::error::Error>> {

@@ -7,7 +7,7 @@ use crate::{
     },
     ax_element::{ElementOfInterest, GetAttribute, SetAttribute},
     config::RoleOfInterest,
-    user_interface::pointer_position,
+    os_util::pointer_position,
 };
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
 use accessibility_sys::{
@@ -16,6 +16,8 @@ use accessibility_sys::{
 use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber, string::CFString};
 use log::Level;
 use monio::{Button, Event, Key, ScrollDirection};
+
+const SCALE_FACTOR: f64 = 1.5;
 
 impl AppEngine {
     pub(super) const KEY_OP_INTERVAL_IN_MS: u64 = 20;
@@ -43,10 +45,11 @@ impl AppEngine {
         self.simulate_click_holding(x, y, button, &[]);
     }
 
-    /// Move the cursor and click, with a ripple at the click point.
+    /// [`Self::simulate_click`] with the sticky click modifiers held, which are
+    /// released afterwards.
     pub(super) fn simulate_click_with_modifiers(&mut self, x: f64, y: f64, button: Button) {
-        let modifers = self.click_modifiers.keys();
-        self.simulate_click_holding(x, y, button, &modifers);
+        let modifiers = self.click_modifiers.keys();
+        self.simulate_click_holding(x, y, button, &modifiers);
         self.click_modifiers.reset();
     }
 
@@ -124,16 +127,9 @@ impl AppEngine {
             self.simulate_click_holding(x, y, self.click_modifiers.button(), &modifiers);
         } else if let Err(e) = element.press() {
             log::warn!("Failed to do UI press on element: {e}");
-            match e {
-                // NOTE: Sometimes this error is false alarm, usually because it takes longer
-                // than expected, we shouldn't click in this case, otherwise it is performed twice.
-                accessibility::Error::Ax(err_num)
-                    if err_num == kAXErrorCannotComplete
-                        || err_num == kAXErrorAttributeUnsupported => {}
-                _ => {
-                    log::info!("Simulating mouse click instead...");
-                    self.simulate_click(x, y, Button::Left);
-                }
+            if !is_false_alarm(&e) {
+                log::info!("Simulating mouse click instead...");
+                self.simulate_click(x, y, Button::Left);
             }
         };
     }
@@ -153,16 +149,9 @@ impl AppEngine {
             self.simulate_click(x, y, Button::Right);
         } else if let Err(e) = element.show_menu() {
             log::warn!("Failed to show menu on element: {e}");
-            match e {
-                // NOTE: Sometimes this error is false alarm, usually because it takes longer
-                // than expected, we shouldn't click in this case, otherwise it is performed twice.
-                accessibility::Error::Ax(err_num)
-                    if err_num == kAXErrorCannotComplete
-                        || err_num == kAXErrorAttributeUnsupported => {}
-                _ => {
-                    log::info!("Simulating mouse click instead...");
-                    self.simulate_click(x, y, Button::Right);
-                }
+            if !is_false_alarm(&e) {
+                log::info!("Simulating mouse click instead...");
+                self.simulate_click(x, y, Button::Right);
             }
         };
     }
@@ -187,11 +176,9 @@ impl AppEngine {
         false
     }
 
-    /// Run a text action.
-    ///
-    /// The returned flag says whether the drawing must be kept: deactivating
-    /// would tear down the word picker or the dictionary view that the action
-    /// just built.
+    /// Run a text action, keeping the drawing when the action just built
+    /// something deactivating would tear down — the word picker or the
+    /// dictionary view.
     pub(super) fn perform_text_action(&mut self, ta: TextAction) {
         let Some(ElementOfInterest {
             context: Some(text),
@@ -274,6 +261,17 @@ impl AppEngine {
         }
     }
 
+    /// Halve or double the scroll distance. `false` means `sa` is some other
+    /// scroll action, which the caller still has to handle.
+    pub(super) fn scale_scroll_distance(&mut self, sa: ScrollAction) -> bool {
+        match sa {
+            ScrollAction::IncreaseDistance => self.config.scroll_distance *= SCALE_FACTOR,
+            ScrollAction::DecreaseDistance => self.config.scroll_distance /= SCALE_FACTOR,
+            _ => return false,
+        }
+        true
+    }
+
     /// Scroll a scroll bar by value, or synthesize wheel events for any other
     /// element.
     pub(super) fn perform_scroll_action(&mut self, sa: ScrollAction) {
@@ -305,11 +303,8 @@ impl AppEngine {
                 ScrollAction::UpLeft => {
                     self.scroll_to_value(element, old_val - scroll_unit);
                 }
-                ScrollAction::IncreaseDistance => {
-                    self.config.scroll_distance *= 1.5;
-                }
-                ScrollAction::DecreaseDistance => {
-                    self.config.scroll_distance /= 1.5;
+                ScrollAction::IncreaseDistance | ScrollAction::DecreaseDistance => {
+                    self.scale_scroll_distance(sa);
                 }
                 ScrollAction::Top => {
                     self.scroll_to_value(element, 0.0);
@@ -329,11 +324,8 @@ impl AppEngine {
                 ScrollAction::UpLeft => {
                     Self::simulate_scroll(distance);
                 }
-                ScrollAction::IncreaseDistance => {
-                    self.config.scroll_distance *= 1.5;
-                }
-                ScrollAction::DecreaseDistance => {
-                    self.config.scroll_distance /= 1.5;
+                ScrollAction::IncreaseDistance | ScrollAction::DecreaseDistance => {
+                    self.scale_scroll_distance(sa);
                 }
                 ScrollAction::Top => {
                     Self::simulate_scroll(999999.0);
@@ -487,4 +479,14 @@ impl AppEngine {
             }
         }
     }
+}
+
+/// Whether an AX error means the action probably went through, only slower than
+/// the API waited for — clicking again would perform it twice.
+fn is_false_alarm(e: &accessibility::Error) -> bool {
+    matches!(
+        e,
+        accessibility::Error::Ax(err_num)
+            if *err_num == kAXErrorCannotComplete || *err_num == kAXErrorAttributeUnsupported
+    )
 }

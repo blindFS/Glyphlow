@@ -1,9 +1,10 @@
 use core_foundation::{attributed_string::CFAttributedStringRef, base::CFRange};
 use core_graphics_types::geometry::CGSize;
 use core_text::framesetter::CTFramesetter;
-use objc2::rc::Retained;
+use objc2::rc::{DefaultRetained, Retained};
+use objc2_app_kit::{NSMutableParagraphStyle, NSParagraphStyleAttributeName};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize as OCGSize};
-use objc2_foundation::NSMutableAttributedString;
+use objc2_foundation::{NSMutableAttributedString, NSRange};
 use regex::Regex;
 use std::{borrow::Cow, cmp::Ordering};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -24,6 +25,18 @@ pub fn estimate_frame_for_text(
         CGSize::new(size.0, size.1),
     );
     (OCGSize::new(width, height), range.length)
+}
+
+/// Give `text` the line spacing the app uses everywhere.
+///
+/// HACK: multilingual text has its height underestimated because of fallback
+/// fonts, so the extra spacing compensates.
+pub fn apply_line_spacing(text: &NSMutableAttributedString, range: NSRange) {
+    let style = NSMutableParagraphStyle::default_retained();
+    style.setLineSpacing(1.0);
+    unsafe {
+        text.addAttribute_value_range(NSParagraphStyleAttributeName, &style, range);
+    }
 }
 
 /// An axis-aligned rectangle in AX screen coordinates (top-left origin). The
@@ -75,7 +88,7 @@ impl Frame {
         w * h
     }
 
-    pub fn to_cgrect(&self) -> CGRect {
+    pub fn to_cgrect(self) -> CGRect {
         let (w, h) = self.size();
         CGRect::new(self.top_left, OCGSize::new(w, h))
     }
@@ -122,7 +135,7 @@ impl Frame {
 
     pub fn union_of_frames(frames: &[Frame]) -> Self {
         let mut iter = frames.iter();
-        let first = iter.next().cloned().unwrap_or_default();
+        let first = iter.next().copied().unwrap_or_default();
         iter.fold(first, |acc, f| acc.union(f))
     }
 
@@ -231,9 +244,7 @@ pub fn select_text_range(
     }
     x_ranges.sort_by(|a, b| a.0.total_cmp(&b.0));
 
-    let (mut this_min, mut this_max) = *x_ranges
-        .get_mut(0)
-        .expect("Should contains at least one choice in the given y range.");
+    let (mut this_min, mut this_max) = x_ranges[0];
     for (x1, x2) in x_ranges.iter().skip(1) {
         if this_max + x_thres > x_min {
             x_min = this_min.min(x_min);

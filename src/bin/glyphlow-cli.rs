@@ -196,10 +196,8 @@ async fn send(signal: AppSignal, confirmation: String) -> ExitCode {
 /// ANSI escapes when they would be unwelcome.
 ///
 /// Rust ignores `SIGPIPE`, so a plain `print!` turns `glyphlow-cli complete bash
-/// | head` into an EPIPE panic, while producing less output than the reader
-/// wanted is a normal way for a pipeline to end. Routing through `anstream` also
-/// keeps `--help` and `workflow list` in agreement about `NO_COLOR`, `CLICOLOR`,
-/// `TERM=dumb` and CI, because clap filters its own output the same way.
+/// | head` into an EPIPE panic. Going through `anstream` also keeps this in
+/// agreement with clap's own filtering of `--help` output.
 fn write_stdout(bytes: &[u8]) {
     let mut stdout = anstream::stdout().lock();
     let _ = stdout.write_all(bytes);
@@ -427,11 +425,8 @@ mod tests {
 
     /// `WorkFlow::display` is user-authored, so it can contain escape sequences.
     /// This is what the `ansi` feature of `tabled` buys: cells measured by visible
-    /// width. Drop it and the second row shifts left by the length of the escapes.
-    ///
-    /// The lines are stripped *after* rendering, which is what makes this a
-    /// measurement test: if `tabled` counted the escapes as width, the
-    /// misalignment would already be baked into the spacing by now.
+    /// width. Lines are stripped *after* rendering, so if `tabled` counted the
+    /// escapes the misalignment would already be in the spacing.
     #[test]
     fn test_table_measures_escapes_in_config_values_by_visible_width() {
         let rows = [

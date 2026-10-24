@@ -1,4 +1,4 @@
-use crate::config::GlyphlowTheme;
+use crate::{config::GlyphlowTheme, util::apply_line_spacing};
 use core_foundation::{
     array::{CFArray, CFArrayGetCount, CFArrayGetValueAtIndex, CFArrayRef},
     base::{CFTypeRef, TCFType},
@@ -6,13 +6,12 @@ use core_foundation::{
     string::{CFString, CFStringRef},
 };
 use objc2::{
-    rc::{DefaultRetained, Retained, autoreleasepool},
+    rc::{Retained, autoreleasepool},
     runtime::{AnyObject, ProtocolObject},
 };
 use objc2_app_kit::{
     NSDocumentTypeDocumentAttribute, NSForegroundColorAttributeName, NSHTMLTextDocumentType,
-    NSMutableAttributedStringDocumentFormats, NSMutableParagraphStyle,
-    NSParagraphStyleAttributeName, NSPasteboard, NSPasteboardTypeString,
+    NSMutableAttributedStringDocumentFormats, NSPasteboard, NSPasteboardTypeString,
 };
 use objc2_foundation::{
     NSArray, NSDictionary, NSMutableAttributedString, NSRange, NSString, NSUTF8StringEncoding,
@@ -20,25 +19,25 @@ use objc2_foundation::{
 use std::{collections::HashMap, ffi::c_void};
 
 #[repr(C)]
-pub struct __DCSDictionary(c_void);
-pub type DCSDictionaryRef = *const __DCSDictionary;
+struct __DCSDictionary(c_void);
+type DCSDictionaryRef = *const __DCSDictionary;
 
 #[link(name = "CoreServices", kind = "framework")]
 unsafe extern "C" {
-    pub fn DCSCopyAvailableDictionaries() -> CFSetRef;
-    pub fn DCSCopyRecordsForSearchString(
+    fn DCSCopyAvailableDictionaries() -> CFSetRef;
+    fn DCSCopyRecordsForSearchString(
         dictionary: DCSDictionaryRef,
         string: CFStringRef,
         u1: *mut c_void, // Usually NULL
         u2: *mut c_void, // Usually NULL
     ) -> CFArrayRef;
-    pub fn DCSDictionaryGetName(dict: DCSDictionaryRef) -> CFStringRef;
-    pub fn DCSRecordCopyData(record: CFTypeRef, version: u8) -> CFStringRef;
+    fn DCSDictionaryGetName(dict: DCSDictionaryRef) -> CFStringRef;
+    fn DCSRecordCopyData(record: CFTypeRef, version: u8) -> CFStringRef;
 }
 
 /// Look `word` up in the first configured dictionary that has it, as rich text.
 // TODO: Indentation, might require regex replacing
-pub fn get_dictionary_attributed_string(
+pub(crate) fn get_dictionary_attributed_string(
     word: &str,
     dict_names: &[String],
     theme: &GlyphlowTheme,
@@ -129,7 +128,7 @@ pub fn get_dictionary_attributed_string(
 
 /// Converts an HTML string into an NSMutableAttributedString, applying bold/italic
 /// styles to specific classes via CSS injection.
-pub fn html_to_attributed_string(
+pub(crate) fn html_to_attributed_string(
     html: &str,
     css: Option<&str>,
 ) -> Option<Retained<NSMutableAttributedString>> {
@@ -156,16 +155,7 @@ pub fn html_to_attributed_string(
             .readFromData_options_documentAttributes_error(&data, &options, None)
             .ok()?;
 
-        // HACK: For multilingual text, height is underestimated due to fallback fonts.
-        // This ensures more vertical spacing.
-        let style = NSMutableParagraphStyle::default_retained();
-        style.setLineSpacing(1.0);
-        // style.setLineHeightMultiple(1.2);
-        attr_str.addAttribute_value_range(
-            NSParagraphStyleAttributeName,
-            &style,
-            NSRange::new(0, attr_str.length()),
-        );
+        apply_line_spacing(&attr_str, NSRange::new(0, attr_str.length()));
 
         Some(attr_str)
     }
@@ -182,7 +172,7 @@ pub fn text_to_clipboard(text: &str) {
     })
 }
 
-pub fn text_from_clipboard() -> Option<String> {
+pub(crate) fn text_from_clipboard() -> Option<String> {
     autoreleasepool(|_| {
         let pb = NSPasteboard::generalPasteboard();
         pb.stringForType(unsafe { NSPasteboardTypeString })

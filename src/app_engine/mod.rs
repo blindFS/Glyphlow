@@ -1,5 +1,5 @@
 use crate::{
-    AppSignal, KeyState, Mode, ModifierKey, ScrollAction,
+    AppSignal, KeyState, Mode, ModifierKey,
     action::{OCRResult, WordPicker},
     ax_element::{ElementCache, ElementOfInterest, Target},
     config::{AppOverride, GlyphlowConfig, RoleOfInterest, WorkFlowAction},
@@ -27,6 +27,13 @@ mod menu;
 mod workflow;
 
 pub use menu::MenuScope;
+
+/// Send `signal` after `millis`, for a follow-up the engine schedules rather
+/// than waits for.
+async fn delay<T>(sender: Sender<T>, signal: T, millis: u64) {
+    tokio::time::sleep(std::time::Duration::from_millis(millis)).await;
+    let _ = sender.send(signal).await;
+}
 
 /// Tracks the two ends of a multi-selection: the first picked hint, and the role
 /// of the elements picked so far, which keeps both ends the same kind.
@@ -95,8 +102,8 @@ impl ClickModifiers {
         self.shift || self.ctrl || self.alt || self.meta || self.tab
     }
 
-    /// The keys to hold down around a click, in the order they are written.
-    pub(super) fn keys(&self) -> Vec<Key> {
+    /// The held modifiers, in the order they are written.
+    fn held(&self) -> impl Iterator<Item = ModifierKey> + '_ {
         [
             (self.shift, ModifierKey::Shift),
             (self.ctrl, ModifierKey::Ctrl),
@@ -104,9 +111,12 @@ impl ClickModifiers {
             (self.meta, ModifierKey::Meta),
         ]
         .into_iter()
-        .filter(|(on, _)| *on)
-        .map(|(_, key)| key.key())
-        .collect()
+        .filter_map(|(held, key)| held.then_some(key))
+    }
+
+    /// The keys to hold down around a click.
+    pub(super) fn keys(&self) -> Vec<Key> {
+        self.held().map(ModifierKey::key).collect()
     }
 
     pub(super) fn click_type(&self) -> &'static str {
@@ -123,15 +133,7 @@ impl ClickModifiers {
 
     /// The combination as it is written, or `None` when nothing is held.
     pub(super) fn label(&self) -> String {
-        let held = [
-            self.shift.then_some("Shift"),
-            self.ctrl.then_some("Ctrl"),
-            self.alt.then_some("Alt"),
-            self.meta.then_some("Meta"),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
+        let held: Vec<&str> = self.held().map(ModifierKey::label).collect();
 
         if held.is_empty() {
             "None".into()
@@ -258,16 +260,8 @@ impl AppEngine {
             }
             AppSignal::ScrollAction(sa) => {
                 if self.check_mode(Mode::DictionaryScrolling) {
-                    match sa {
-                        ScrollAction::IncreaseDistance => {
-                            self.config.scroll_distance *= 1.5;
-                        }
-                        ScrollAction::DecreaseDistance => {
-                            self.config.scroll_distance /= 1.5;
-                        }
-                        _ => {
-                            self.drawer.scroll_menu(sa, self.config.scroll_distance);
-                        }
+                    if !self.scale_scroll_distance(sa) {
+                        self.drawer.scroll_menu(sa, self.config.scroll_distance);
                     }
                 } else {
                     self.perform_scroll_action(sa);

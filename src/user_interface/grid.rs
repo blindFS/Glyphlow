@@ -1,7 +1,6 @@
-use super::drawer::without_animations;
+use super::{calibrated_origin, drawer::without_animations};
 use crate::{
     config::GridConfig,
-    user_interface::calibrated_origin,
     util::{Frame, estimate_frame_for_text},
 };
 use objc2::{
@@ -158,11 +157,8 @@ pub fn cell_frame(region: &Frame, rows: usize, cols: usize, idx: usize) -> Frame
 
 /// The region one level up from `region`: the cell of its parent that holds it.
 ///
-/// A cell is `cols` by `rows` smaller than the region it came from, so `region`'s
-/// own size is the cell size at its level. Counting how many such cells `region`'s
-/// origin sits from `outer`'s gives an exact integer, so rounding only undoes float
-/// drift; its remainder modulo the grid width is `region`'s own column, and the
-/// parent's edge is that many cells back.
+/// `region`'s own size is the cell size at its level, so its origin lands on an
+/// exact cell boundary and rounding only undoes float drift.
 pub fn parent_frame(region: &Frame, outer: &Frame, rows: usize, cols: usize) -> Frame {
     let (w, h) = region.size();
     let cells_x = ((region.top_left.x - outer.top_left.x) / w).round() as i64;

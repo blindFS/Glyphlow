@@ -1,10 +1,10 @@
 use crate::{
-    config::{GlyphlowTheme, HintKeys},
+    config::{BACKSPACE_CHAR, GlyphlowTheme, HintKeys},
     user_interface::{MenuString, MenuStyle, UIDrawer},
     util::{lower_ascii, search_regex},
 };
 use regex::Regex;
-use std::sync::OnceLock;
+use std::{ops::Range, sync::OnceLock};
 use unicode_width::UnicodeWidthStr;
 
 /// Between a word and its own label.
@@ -18,27 +18,26 @@ fn entry_width(word: &str, digits: u32) -> usize {
     word.width() + WORD_LABEL_GAP.len() + digits as usize + LABEL_WORD_GAP.len()
 }
 
-/// A token of the picked text: the original, its hint label, and the folded form
-/// searches are matched against.
+/// A token of the picked text: where it sits in [`WordPicker::raw`], its hint
+/// label, and the folded form searches are matched against.
 #[derive(Debug, Clone)]
 struct Word {
-    text: String,
+    text: Range<usize>,
     label: String,
     ascii: String,
 }
 
 /// Splits a text into pickable words and draws them as a hint-labelled block.
-pub struct WordPicker {
+pub(crate) struct WordPicker {
     raw: String,
     words: Vec<Word>,
-    offsets: Vec<usize>,
     screen_ratio: f64,
-    pub digits: u32,
+    pub(crate) digits: u32,
     matched: Vec<usize>,
 }
 
 impl WordPicker {
-    pub fn new(
+    pub(crate) fn new(
         text: String,
         screen_ratio: f64,
         theme: &GlyphlowTheme,
@@ -48,16 +47,19 @@ impl WordPicker {
         let (word_strings, offsets) = multilingual_split(&text);
         let digits = hint_keys.digits_for_len(word_strings.len());
         let mut words = Vec::new();
-        for (i, text) in word_strings.into_iter().enumerate() {
+        for (i, (text, offset)) in word_strings.into_iter().zip(offsets).enumerate() {
             let label = hint_keys.label_for_index(i, Some(digits));
             let ascii = lower_ascii(&text);
-            words.push(Word { text, label, ascii });
+            words.push(Word {
+                text: offset..offset + text.len(),
+                label,
+                ascii,
+            });
         }
 
         let word_picker = Self {
             raw: text,
             words,
-            offsets,
             digits,
             screen_ratio,
             matched: Vec::new(),
@@ -69,7 +71,7 @@ impl WordPicker {
         word_picker
     }
 
-    pub fn update_text_layer(
+    pub(crate) fn update_text_layer(
         &mut self,
         theme: &GlyphlowTheme,
         drawer: &UIDrawer,
@@ -93,7 +95,7 @@ impl WordPicker {
         let total_unicode_width = self
             .words
             .iter()
-            .map(|w| entry_width(&w.text, self.digits))
+            .map(|w| entry_width(&self.raw[w.text.clone()], self.digits))
             .sum::<usize>();
         // ideal_width / (total_unicode_width / ideal_width) 󰾞 ratio * 3
         let ideal_width = (total_unicode_width as f64 * self.screen_ratio * 3.0)
@@ -121,19 +123,20 @@ impl WordPicker {
         // The header names the picker, so every part of it is styled as a header;
         // the key inside it stays a key.
         let (hint_key, hint) = if filtering && matched.is_empty() {
-            ("󰁮", " to return")
+            (BACKSPACE_CHAR, " to return")
         } else {
-            ("/", " to search")
+            ('/', " to search")
         };
         let mut buffer = MenuString::styled("Press ", MenuStyle::Header);
         buffer
-            .push_styled(hint_key, MenuStyle::Key)
+            .push_styled(hint_key.encode_utf8(&mut [0; 4]), MenuStyle::Key)
             .push_styled(hint, MenuStyle::Header)
             .push("\n");
 
         let mut line_width = 0;
         for (idx, word) in self.words.iter().enumerate() {
-            let this_width = entry_width(&word.text, self.digits);
+            let text = &self.raw[word.text.clone()];
+            let this_width = entry_width(text, self.digits);
             // Wrap when this word would overflow, unless the line is still empty.
             if line_width + this_width > ideal_width && line_width > 0 {
                 buffer.push("\n");
@@ -147,24 +150,24 @@ impl WordPicker {
             if multi_selection_idx == Some(idx) {
                 // A picked end of the range: its key cannot be pressed again.
                 buffer
-                    .push_styled(&word.text, MenuStyle::Text)
+                    .push_styled(text, MenuStyle::Text)
                     .push(WORD_LABEL_GAP)
                     .push_styled(&word.label, MenuStyle::Dim);
             } else if matched.binary_search(&idx).is_ok() {
                 // The typed part of the key cannot be pressed again either.
                 buffer
-                    .push(&word.text)
+                    .push(text)
                     .push(WORD_LABEL_GAP)
                     .push_styled(&word.label[..typed], MenuStyle::Dim)
                     .push_styled(&word.label[typed..], MenuStyle::Key);
             } else if filtering {
                 buffer
-                    .push_styled(&word.text, MenuStyle::Dim)
+                    .push_styled(text, MenuStyle::Dim)
                     .push(WORD_LABEL_GAP)
                     .push_styled(&word.label, MenuStyle::Dim);
             } else {
                 buffer
-                    .push(&word.text)
+                    .push(text)
                     .push(WORD_LABEL_GAP)
                     .push_styled(&word.label, MenuStyle::Key);
             }
@@ -180,9 +183,11 @@ impl WordPicker {
     /// skipping it rather than panicking keeps a bad index from taking down an
     /// input handler.
     fn live_matches(&self) -> impl Iterator<Item = (usize, &str)> + '_ {
-        self.matched
-            .iter()
-            .filter_map(|idx| self.words.get(*idx).map(|w| (*idx, w.text.as_str())))
+        self.matched.iter().filter_map(|idx| {
+            self.words
+                .get(*idx)
+                .map(|w| (*idx, &self.raw[w.text.clone()]))
+        })
     }
 
     /// The match to pick, when the matches leave no choice: the only one, or
@@ -190,7 +195,7 @@ impl WordPicker {
     /// then there is nothing to tell apart.
     ///
     /// `None` when nothing matched or the pick is ambiguous.
-    pub fn unambiguous_match(&self, multi_selection: bool) -> Option<(usize, &str)> {
+    pub(crate) fn unambiguous_match(&self, multi_selection: bool) -> Option<(usize, &str)> {
         let mut live = self.live_matches();
         let (idx, text) = live.next()?;
         let Some((_, second)) = live.next() else {
@@ -201,16 +206,16 @@ impl WordPicker {
             .then_some((idx, text))
     }
 
-    pub fn select_range(&self, idx1: usize, idx2: usize) -> Option<String> {
+    pub(crate) fn select_range(&self, idx1: usize, idx2: usize) -> Option<String> {
         let (start, end) = if idx1 < idx2 {
             (idx1, idx2)
         } else {
             (idx2, idx1)
         };
-        let s_off = self.offsets.get(start)?;
-        let e_off = self.offsets.get(end)? + self.words.get(end)?.text.len();
+        let s_off = self.words.get(start)?.text.start;
+        let e_off = self.words.get(end)?.text.end;
 
-        self.raw.get(*s_off..e_off).map(String::from)
+        self.raw.get(s_off..e_off).map(String::from)
     }
 }
 
@@ -297,9 +302,8 @@ fn multilingual_split(input: &str) -> (Vec<String>, Vec<usize>) {
             buffer.push(c);
         } else {
             if !buffer.is_empty() {
-                l3_res.push(buffer.clone());
+                l3_res.push(std::mem::take(&mut buffer));
                 l3_off.push(base_offset + buffer_start);
-                buffer.clear();
             }
             l3_res.push(c.to_string());
             l3_off.push(base_offset + i);
@@ -358,17 +362,24 @@ mod tests {
     /// queries can be exercised without a live `UIDrawer` (which is what
     /// [`WordPicker::new`] needs and a headless test cannot build).
     fn picker_with(words: &[&str], matched: &[usize]) -> WordPicker {
-        WordPicker {
-            raw: words.join(" "),
-            words: words
-                .iter()
-                .map(|w| Word {
-                    text: (*w).to_owned(),
+        let raw = words.join(" ");
+        let mut start = 0;
+        let words = words
+            .iter()
+            .map(|w| {
+                let text = start..start + w.len();
+                // The single space `join` put after this word.
+                start = text.end + 1;
+                Word {
+                    text,
                     label: String::new(),
                     ascii: lower_ascii(w),
-                })
-                .collect(),
-            offsets: Vec::new(),
+                }
+            })
+            .collect();
+        WordPicker {
+            raw,
+            words,
             screen_ratio: 1.0,
             digits: 1,
             matched: matched.to_vec(),
