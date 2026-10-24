@@ -72,6 +72,11 @@ impl HintBox {
         }
     }
 
+    /// A box standing in for something that is not a hint: the pointer.
+    fn pseudo(x: f64, y: f64) -> Self {
+        Self::new(usize::MAX, String::new(), x, y, Frame::default(), None)
+    }
+
     /// Replaces the label and lays the box out to match.
     ///
     /// This is the only way a box's size changes, so laying out here is what lets
@@ -307,34 +312,35 @@ pub fn hint_boxes_from_frames(
     let color_num = theme.frame_colors.len();
     let mut color_idx = 0;
 
-    let mut boxes = frames
-        .enumerate()
-        .map(|(idx, frame)| {
-            let frame = frame.intersect(screen_frame).unwrap_or(*screen_frame);
+    // One spare slot for the pointer's stand-in. `collect` would size this
+    // exactly, and the push in `resolve_collisions` would then have to grow it,
+    // copying every box.
+    let mut boxes = Vec::with_capacity(len + 1);
+    boxes.extend(frames.enumerate().map(|(idx, frame)| {
+        let frame = frame.intersect(screen_frame).unwrap_or(*screen_frame);
 
-            let (x, y) = frame.center();
-            let (w, h) = frame.size();
+        let (x, y) = frame.center();
+        let (w, h) = frame.size();
 
-            // Draw frames for large enough elements
-            let is_large = w.max(h) >= colored_frame_min_size;
-            if is_large {
-                color_idx += 1;
-            };
+        // Draw frames for large enough elements
+        let is_large = w.max(h) >= colored_frame_min_size;
+        if is_large {
+            color_idx += 1;
+        };
 
-            let color = (color_num > 0 && is_large)
-                .then(|| theme.frame_colors.get(color_idx % color_num).cloned())
-                .flatten();
+        let color = (color_num > 0 && is_large)
+            .then(|| theme.frame_colors.get(color_idx % color_num).cloned())
+            .flatten();
 
-            HintBox::new(
-                idx,
-                hint_keys.label_for_index(idx, Some(digits)),
-                x,
-                y,
-                frame,
-                color,
-            )
-        })
-        .collect::<Vec<_>>();
+        HintBox::new(
+            idx,
+            hint_keys.label_for_index(idx, Some(digits)),
+            x,
+            y,
+            frame,
+            color,
+        )
+    }));
 
     resolve_collisions(&mut boxes, digits, theme);
 
@@ -343,73 +349,36 @@ pub fn hint_boxes_from_frames(
 
 pub const MAX_COLLISION_OPS: usize = 150;
 
-/// A participant in collision resolution: a hint box, or the pointer standing in
-/// as one.
-///
-/// The solver reads and writes nothing else, which is what lets the pointer join
-/// without a layer-backed [`HintBox`].
-#[derive(Debug, Clone, Copy)]
-struct Placement {
-    x: f64,
-    y: f64,
-    delta: (f64, f64),
-    disabled: bool,
-}
-
-impl Placement {
-    fn of(hb: &HintBox) -> Self {
-        Self {
-            x: hb.x,
-            y: hb.y,
-            delta: hb.delta,
-            disabled: hb.disabled,
-        }
-    }
-}
-
 /// Nudge overlapping boxes apart, with the pointer taking part as one more box.
 ///
 /// The thresholds are estimated from the font rather than measured, because this
 /// also runs before the boxes are laid out.
-pub fn resolve_collisions(boxes: &mut [HintBox], digits: u32, theme: &GlyphlowTheme) {
+pub fn resolve_collisions(boxes: &mut Vec<HintBox>, digits: u32, theme: &GlyphlowTheme) {
     // Estimate box size
     let x_thres =
         theme.hint_font.pointSize() * digits as f64 * 0.8 + 2.0 * theme.hint_margin_size as f64;
     let y_thres = theme.hint_font.pointSize() * 1.5 + 2.0 * theme.hint_margin_size as f64;
-
-    let mut placements: Vec<Placement> = boxes.iter().map(Placement::of).collect();
     // A test has no pointer worth respecting, and reading the real one would make
     // the layout depend on where the mouse happens to be.
     #[cfg(not(test))]
-    let pointer = pointer_position().map(|(x, y)| Placement {
-        x,
-        y,
-        delta: (0.0, 0.0),
-        disabled: false,
-    });
+    let pointer = pointer_position();
     #[cfg(test)]
-    let pointer: Option<Placement> = None;
+    let pointer: Option<(f64, f64)> = None;
 
-    if let Some(p) = pointer {
-        placements.push(p);
+    if let Some((x, y)) = pointer {
+        boxes.push(HintBox::pseudo(x, y));
     }
 
-    resolve_collisions_reactive(&mut placements, x_thres, y_thres, MAX_COLLISION_OPS);
-
-    for (hb, p) in boxes.iter_mut().zip(&placements) {
-        hb.x = p.x;
-        hb.y = p.y;
-        hb.delta = p.delta;
-    }
+    resolve_collisions_reactive(boxes, x_thres, y_thres, MAX_COLLISION_OPS);
 
     // The pointer cannot be hidden — a background process may not change the
     // cursor's visibility — so it is solved as one more box and then moved to
-    // wherever the solve put it.
-    if let Some(before) = pointer {
-        let after = placements[boxes.len()];
-        if (after.x, after.y) != (before.x, before.y) {
-            move_pointer(after.x, after.y);
-        }
+    // wherever the solve put it. Either way it leaves the list again.
+    if let Some(before) = pointer
+        && let Some(after) = boxes.pop()
+        && (after.x, after.y) != before
+    {
+        move_pointer(after.x, after.y);
     }
 }
 
@@ -431,23 +400,18 @@ fn move_pointer(x: f64, y: f64) {
 
 /// The reactive part: a spatial grid to find neighbours cheaply, and a work
 /// queue so a box pushed into a new collision is checked again.
-fn resolve_collisions_reactive(
-    slots: &mut [Placement],
-    x_thres: f64,
-    y_thres: f64,
-    max_ops: usize,
-) {
-    if slots.is_empty() {
+fn resolve_collisions_reactive(boxes: &mut [HintBox], x_thres: f64, y_thres: f64, max_ops: usize) {
+    if boxes.is_empty() {
         return;
     }
 
-    let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::with_capacity(slots.len());
-    let mut cell_coords = vec![(0, 0); slots.len()];
-    let mut queue = VecDeque::with_capacity(slots.len());
-    let mut in_queue = vec![true; slots.len()];
+    let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::with_capacity(boxes.len());
+    let mut cell_coords = vec![(0, 0); boxes.len()];
+    let mut queue = VecDeque::with_capacity(boxes.len());
+    let mut in_queue = vec![true; boxes.len()];
 
     // Initial setup
-    for (i, hb) in slots.iter().enumerate() {
+    for (i, hb) in boxes.iter().enumerate() {
         if hb.disabled {
             continue;
         }
@@ -466,7 +430,7 @@ fn resolve_collisions_reactive(
         in_queue[i] = false;
         ops_count += 1;
         // Initial checking for each element doesn't count
-        if ops_count > max_ops + slots.len() {
+        if ops_count > max_ops + boxes.len() {
             break;
         }
 
@@ -485,8 +449,8 @@ fn resolve_collisions_reactive(
                         continue;
                     }
 
-                    let diff_x = slots[i].x - slots[j].x;
-                    let diff_y = slots[i].y - slots[j].y;
+                    let diff_x = boxes[i].x - boxes[j].x;
+                    let diff_y = boxes[i].y - boxes[j].y;
                     let abs_dx = diff_x.abs();
                     let abs_dy = diff_y.abs();
 
@@ -503,23 +467,23 @@ fn resolve_collisions_reactive(
                         if x_m_count + x_p_count <= y_m_count + y_p_count {
                             let move_dist =
                                 (shift_x / 2.0) * (if diff_x >= 0.0 { 1.0 } else { -1.0 });
-                            slots[i].x += move_dist;
-                            slots[i].delta.0 += move_dist;
-                            slots[j].x -= move_dist;
-                            slots[j].delta.0 -= move_dist;
+                            boxes[i].x += move_dist;
+                            boxes[i].delta.0 += move_dist;
+                            boxes[j].x -= move_dist;
+                            boxes[j].delta.0 -= move_dist;
                         } else {
                             let move_dist =
                                 (shift_y / 2.0) * (if diff_y >= 0.0 { 1.0 } else { -1.0 });
-                            slots[i].y += move_dist;
-                            slots[i].delta.1 += move_dist;
-                            slots[j].y -= move_dist;
-                            slots[j].delta.1 -= move_dist;
+                            boxes[i].y += move_dist;
+                            boxes[i].delta.1 += move_dist;
+                            boxes[j].y -= move_dist;
+                            boxes[j].delta.1 -= move_dist;
                         }
 
                         // Update grid positions and mark both as dirty
                         update_and_requeue(
                             i,
-                            slots,
+                            boxes,
                             &mut cell_coords,
                             &mut grid,
                             &mut queue,
@@ -528,7 +492,7 @@ fn resolve_collisions_reactive(
                         );
                         update_and_requeue(
                             j,
-                            slots,
+                            boxes,
                             &mut cell_coords,
                             &mut grid,
                             &mut queue,
@@ -549,7 +513,7 @@ fn resolve_collisions_reactive(
 /// Move `idx` to its new grid cell and queue it for another collision check.
 fn update_and_requeue(
     idx: usize,
-    slots: &[Placement],
+    boxes: &[HintBox],
     cell_coords: &mut [(i32, i32)],
     grid: &mut HashMap<(i32, i32), Vec<usize>>,
     queue: &mut VecDeque<usize>,
@@ -559,8 +523,8 @@ fn update_and_requeue(
     let old_c = cell_coords[idx];
     let (xt, yt) = thres;
     let new_c = (
-        (slots[idx].x / xt).floor() as i32,
-        (slots[idx].y / yt).floor() as i32,
+        (boxes[idx].x / xt).floor() as i32,
+        (boxes[idx].y / yt).floor() as i32,
     );
 
     if old_c != new_c {
@@ -681,24 +645,28 @@ mod collision_tests {
     use super::*;
     use rstest::rstest;
 
-    fn mock_slot(x: f64, y: f64) -> Placement {
-        Placement {
+    fn mock_box(idx: usize, x: f64, y: f64) -> HintBox {
+        HintBox::new(
+            idx,
+            format!("Box{}", idx),
             x,
             y,
-            delta: (0.0, 0.0),
-            disabled: false,
-        }
+            Frame::new(0.0, 0.0, 0.0, 0.0),
+            None,
+        )
     }
 
     /// The invariant the resolver exists to establish: every pair ends up
     /// separated by at least the threshold on *some* axis.
-    fn assert_no_pair_collides(slots: &[Placement], x_thres: f64, y_thres: f64) {
-        for (i, a) in slots.iter().enumerate() {
-            for (j, b) in slots.iter().enumerate().skip(i + 1) {
+    fn assert_no_pair_collides(boxes: &[HintBox], x_thres: f64, y_thres: f64) {
+        for (i, a) in boxes.iter().enumerate() {
+            for b in &boxes[i + 1..] {
                 let (dx, dy) = ((a.x - b.x).abs(), (a.y - b.y).abs());
                 assert!(
                     dx >= x_thres || dy >= y_thres,
-                    "slots {i} and {j} still collide: dx = {dx}, dy = {dy}"
+                    "boxes {} and {} still collide: dx = {dx}, dy = {dy}",
+                    a.idx,
+                    b.idx
                 );
             }
         }
@@ -708,38 +676,44 @@ mod collision_tests {
     /// in `straddling_a_grid_cell` the cell boundary must not hide the overlap
     /// from the grid lookup.
     #[rstest]
-    #[case::simple_pair(vec![(100.0, 100.0), (105.0, 100.0)], 100)]
-    #[case::chain_reaction(vec![(100.0, 100.0), (108.0, 100.0), (116.0, 100.0)], 500)]
-    #[case::straddling_a_grid_cell(vec![(9.9, 10.0), (10.1, 10.0)], 100)]
-    fn separates_every_overlapping_pair(#[case] spec: Vec<(f64, f64)>, #[case] max_ops: usize) {
-        let mut slots: Vec<Placement> = spec.into_iter().map(|(x, y)| mock_slot(x, y)).collect();
+    #[case::simple_pair(vec![(0, 100.0, 100.0), (1, 105.0, 100.0)], 100)]
+    #[case::chain_reaction(vec![(0, 100.0, 100.0), (1, 108.0, 100.0), (2, 116.0, 100.0)], 500)]
+    #[case::straddling_a_grid_cell(vec![(0, 9.9, 10.0), (1, 10.1, 10.0)], 100)]
+    fn separates_every_overlapping_pair(
+        #[case] spec: Vec<(usize, f64, f64)>,
+        #[case] max_ops: usize,
+    ) {
+        let mut boxes: Vec<HintBox> = spec
+            .into_iter()
+            .map(|(idx, x, y)| mock_box(idx, x, y))
+            .collect();
 
-        resolve_collisions_reactive(&mut slots, 10.0, 10.0, max_ops);
+        resolve_collisions_reactive(&mut boxes, 10.0, 10.0, max_ops);
 
-        assert_no_pair_collides(&slots, 10.0, 10.0);
+        assert_no_pair_collides(&boxes, 10.0, 10.0);
     }
 
     /// Two boxes 5px apart are separated along whichever axis needs the smaller
     /// nudge: X needs 5px and Y would need 10px, so Y must be left alone.
     #[test]
     fn separates_along_the_axis_needing_the_smaller_nudge() {
-        let mut slots = vec![mock_slot(100.0, 100.0), mock_slot(105.0, 100.0)];
+        let mut boxes = vec![mock_box(0, 100.0, 100.0), mock_box(1, 105.0, 100.0)];
 
-        resolve_collisions_reactive(&mut slots, 10.0, 10.0, 100);
+        resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 100);
 
-        assert_eq!(slots[0].y, 100.0, "Y must not move when X is cheaper");
-        assert_no_pair_collides(&slots, 10.0, 10.0);
+        assert_eq!(boxes[0].y, 100.0, "Y must not move when X is cheaper");
+        assert_no_pair_collides(&boxes, 10.0, 10.0);
     }
 
     #[test]
     fn test_no_collision_stays_put() {
-        let mut slots = vec![mock_slot(100.0, 100.0), mock_slot(200.0, 200.0)];
+        let mut boxes = vec![mock_box(0, 100.0, 100.0), mock_box(1, 200.0, 200.0)];
 
-        let original_x = slots[0].x;
-        resolve_collisions_reactive(&mut slots, 10.0, 10.0, 100);
+        let original_x = boxes[0].x;
+        resolve_collisions_reactive(&mut boxes, 10.0, 10.0, 100);
 
         assert_eq!(
-            slots[0].x, original_x,
+            boxes[0].x, original_x,
             "Box should not move if no collision exists"
         );
     }
@@ -748,7 +722,11 @@ mod collision_tests {
     /// has to cut the loop short instead of spinning forever.
     #[test]
     fn max_ops_budget_terminates_deterministically() {
-        let stacked = || (0..10).map(|_| mock_slot(100.0, 100.0)).collect::<Vec<_>>();
+        let stacked = || {
+            (0..10)
+                .map(|i| mock_box(i, 100.0, 100.0))
+                .collect::<Vec<_>>()
+        };
 
         let mut first = stacked();
         resolve_collisions_reactive(&mut first, 10.0, 10.0, 50);
@@ -757,11 +735,12 @@ mod collision_tests {
         resolve_collisions_reactive(&mut second, 10.0, 10.0, 50);
 
         assert_eq!(first.len(), 10, "boxes must not be dropped");
-        for (i, (a, b)) in first.iter().zip(&second).enumerate() {
+        for (a, b) in first.iter().zip(&second) {
             assert_eq!((a.x, a.y), (b.x, b.y), "resolution is not deterministic");
             assert!(
                 a.x.is_finite() && a.y.is_finite(),
-                "slot {i} ended up at a non-finite position"
+                "box {} ended up at a non-finite position",
+                a.idx
             );
         }
     }
