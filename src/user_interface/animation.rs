@@ -105,13 +105,9 @@ impl UIDrawer {
         });
     }
 
-    /// Draw a fading triangle from the cursor's current position to
-    /// `(end_x, end_y)`.
+    /// Draw a fading triangle from `(start_x, start_y)` to `(end_x, end_y)`.
     ///
-    /// The end point is in screen coordinates and gets calibrated, but the start
-    /// point comes from `NSEvent::mouseLocation` — already bottom-left, relative
-    /// to the main screen — and needs its own adjustment when there is more than
-    /// one display.
+    /// Both points are in AX coordinates, so both are calibrated the same way.
     pub fn draw_trail(
         &self,
         start_x: f64,
@@ -120,15 +116,10 @@ impl UIDrawer {
         end_y: f64,
         color: &CFRetained<CGColor>,
     ) {
-        let (start_x, start_y) = if self.screen_frames.len() > 1 {
-            let main_frame = self.screen_frames[0];
-            let start_x = start_x + main_frame.top_left.x - self.overlay_frame.top_left.x;
-            let start_y = start_y - main_frame.bottom_right.y + self.overlay_frame.bottom_right.y;
-            (start_x, start_y)
-        } else {
-            (start_x, start_y)
-        };
-        // Convert ending point from top-left origin to bottom-left origin (Cocoa/CALayer coordinates)
+        let CGPoint {
+            x: start_x,
+            y: start_y,
+        } = calibrated_origin(start_x, start_y, &self.overlay_frame);
         let CGPoint { x: end_x, y: end_y } = calibrated_origin(end_x, end_y, &self.overlay_frame);
         // Skip if start and end are the same (no movement)
         if (start_x - end_x).abs() < 1.0 && (start_y - end_y).abs() < 1.0 {

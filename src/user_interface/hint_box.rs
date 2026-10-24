@@ -383,9 +383,10 @@ pub fn resolve_collisions(boxes: &mut Vec<HintBox>, digits: u32, theme: &Glyphlo
 }
 
 /// Where the pointer is, in AX coordinates.
-#[cfg(not(test))]
-fn pointer_position() -> Option<(f64, f64)> {
-    // Global display coordinates are already the AX system: top-left origin.
+///
+/// Global display coordinates are already that system: top-left origin, with the
+/// other displays placed relative to the main one, negative coordinates and all.
+pub fn pointer_position() -> Option<(f64, f64)> {
     let event = objc2_core_graphics::CGEvent::new(None)?;
     let loc = objc2_core_graphics::CGEvent::location(Some(&event));
     Some((loc.x, loc.y))
