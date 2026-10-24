@@ -407,17 +407,16 @@ impl AppEngine {
         }
     }
 
-    /// A tap means multi-selection wherever there is text to select, a sticky
-    /// click modifier on a clickable target, and nothing anywhere else.
+    /// A tap is a sticky click modifier in the grid and on a clickable target,
+    /// multi-selection wherever there is text to select, and nothing anywhere
+    /// else.
+    ///
+    /// The grid wins over text: it is about clicking cells, and a grid opened
+    /// over a text selection still has that text behind it.
     pub(super) fn toggle_modifier(&mut self, key: ModifierKey) {
-        if self.target == Target::Clickable || self.mode() == Mode::Grid {
-            self.click_modifiers.toggle(key);
-            let mut msg = MenuString::styled(self.click_modifiers.click_type(), MenuStyle::Header);
-            msg.push(" click modifiers: ");
-            msg.push_styled(&self.click_modifiers.label(), MenuStyle::Key);
-            self.notify_styled(msg, Level::Info);
+        if self.mode() == Mode::Grid {
+            self.toggle_click_modifier(key);
         } else if self.target == Target::Text || self.word_picker.is_some() {
-            // Toggle multi-selection
             self.multi_selection.toggle();
             let on_off = if self.multi_selection.is_on {
                 "on"
@@ -427,6 +426,17 @@ impl AppEngine {
             let mut msg = MenuString::from("Multi-selection is now ");
             msg.push_styled(on_off, MenuStyle::Key).push(".");
             self.notify_styled(msg, Level::Info);
+        } else if self.target == Target::Clickable {
+            self.toggle_click_modifier(key);
         }
+    }
+
+    /// Toggle `key` in the sticky click modifiers and say what is held now.
+    fn toggle_click_modifier(&mut self, key: ModifierKey) {
+        self.click_modifiers.toggle(key);
+        let mut msg = MenuString::styled(self.click_modifiers.click_type(), MenuStyle::Header);
+        msg.push(" click modifiers: ");
+        msg.push_styled(&self.click_modifiers.label(), MenuStyle::Key);
+        self.notify_styled(msg, Level::Info);
     }
 }

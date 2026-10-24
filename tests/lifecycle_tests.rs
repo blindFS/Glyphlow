@@ -662,6 +662,24 @@ fn main() {
                 TestEvent::ExpectMode(Mode::Menu(MenuScope::Text)),
             ],
         },
+        Scenario::new(
+            "Scenario 23: Text activation, then grid — the tap is a click modifier",
+            vec![
+                // `Text` is the target that makes a tap multi-selection, and it
+                // survives the grid being opened over it, as `GridMove` does.
+                TestEvent::SendSignal(AppSignal::Activate(Target::Text)),
+                TestEvent::SetMode(Mode::Grid),
+                TestEvent::ClearMessages,
+                TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Tab)),
+                TestEvent::ExpectMessage("Right click modifiers: None".into()),
+                // Off the grid the same target is multi-selection again, so the
+                // tap above was the grid's, not a target that stopped counting.
+                TestEvent::SetMode(Mode::Filtering),
+                TestEvent::ClearMessages,
+                TestEvent::SendSignal(AppSignal::ToggleModifier(ModifierKey::Tab)),
+                TestEvent::ExpectMessage("Multi-selection is now on.".into()),
+            ],
+        ),
     ];
 
     let rt = tokio::runtime::Builder::new_current_thread()
