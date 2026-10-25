@@ -683,14 +683,8 @@ fn main() {
         Scenario::new(
             "Scenario 24: Enter refreshes only in generic filtering",
             vec![
-                TestEvent::SetMode(Mode::Filtering),
-                TestEvent::ClearSignals,
-                // Enter re-runs the traversal that produced the hints ...
-                TestEvent::PressKey(Key::Enter),
-                TestEvent::ExpectSignal(AppSignal::ActOnEnter),
-                TestEvent::ReleaseKey(Key::Enter),
-                // ... but an OCR result has nothing to run again. The key has to
-                // be swallowed here: `to_char` gives Enter a space, so letting it
+                // An OCR result has nothing to run again. The key has to be
+                // swallowed here: `to_char` gives Enter a space, so letting it
                 // fall through to the catch-all would close everything.
                 TestEvent::SetMode(Mode::OCRResultFiltering),
                 TestEvent::ClearSignals,
@@ -708,6 +702,15 @@ fn main() {
                 TestEvent::ClearSignals,
                 TestEvent::PressKey(Key::Enter),
                 TestEvent::ExpectNoSignal,
+                TestEvent::ReleaseKey(Key::Enter),
+                // Enter re-runs the traversal that produced the hints. This comes
+                // last on purpose: the traversal ends in a notification, whose
+                // 2 s `ClearNotification` would land in a later `ExpectNoSignal`
+                // window and fail it — timing-dependent, and it did on CI.
+                TestEvent::SetMode(Mode::Filtering),
+                TestEvent::ClearSignals,
+                TestEvent::PressKey(Key::Enter),
+                TestEvent::ExpectSignal(AppSignal::ActOnEnter),
                 TestEvent::ReleaseKey(Key::Enter),
             ],
         ),
