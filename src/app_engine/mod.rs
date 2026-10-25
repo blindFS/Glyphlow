@@ -311,6 +311,9 @@ impl AppEngine {
                     // To act on selected parent node
                     self.clear_cache();
                     self.draw_dashboard();
+                } else {
+                    // Refresh the hints
+                    self.activate(self.target.clone());
                 }
             }
             AppSignal::FrameOCR => {

@@ -680,6 +680,54 @@ fn main() {
                 TestEvent::ExpectMessage("Multi-selection is now on.".into()),
             ],
         ),
+        Scenario::new(
+            "Scenario 24: Enter refreshes only in generic filtering",
+            vec![
+                // An OCR result has nothing to run again. The key has to be
+                // swallowed here: `to_char` gives Enter a space, so letting it
+                // fall through to the catch-all would close everything.
+                TestEvent::SetMode(Mode::OCRResultFiltering),
+                TestEvent::ClearSignals,
+                TestEvent::PressKey(Key::Enter),
+                TestEvent::ExpectNoSignal,
+                TestEvent::ReleaseKey(Key::Enter),
+                // A word picker has nothing to run again either, and a menu does
+                // not take Enter as one of its keys.
+                TestEvent::SetMode(Mode::WordPicking),
+                TestEvent::ClearSignals,
+                TestEvent::PressKey(Key::Enter),
+                TestEvent::ExpectNoSignal,
+                TestEvent::ReleaseKey(Key::Enter),
+                TestEvent::SetMode(Mode::Menu(MenuScope::Dashboard)),
+                TestEvent::ClearSignals,
+                TestEvent::PressKey(Key::Enter),
+                TestEvent::ExpectNoSignal,
+                TestEvent::ReleaseKey(Key::Enter),
+                // Enter re-runs the traversal that produced the hints. This comes
+                // last on purpose: the traversal ends in a notification, whose
+                // 2 s `ClearNotification` would land in a later `ExpectNoSignal`
+                // window and fail it — timing-dependent, and it did on CI.
+                TestEvent::SetMode(Mode::Filtering),
+                TestEvent::ClearSignals,
+                TestEvent::PressKey(Key::Enter),
+                TestEvent::ExpectSignal(AppSignal::ActOnEnter),
+                TestEvent::ReleaseKey(Key::Enter),
+            ],
+        ),
+        Scenario::new(
+            "Scenario 25: Enter runs the traversal again",
+            vec![
+                // The harness has no accessibility tree, so a traversal finds
+                // nothing and says so. The same notification after Enter is what
+                // shows the traversal really ran a second time.
+                TestEvent::SendSignal(AppSignal::Activate(Target::Text)),
+                TestEvent::ExpectMessage("No relevant UI elements found.".into()),
+                TestEvent::SetMode(Mode::Filtering),
+                TestEvent::ClearMessages,
+                TestEvent::SendSignal(AppSignal::ActOnEnter),
+                TestEvent::ExpectMessage("No relevant UI elements found.".into()),
+            ],
+        ),
     ];
 
     let rt = tokio::runtime::Builder::new_current_thread()
