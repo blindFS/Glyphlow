@@ -1,5 +1,6 @@
 use std::{
     sync::mpsc::{RecvTimeoutError, channel},
+    thread,
     time::{Duration, Instant},
 };
 
@@ -26,6 +27,9 @@ use crate::util::Frame;
 /// The cap on waiting for ScreenCaptureKit's completion handler, which is
 /// documented to fire exactly once but is not enforced.
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long OCR may run before it is abandoned.
+const OCR_TIMEOUT: Duration = Duration::from_millis(1500);
 
 /// Screenshot the screen region `rect`.
 ///
@@ -111,17 +115,50 @@ pub(crate) fn screen_shot(frame: &Frame) -> bool {
 /// Recognised text, with the screen rect it was found in.
 pub(crate) type OCRResult = Vec<(String, CGRect)>;
 
-/// OCR `frame` and map every observation back to screen coordinates.
+/// OCR `frame`, giving up after [`OCR_TIMEOUT`] with `Ok(None)`.
+///
+/// Recognition runs on its own thread: on a cold cache Vision compiles the
+/// models first, which takes far longer than the caller may stay blocked.
+pub(crate) fn perform_ocr(
+    frame: &Frame,
+    languages: Vec<String>,
+) -> Result<Option<OCRResult>, Box<dyn std::error::Error>> {
+    let cg_image = capture_rect(frame.to_cgrect())?;
+    let frame = *frame;
+
+    let (tx, rx) = channel();
+    thread::spawn(move || {
+        let _ = tx.send(recognize(cg_image, frame, &languages));
+    });
+
+    let deadline = Instant::now() + OCR_TIMEOUT;
+    loop {
+        match rx.recv_timeout(Duration::from_millis(10)) {
+            Ok(result) => return result.map(Some).map_err(Into::into),
+            Err(RecvTimeoutError::Timeout) => {
+                if Instant::now() >= deadline {
+                    return Ok(None);
+                }
+                unsafe {
+                    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, Boolean::from(false));
+                }
+            }
+            Err(RecvTimeoutError::Disconnected) => return Err("OCR thread died.".into()),
+        }
+    }
+}
+
+/// Recognise the text in `cg_image` and map it back to screen coordinates.
 ///
 /// Vision reports normalised bottom-left boxes, so the y axis is flipped here.
-pub(crate) async fn perform_ocr(
-    frame: &Frame,
+fn recognize(
+    cg_image: Retained<CGImage>,
+    frame: Frame,
     languages: &[String],
-) -> Result<OCRResult, Box<dyn std::error::Error>> {
+) -> Result<OCRResult, String> {
     let rect = frame.to_cgrect();
     let (w, h) = frame.size();
     unsafe {
-        let cg_image = capture_rect(rect)?;
         autoreleasepool(move |_| {
             let request = VNRecognizeTextRequest::default_retained();
             request.setRecognitionLevel(objc2_vision::VNRequestTextRecognitionLevel::Accurate);
@@ -141,7 +178,9 @@ pub(crate) async fn perform_ocr(
 
             let request: Retained<VNRequest> = Retained::cast_unchecked(request);
             let requests = NSArray::from_retained_slice(std::slice::from_ref(&request));
-            handler.performRequests_error(&requests)?;
+            handler
+                .performRequests_error(&requests)
+                .map_err(|e| e.localizedDescription().to_string())?;
 
             let mut ocr_results = Vec::new();
             if let Some(results) = request.results() {
