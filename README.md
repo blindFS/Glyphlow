@@ -202,6 +202,10 @@ or `~/.cache/glyphlow/tempfile.md`.
 `~/.cache/glyphlow/glyphlow.socket`. It is recreated every time the server
 starts.
 
+macOS also keeps one directory for it: `~/Library/Caches/glyphlow/`, where
+CoreML compiles the OCR models on first use. Safe to delete, at the cost of
+recompiling on the next OCR.
+
 ## Configuration
 
 A comprehensive configuration file is generated when you run this app at the first time.
