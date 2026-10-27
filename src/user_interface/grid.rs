@@ -1,4 +1,6 @@
-use super::{calibrated_origin, drawer::without_animations};
+use super::{
+    SHADOW_OFFSET_Y, SHADOW_OPACITY, SHADOW_RADIUS, calibrated_origin, drawer::without_animations,
+};
 use crate::{
     config::GridConfig,
     util::{Frame, estimate_frame_for_text},
@@ -8,7 +10,8 @@ use objc2::{
     rc::{Retained, autoreleasepool},
 };
 use objc2_app_kit::{NSFontAttributeName, NSForegroundColorAttributeName};
-use objc2_core_foundation::CGSize;
+use objc2_core_foundation::{CFRetained, CGSize};
+use objc2_core_graphics::CGColor;
 use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CALayer, CATextLayer, CATransaction, kCAAlignmentCenter};
 
@@ -41,6 +44,7 @@ impl GridOverlay {
         region: &Frame,
         labels: &[char],
         grid: &GridConfig,
+        shadow_color: &CFRetained<CGColor>,
         root: &CALayer,
         overlay_frame: &Frame,
     ) -> Self {
@@ -50,7 +54,7 @@ impl GridOverlay {
         let container = autoreleasepool(|_| {
             let container = CALayer::new();
             for (idx, label) in labels.iter().enumerate() {
-                let (cell, size) = CellLayers::new(grid, *label);
+                let (cell, size) = CellLayers::new(grid, *label, shadow_color);
                 if idx == 0 {
                     badge_size = size;
                 }
@@ -95,7 +99,7 @@ impl CellLayers {
     /// The border and badge of one cell, with `label` laid out inside the badge.
     /// The badge size comes back out because it also decides whether any cell can
     /// show a label at all.
-    fn new(grid: &GridConfig, label: char) -> (Self, CGSize) {
+    fn new(grid: &GridConfig, label: char, shadow_color: &CFRetained<CGColor>) -> (Self, CGSize) {
         let margin = badge_margin(grid);
         let text = attributed_label(label, grid);
         let (text_size, badge_size) = measure_badge(&text, margin);
@@ -108,6 +112,10 @@ impl CellLayers {
         badge.setBounds(NSRect::new(NSPoint::new(0.0, 0.0), badge_size));
         badge.setBackgroundColor(Some(&grid.badge_bg_color));
         badge.setCornerRadius(margin);
+        badge.setShadowColor(Some(shadow_color));
+        badge.setShadowOpacity(SHADOW_OPACITY);
+        badge.setShadowRadius(SHADOW_RADIUS);
+        badge.setShadowOffset(CGSize::new(0.0, SHADOW_OFFSET_Y));
 
         let text_layer = CATextLayer::new();
         text_layer.setContentsScale(2.0);

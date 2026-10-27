@@ -255,6 +255,7 @@ keeps its default instead of failing to load.
 | `theme.menu_header_hl_color` | Highlight color of menu headers and warnings | $\color{#e0af68}{\blacksquare}$ |
 | `theme.menu_error_hl_color` | Highlight color of error messages | $\color{#f7768e}{\blacksquare}$ |
 | `theme.frame_colors` | Colors used for large UI element frames | [ $\color{#e0af68}{\blacksquare}$, $\color{#9ece6a}{\blacksquare}$, $\color{#bb9af7}{\blacksquare}$, $\color{#f7768e}{\blacksquare}$ ] |
+| `theme.shadow_color` | Color of the shadow behind hints, grid labels and menus | $\color{#414868}{\blacksquare}$ |
 | `theme.enable_animation` | Animations for mouse events | `true` |
 
 </details>

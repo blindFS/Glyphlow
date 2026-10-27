@@ -1,4 +1,4 @@
-use super::calibrated_origin;
+use super::{SHADOW_OFFSET_Y, SHADOW_OPACITY, SHADOW_RADIUS, calibrated_origin};
 use crate::config::{GlyphlowTheme, HintKeys};
 use crate::os_util::move_pointer;
 use crate::util::{Frame, estimate_frame_for_text};
@@ -182,6 +182,12 @@ impl HintBox {
         self.box_layer.setBackgroundColor(Some(bg_color));
         self.box_layer
             .setCornerRadius(theme.hint_margin_size as f64);
+        // The triangle is a sublayer, so it is part of the silhouette.
+        self.box_layer.setShadowColor(Some(&theme.shadow_color));
+        self.box_layer.setShadowOpacity(SHADOW_OPACITY);
+        self.box_layer.setShadowRadius(SHADOW_RADIUS);
+        self.box_layer
+            .setShadowOffset(CGSize::new(0.0, SHADOW_OFFSET_Y));
         self.tri_layer.setFillColor(Some(bg_color));
 
         self.render(key_prefix_len, theme);

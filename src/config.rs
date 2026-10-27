@@ -174,6 +174,8 @@ pub struct GlyphlowTheme {
     pub menu_error_hl_color: CFRetained<CGColor>,
     #[serde(with = "vec_cgcolor_format", default = "default_frame_colors")]
     pub frame_colors: Vec<CFRetained<CGColor>>,
+    #[serde(with = "cgcolor_format", default = "default_shadow_color")]
+    pub shadow_color: CFRetained<CGColor>,
     #[serde(default = "default_enable_animation")]
     pub enable_animation: bool,
 }
@@ -225,6 +227,9 @@ fn default_frame_colors() -> Vec<CFRetained<CGColor>> {
         color_from_hex("#f7768eff"),
     ]
 }
+fn default_shadow_color() -> CFRetained<CGColor> {
+    color_from_hex("#414868d0")
+}
 fn default_enable_animation() -> bool {
     true
 }
@@ -246,6 +251,7 @@ impl Default for GlyphlowTheme {
             menu_header_hl_color: default_menu_header_hl(),
             menu_error_hl_color: default_menu_error_hl(),
             frame_colors: default_frame_colors(),
+            shadow_color: default_shadow_color(),
             enable_animation: default_enable_animation(),
         }
     }

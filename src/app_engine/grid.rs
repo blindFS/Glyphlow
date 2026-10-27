@@ -74,6 +74,7 @@ impl AppEngine {
             &region,
             &grid.labels(),
             grid,
+            &self.config.theme.shadow_color,
             &self.drawer.root,
             &self.overlay_frame,
         );
