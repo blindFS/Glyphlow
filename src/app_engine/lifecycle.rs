@@ -98,13 +98,16 @@ impl AppEngine {
         });
     }
 
-    /// Refresh the focused window information.
+    /// Refresh the focused window and put its frame on screen.
     ///
     /// Returns `false` when the focused window could not be determined, leaving
     /// `last_app_window_info` untouched — possibly still the sentinel default,
     /// whose window is the *system-wide* element. Callers deriving a selection
     /// from it must check this.
-    pub fn get_app_window_info(&mut self) -> bool {
+    ///
+    /// Called once per interaction — by the CLI loop, the dashboard and the
+    /// workflow steps that read the window — so [`Self::activate`] needs none.
+    pub fn refresh_front_window(&mut self) -> bool {
         let Some(app_win_info) = get_focused_window(
             self.overlay_frame,
             &self.last_app_window_info,
@@ -150,9 +153,10 @@ impl AppEngine {
     /// Select the focused window as the default element of interest, so that
     /// element-relative workflows (press, menu) have something to act on.
     ///
-    /// Callers must have called [`Self::get_app_window_info`] first **and checked
-    /// that it returned `true`**: otherwise this selects the sentinel system-wide
-    /// element, and a generic workflow would act on the middle of the screen.
+    /// Callers must have called [`Self::refresh_front_window`] first **and
+    /// checked that it returned `true`**: otherwise this selects the sentinel
+    /// system-wide element, and a generic workflow would act on the middle of the
+    /// screen.
     pub fn select_focused_window(&mut self) {
         let AppWindowInfo { window, frame, .. } = &self.last_app_window_info;
         self.selected = Some(ElementOfInterest::new(
@@ -164,8 +168,10 @@ impl AppEngine {
     }
 
     /// Start a traversal for `target` and hand back the channel its results
-    /// arrive on. Custom targets search the whole overlay, everything else the
-    /// focused window.
+    /// arrive on.
+    ///
+    /// A custom target searches the whole app; everything else searches the
+    /// focused window, or the picked element when there is one.
     pub(super) fn ui_element_traverse_on_activation(
         &mut self,
         target: Target,
@@ -177,51 +183,46 @@ impl AppEngine {
             _ => target,
         };
 
-        let (focused_only, vis_level) = match target {
-            // NOTE: loose visibility checking for specific targets
-            Target::Custom(_) => (false, VisibilityCheckingLevel::Loosest),
-            _ => (true, self.config.visibility_checking_level),
+        let window = self.last_app_window_info.window.clone();
+        let window_frame = self.last_app_window_info.frame;
+        // A search can find its subject outside the focused window — the menu
+        // `ShowMenu` opens is a window of its own — so it starts at the app and
+        // keeps invisible candidates too.
+        let app_wide = matches!(target, Target::Custom(_));
+        let (scope_root, bounds, vis_level) = if app_wide {
+            let app = window.parent().unwrap_or(window);
+            (app, self.overlay_frame, VisibilityCheckingLevel::Loosest)
+        } else {
+            (window, window_frame, self.config.visibility_checking_level)
         };
 
         if self.selected.is_none() {
-            let element =
-                if !focused_only && let Ok(ax_app) = self.last_app_window_info.window.parent() {
-                    ax_app
-                } else {
-                    self.last_app_window_info.window.clone()
-                };
-
             self.selected = Some(ElementOfInterest::new(
-                element,
+                scope_root.clone(),
                 None,
                 RoleOfInterest::Generic,
-                self.last_app_window_info.frame,
+                window_frame,
             ));
         }
 
-        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        let (root, parent_frame) = self
+            .selected
+            .as_ref()
+            .and_then(|sel| sel.element().map(|e| (e.clone(), sel.frame)))
+            .unwrap_or((scope_root, window_frame));
 
-        if let Some(selected) = self.selected.as_ref()
-            && let Some(element) = selected.element()
-        {
-            let safe_root = ThreadSafeElement(element.clone());
-            let frame = selected.frame;
-            let window_frame = if focused_only {
-                self.last_app_window_info.frame
-            } else {
-                self.overlay_frame
-            };
-            let _ = std::thread::spawn(move || {
-                traverse(
-                    safe_root,
-                    frame,
-                    window_frame,
-                    target,
-                    vis_level,
-                    &result_tx,
-                );
-            });
-        }
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        let safe_root = ThreadSafeElement(root);
+        let _ = std::thread::spawn(move || {
+            traverse(
+                safe_root,
+                parent_frame,
+                bounds,
+                target,
+                vis_level,
+                &result_tx,
+            );
+        });
 
         result_rx
     }

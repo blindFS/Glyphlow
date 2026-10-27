@@ -79,6 +79,12 @@ impl AppEngine {
 
     /// Run one workflow action; returns `true` when the queue should stop.
     fn execute_workflow_action(&mut self, act: &WorkFlowAction) -> bool {
+        // An earlier step may have moved the front window (`Press`, `KeyCombo`),
+        // so whatever works on the window has to look it up again.
+        if act.reads_front_window() {
+            self.refresh_front_window();
+        }
+
         let key_down = |kb: &KeyBinding| {
             for k in kb.keys.iter() {
                 let _ = monio::key_press(*k);
@@ -129,7 +135,6 @@ impl AppEngine {
                 return false;
             }
             WorkFlowAction::SearchFor(ct) => {
-                self.selected = None;
                 match CompiledTarget::new(ct) {
                     Ok(compiled) => self.activate(Target::Custom(Box::new(compiled))),
                     Err(e) => {
@@ -147,7 +152,6 @@ impl AppEngine {
                 return false;
             }
             WorkFlowAction::Activate(target) => {
-                self.get_app_window_info();
                 self.activate(target.clone());
                 // The queue resumes
                 return true;
@@ -168,7 +172,6 @@ impl AppEngine {
                 return false;
             }
             WorkFlowAction::GridMove => {
-                self.get_app_window_info();
                 self.start_grid();
                 // The queue resumes when Enter accepts a cell.
                 return true;

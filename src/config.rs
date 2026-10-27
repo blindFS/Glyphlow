@@ -86,6 +86,17 @@ pub enum WorkFlowAction {
     Repeat(usize, Box<[WorkFlowAction]>),
 }
 
+impl WorkFlowAction {
+    /// Whether this works on the focused window rather than on the picked
+    /// element, so the window has to be looked up again before it runs.
+    pub(crate) fn reads_front_window(&self) -> bool {
+        matches!(
+            self,
+            Self::Activate(_) | Self::SearchFor(_) | Self::GridMove | Self::ScreenShot
+        )
+    }
+}
+
 /// A pre-defined workflow: a key, the apps it applies to and the actions it runs.
 ///
 /// [`Tabled`] is what lets `glyphlow-cli workflow list` print these directly;
