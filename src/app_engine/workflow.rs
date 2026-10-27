@@ -147,6 +147,7 @@ impl AppEngine {
                 return false;
             }
             WorkFlowAction::Activate(target) => {
+                self.get_app_window_info();
                 self.activate(target.clone());
                 // The queue resumes
                 return true;
@@ -167,6 +168,7 @@ impl AppEngine {
                 return false;
             }
             WorkFlowAction::GridMove => {
+                self.get_app_window_info();
                 self.start_grid();
                 // The queue resumes when Enter accepts a cell.
                 return true;
