@@ -228,7 +228,7 @@ fn default_frame_colors() -> Vec<CFRetained<CGColor>> {
     ]
 }
 fn default_shadow_color() -> CFRetained<CGColor> {
-    color_from_hex("#414868")
+    color_from_hex("#414868d0")
 }
 fn default_enable_animation() -> bool {
     true

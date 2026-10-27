@@ -173,8 +173,8 @@ const MIN_FONT_SIZE: f64 = 10.0;
 const SEARCH_BAR_WIDTH: usize = 10;
 /// The menu's share of the shadow: it widens the spread and drops the offset, but
 /// keeps the opacity every other overlay uses.
-const MENU_SHADOW_RADIUS: f64 = 12.0;
-const MENU_SHADOW_OFFSET_Y: f64 = -6.0;
+const MENU_SHADOW_RADIUS: f64 = 6.0;
+const MENU_SHADOW_OFFSET_Y: f64 = -3.0;
 /// Kept off the text layer's width so its widest line never sits exactly on the
 /// wrap boundary, where CoreText's own rounding can break the line.
 const TEXT_WIDTH_SLACK: f64 = 1.0;
