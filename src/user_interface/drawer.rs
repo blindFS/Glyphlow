@@ -1,3 +1,4 @@
+use super::SHADOW_OPACITY;
 use crate::{
     ScrollAction,
     config::{GlyphlowTheme, cgcolor_to_rgba},
@@ -170,6 +171,10 @@ struct Menu {
 const BORDER_WIDTH: f64 = 2.0;
 const MIN_FONT_SIZE: f64 = 10.0;
 const SEARCH_BAR_WIDTH: usize = 10;
+/// The menu's share of the shadow: it widens the spread and drops the offset, but
+/// keeps the opacity every other overlay uses.
+const MENU_SHADOW_RADIUS: f64 = 12.0;
+const MENU_SHADOW_OFFSET_Y: f64 = -6.0;
 /// Kept off the text layer's width so its widest line never sits exactly on the
 /// wrap boundary, where CoreText's own rounding can break the line.
 const TEXT_WIDTH_SLACK: f64 = 1.0;
@@ -183,6 +188,9 @@ impl Menu {
 
             let container = CALayer::new();
             container.setBorderWidth(BORDER_WIDTH);
+            container.setShadowOpacity(SHADOW_OPACITY);
+            container.setShadowRadius(MENU_SHADOW_RADIUS);
+            container.setShadowOffset(CGSize::new(0.0, MENU_SHADOW_OFFSET_Y));
             container.addSublayer(&text_layer);
             container.setZPosition(1.0);
             // Hidden by default
@@ -215,6 +223,7 @@ impl Menu {
         self.container.setBorderColor(Some(&theme.menu_fg_color));
         self.container
             .setBackgroundColor(Some(&theme.menu_bg_color));
+        self.container.setShadowColor(Some(&theme.shadow_color));
         self.container
             .setCornerRadius(theme.menu_margin_size as f64);
         // The spans hold the colours they were painted in, so a new theme has to
