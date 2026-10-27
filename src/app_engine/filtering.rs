@@ -96,24 +96,31 @@ impl AppEngine {
         }
     }
 
-    pub(super) async fn perform_ocr_on_frame(&mut self, frame: Frame) {
+    pub(super) fn perform_ocr_on_frame(&mut self, frame: Frame) {
         self.drawer.clear_menus_instant();
         self.clear_cache();
         self.target = Target::Text;
         // NOTE: for images with parts out of sight
         let frame = frame.intersect(&self.overlay_frame).unwrap_or(frame);
-        match perform_ocr(&frame, &self.config.ocr_languages).await {
-            Ok(ocr_res) if !ocr_res.is_empty() => {
+        let languages = self.config.ocr_languages.clone();
+        match perform_ocr(&frame, languages) {
+            Ok(Some(ocr_res)) if !ocr_res.is_empty() => {
                 self.ocr_cache = Some(ocr_res);
                 self.hint_prefix.clear();
                 self.set_mode(Mode::OCRResultFiltering);
                 self.build_ocr_hints();
             }
+            Ok(Some(_)) => {
+                self.notify_then_deactivate("Empty OCR result.", Level::Warn);
+            }
+            Ok(None) => {
+                self.notify_then_deactivate(
+                    "Compiling OCR models for the first time,\ntry again in a few seconds.",
+                    Level::Warn,
+                );
+            }
             Err(e) => {
                 self.notify_then_deactivate(&format!("OCR failed: {e:?}"), Level::Error);
-            }
-            _ => {
-                self.notify_then_deactivate("Empty OCR result.", Level::Warn);
             }
         }
     }
@@ -149,7 +156,7 @@ impl AppEngine {
                     self.select(eoi.clone());
                     self.execute_pending_workflow_actions();
                 }
-                Target::ImageOCR => self.perform_ocr_on_frame(*frame).await,
+                Target::ImageOCR => self.perform_ocr_on_frame(*frame),
                 Target::Text => {
                     if self.multi_selection.is_on {
                         if let Some((idx1, idx2)) = self.multi_selection.set_one_side(*idx) {
