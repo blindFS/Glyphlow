@@ -1,14 +1,11 @@
 use std::{
-    sync::mpsc::{RecvTimeoutError, channel},
+    sync::mpsc::{Receiver, RecvTimeoutError, channel},
     thread,
     time::{Duration, Instant},
 };
 
 use block2::RcBlock;
-use core_foundation::{
-    base::Boolean,
-    runloop::{CFRunLoopRunInMode, kCFRunLoopDefaultMode},
-};
+use core_foundation::runloop::{CFRunLoopRunInMode, kCFRunLoopDefaultMode};
 use objc2::{
     AnyThread,
     rc::{DefaultRetained, Retained, autoreleasepool},
@@ -30,6 +27,35 @@ const CAPTURE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How long OCR may run before it is abandoned.
 const OCR_TIMEOUT: Duration = Duration::from_millis(1500);
+
+/// Poll interval for a wait that pumps the run loop.
+const POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+/// Wait for `rx`, pumping the run loop so main-thread work still runs.
+///
+/// `Timeout` means `timeout` elapsed, `Disconnected` that the sender went away
+/// without sending.
+fn recv_pumping<T>(rx: &Receiver<T>, timeout: Duration) -> Result<T, RecvTimeoutError> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match rx.recv_timeout(POLL_INTERVAL) {
+            Ok(value) => return Ok(value),
+            Err(RecvTimeoutError::Timeout) => {
+                if Instant::now() >= deadline {
+                    return Err(RecvTimeoutError::Timeout);
+                }
+                unsafe {
+                    CFRunLoopRunInMode(
+                        kCFRunLoopDefaultMode,
+                        POLL_INTERVAL.as_secs_f64(),
+                        false.into(),
+                    );
+                }
+            }
+            Err(RecvTimeoutError::Disconnected) => return Err(RecvTimeoutError::Disconnected),
+        }
+    }
+}
 
 /// Screenshot the screen region `rect`.
 ///
@@ -62,20 +88,10 @@ fn capture_rect(rect: CGRect) -> Result<Retained<CGImage>, String> {
         )
     };
 
-    let deadline = Instant::now() + CAPTURE_TIMEOUT;
-    loop {
-        match rx.recv_timeout(Duration::from_millis(10)) {
-            Ok(result) => return result,
-            Err(RecvTimeoutError::Timeout) => {
-                if Instant::now() >= deadline {
-                    return Err("Timed out waiting for the capture.".to_string());
-                }
-                unsafe {
-                    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, Boolean::from(false));
-                }
-            }
-            Err(RecvTimeoutError::Disconnected) => return Err("Channel closed.".to_string()),
-        }
+    match recv_pumping(&rx, CAPTURE_TIMEOUT) {
+        Ok(result) => result,
+        Err(RecvTimeoutError::Timeout) => Err("Timed out waiting for the capture.".to_string()),
+        Err(RecvTimeoutError::Disconnected) => Err("Channel closed.".to_string()),
     }
 }
 
@@ -131,20 +147,10 @@ pub(crate) fn perform_ocr(
         let _ = tx.send(recognize(cg_image, frame, &languages));
     });
 
-    let deadline = Instant::now() + OCR_TIMEOUT;
-    loop {
-        match rx.recv_timeout(Duration::from_millis(10)) {
-            Ok(result) => return result.map(Some).map_err(Into::into),
-            Err(RecvTimeoutError::Timeout) => {
-                if Instant::now() >= deadline {
-                    return Ok(None);
-                }
-                unsafe {
-                    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, Boolean::from(false));
-                }
-            }
-            Err(RecvTimeoutError::Disconnected) => return Err("OCR thread died.".into()),
-        }
+    match recv_pumping(&rx, OCR_TIMEOUT) {
+        Ok(result) => result.map(Some).map_err(Into::into),
+        Err(RecvTimeoutError::Timeout) => Ok(None),
+        Err(RecvTimeoutError::Disconnected) => Err("OCR thread died.".into()),
     }
 }
 

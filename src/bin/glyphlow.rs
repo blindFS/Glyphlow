@@ -183,7 +183,7 @@ async fn main() {
             _ = tokio::time::sleep(Duration::from_millis(50)) => {
                 // NOTE: necessary for up-to-date get_focused_pid and UI drawing
                 unsafe {
-                    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, Boolean::from(false));
+                    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, Boolean::from(false));
                 }
             }
         }
