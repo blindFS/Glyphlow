@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<!-- Social preview source. Render at 2x: --force-device-scale-factor=2 --window-size=1280,640 -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1280px; height: 640px; overflow: hidden; }
+
+  body {
+    font-family: -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif;
+    background:
+      radial-gradient(900px 640px at 88% -10%, rgba(44,179,237,0.16), transparent 60%),
+      linear-gradient(150deg, #091124 0%, #0c1a36 56%, #0a1526 100%);
+    position: relative;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------- background ---------- */
+  .glow-blue {
+    position: absolute; inset: 0;
+    background: radial-gradient(780px 700px at 70% 50%, rgba(44,179,237,0.20), transparent 64%);
+  }
+  .glow-peri {
+    position: absolute; inset: 0;
+    background: radial-gradient(680px 560px at 2% 100%, rgba(118,159,240,0.15), transparent 66%);
+  }
+  .grid {
+    position: absolute; inset: 0;
+    background-image: radial-gradient(rgba(118,159,240,0.14) 1px, transparent 1px);
+    background-size: 30px 30px;
+    -webkit-mask-image: radial-gradient(940px 700px at 50% 46%, #000 18%, transparent 78%);
+            mask-image: radial-gradient(940px 700px at 50% 46%, #000 18%, transparent 78%);
+  }
+  .vignette {
+    position: absolute; inset: 0;
+    background: radial-gradient(1120px 800px at 50% 46%, transparent 44%, rgba(4,7,14,0.8) 100%);
+  }
+
+  /* ---------- left column ---------- */
+  .left {
+    position: absolute; left: 120px; top: 0; width: 380px; height: 640px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; z-index: 2;
+  }
+
+  .tile {
+    width: 224px; height: 224px; border-radius: 56px; flex: none;
+    background: #0d1a2e;
+    border: 1px solid rgba(44,179,237,0.30);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow:
+      0 30px 60px rgba(0,0,0,0.55),
+      0 0 70px rgba(44,179,237,0.24),
+      inset 0 2px 0 rgba(255,255,255,0.07);
+  }
+  .tile svg { width: 158px; height: 158px; display: block; }
+
+  h1 {
+    margin-top: 24px;
+    font-size: 84px; font-weight: 600; letter-spacing: -0.037em;
+    color: #f3f7ff; line-height: 1;
+  }
+
+  .tagline {
+    margin-top: 18px;
+    font-size: 26px; line-height: 1.42; font-weight: 400;
+    color: #a2afcb; letter-spacing: -0.004em;
+  }
+
+  .meta {
+    margin-top: 20px; display: flex; align-items: center; gap: 10px;
+    font-family: "SF Mono", "Andale Mono", Menlo, monospace;
+    font-size: 15px; letter-spacing: 0.02em; color: #8593b2; white-space: nowrap; white-space: nowrap;
+  }
+  .meta::before {
+    content: ""; width: 5px; height: 5px; border-radius: 50%; flex: none;
+    background: #2cb3ed; box-shadow: 0 0 9px rgba(44,179,237,0.9);
+  }
+  .meta .hi { color: #2cb3ed; }
+
+  /* ---------- screenshots ---------- */
+  .shot {
+    position: absolute; top: 85px; z-index: 2;
+    border-radius: 9px; overflow: hidden;
+    box-shadow:
+      0 0 0 1px rgba(196,208,235,0.52),
+      0 30px 58px rgba(0,0,0,0.62),
+      0 0 42px rgba(44,179,237,0.20);
+  }
+  .shot img { display: block; width: calc(100% + 4px); margin: -2px; }
+  .shot-a { left: 592px; width: 268px; }
+  .shot-b { left: 912px; width: 247px; }
+</style>
+</head>
+<body>
+  <div class="glow-blue"></div>
+  <div class="glow-peri"></div>
+  <div class="grid"></div>
+  <div class="vignette"></div>
+
+  <div class="left">
+    <div class="tile">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500">
+        <path d="M 271,102 L 135,102 A 37,37 0 0 0 98,139 L 98,369 A 37,37 0 0 0 135,406 L 365,406 A 37,37 0 0 0 383.5,387.5 L 250,254"
+              fill="none" stroke="#2cb3ed" stroke-width="45" stroke-linecap="butt" stroke-linejoin="round"/>
+        <rect x="290" y="80" width="45" height="45" rx="9" fill="none" stroke="#2cb3ed" stroke-width="7"/>
+        <rect x="355" y="80" width="45" height="45" rx="9" fill="none" stroke="#2cb3ed" stroke-width="7"/>
+        <rect x="355" y="145" width="45" height="45" rx="9" fill="none" stroke="#2cb3ed" stroke-width="7"/>
+        <path d="M 195,200 L 315,254 L 250,319" fill="#2cb3ed" stroke="#2cb3ed" stroke-width="2" stroke-linejoin="round"/>
+        <path d="M 200,204 L 250,254 L 310,254 M 250,254 L 250,314" fill="none" stroke="#0d1a2e" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M 200,204 L 250,254 L 310,254 M 250,254 L 250,314" fill="none" stroke="#2cb3ed" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+
+    <h1>Glyphlow</h1>
+
+    <div class="tagline">
+      Select text in any app.<br/>
+      Act on it without the mouse.
+    </div>
+
+    <div class="meta">
+      <span><span class="hi">customizable</span> keys, themes &amp; workflows</span>
+    </div>
+  </div>
+
+  <div class="shot shot-a">
+    <img src="recordings/menu.png" alt="Glyphlow target menu" />
+  </div>
+  <div class="shot shot-b">
+    <img src="recordings/hints.png" alt="Glyphlow hints over a settings sidebar" />
+  </div>
+</body>
+</html>
