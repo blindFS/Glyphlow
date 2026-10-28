@@ -205,10 +205,10 @@ impl AppEngine {
     }
 
     /// Draw the dashboard, refreshing the focused window first: the workflows it
-    /// offers are filtered by app.
+    /// offers are filtered by app, and its frame is drawn under the menu.
     pub(super) fn draw_dashboard(&mut self) {
         if self.selected.is_none() {
-            self.get_app_window_info();
+            self.refresh_front_window();
         }
         self.show_menu(MenuScope::Dashboard, "");
     }

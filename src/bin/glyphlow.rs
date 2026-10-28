@@ -173,7 +173,7 @@ async fn main() {
                 // when the window was actually resolved, otherwise the info
                 // is the sentinel default (the system-wide element) and a
                 // generic workflow would act on the middle of the screen.
-                if app_engine.get_app_window_info() {
+                if app_engine.refresh_front_window() {
                     app_engine.select_focused_window();
                 }
                 app_engine.handle_signal(signal).await;

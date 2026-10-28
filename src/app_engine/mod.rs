@@ -313,6 +313,7 @@ impl AppEngine {
                     self.draw_dashboard();
                 } else {
                     // Refresh the hints
+                    self.refresh_front_window();
                     self.activate(self.target.clone());
                 }
             }
