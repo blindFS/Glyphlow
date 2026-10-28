@@ -104,9 +104,6 @@ impl AppEngine {
     /// `last_app_window_info` untouched — possibly still the sentinel default,
     /// whose window is the *system-wide* element. Callers deriving a selection
     /// from it must check this.
-    ///
-    /// Called once per interaction — by the CLI loop, the dashboard and the
-    /// workflow steps that read the window — so [`Self::activate`] needs none.
     pub fn refresh_front_window(&mut self) -> bool {
         let Some(app_win_info) = get_focused_window(
             self.overlay_frame,
@@ -169,9 +166,6 @@ impl AppEngine {
 
     /// Start a traversal for `target` and hand back the channel its results
     /// arrive on.
-    ///
-    /// A custom target searches the whole app; everything else searches the
-    /// focused window, or the picked element when there is one.
     pub(super) fn ui_element_traverse_on_activation(
         &mut self,
         target: Target,
@@ -185,11 +179,9 @@ impl AppEngine {
 
         let window = self.last_app_window_info.window.clone();
         let window_frame = self.last_app_window_info.frame;
-        // A search can find its subject outside the focused window — the menu
-        // `ShowMenu` opens is a window of its own — so it starts at the app and
-        // keeps invisible candidates too.
+        // The menu `ShowMenu` opens is a window of its own.
         let app_wide = matches!(target, Target::Custom(_));
-        let (scope_root, bounds, vis_level) = if app_wide {
+        let (scope_root, vis_frame, vis_level) = if app_wide {
             let app = window.parent().unwrap_or(window);
             (app, self.overlay_frame, VisibilityCheckingLevel::Loosest)
         } else {
@@ -218,7 +210,7 @@ impl AppEngine {
             traverse(
                 safe_root,
                 parent_frame,
-                bounds,
+                vis_frame,
                 target,
                 vis_level,
                 &result_tx,
