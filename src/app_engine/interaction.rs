@@ -61,7 +61,6 @@ impl AppEngine {
         self.move_mouse_with_trail(x, y);
 
         if self.config.theme.enable_animation {
-            // Choose ripple color according to button type
             let frame_colors = &self.config.theme.frame_colors;
             let default_color = &self.config.theme.hint_bg_color;
             let color_idx = match button {
@@ -156,24 +155,24 @@ impl AppEngine {
         };
     }
 
-    /// Select the parent of the currently selected element.
     pub(super) fn select_parent(&mut self) -> bool {
-        if let Some(parent_element) = self
+        let Some(parent) = self
             .selected
             .as_ref()
             .and_then(|eoi| eoi.element())
             .and_then(|ele| ele.parent().ok())
-        {
-            let frame = parent_element.get_frame(self.overlay_frame);
-            self.select(ElementOfInterest::new(
-                parent_element,
-                None,
-                RoleOfInterest::Generic,
-                frame,
-            ));
-            return true;
-        }
-        false
+        else {
+            return false;
+        };
+
+        let frame = parent.get_frame(self.overlay_frame);
+        self.select(ElementOfInterest::new(
+            parent,
+            None,
+            RoleOfInterest::Generic,
+            frame,
+        ));
+        true
     }
 
     /// Run a text action, keeping the drawing when the action just built
@@ -386,7 +385,6 @@ impl AppEngine {
             && let Err(e) = ele.set_value(CFString::new(&new_text).as_CFType())
         {
             log::warn!("Failed to set the text of focused element: {ele:?}\n Error: {e}");
-            // Reset editing upon failure
             self.editing = None;
         }
     }
@@ -401,7 +399,6 @@ impl AppEngine {
             .as_ref()
             .expect("Internal Error: No editor set.");
 
-        // Write current selected text to temp file
         let _ = std::fs::write(&self.temp_file, text);
         let temp_fp = self
             .temp_file
@@ -456,7 +453,6 @@ impl AppEngine {
             return;
         };
 
-        // Wait for the stdout as the new text
         match child.wait_with_output() {
             Ok(o) => {
                 if !o.stdout.is_empty() {

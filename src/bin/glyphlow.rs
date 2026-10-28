@@ -63,10 +63,8 @@ async fn main() {
     let key_listener = KeyListener::new(tx.clone(), &config);
 
     let state = Arc::new(Mutex::new(Mode::Idle));
-    // Key state for tracking pressed keys and simulating state
     let key_state = Arc::new(Mutex::new(KeyState::default()));
 
-    // Listen to temp file updates
     let cache_file = cache_file_path("tempfile.md", true).expect("Failed to create temp file.");
     let (ftx, mut frx) = mpsc::channel::<PathBuf>(100);
     // NOTE: listen to file updates with FsEvent
@@ -137,7 +135,6 @@ async fn main() {
         });
     });
 
-    // Socket file for IPC
     let socket_file =
         cache_file_path(ipc::SOCKET_FILE_NAME, false).expect("Failed to create socket file.");
     let listener = UnixListener::bind(socket_file).expect("Failed to bind socket.");

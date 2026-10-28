@@ -155,7 +155,6 @@ pub struct AppEngine {
     pub(super) hint_prefix: String,
     /// The keys typed into the menu that is up, in order.
     pub(super) menu_prefix: String,
-    // Search related
     pub(super) is_searching: bool,
     pub(super) search_prefix: String,
     pub(super) search_targets: Vec<String>,
@@ -308,11 +307,9 @@ impl AppEngine {
             }
             AppSignal::ActOnEnter => {
                 if self.target == Target::ChildElement {
-                    // To act on selected parent node
                     self.clear_cache();
                     self.draw_dashboard();
                 } else {
-                    // Refresh the hints
                     self.refresh_front_window();
                     self.activate(self.target.clone());
                 }

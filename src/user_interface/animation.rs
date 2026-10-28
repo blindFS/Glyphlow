@@ -40,14 +40,12 @@ impl UIDrawer {
 
             let ripple_layer = CAShapeLayer::new();
 
-            // Position the layer at the click location and define bounds centered at (0, 0)
             ripple_layer.setPosition(calibrated_origin(x, y, &self.overlay_frame));
             ripple_layer.setBounds(CGRect::new(
                 CGPoint::new(-initial_radius, -initial_radius),
                 CGSize::new(initial_radius * 2.0, initial_radius * 2.0),
             ));
 
-            // Create a circular path centered at (0, 0) inside the layer's local space
             let circle_bounds = CGRect::new(
                 CGPoint::new(-initial_radius, -initial_radius),
                 CGSize::new(initial_radius * 2.0, initial_radius * 2.0),
@@ -59,7 +57,6 @@ impl UIDrawer {
             ripple_layer.setFillColor(Some(color));
             ripple_layer.setOpacity(0.0); // Set model opacity to 0.0 (final state) to prevent flicker
 
-            // Ensure the layer scales from its center point
             ripple_layer.setAnchorPoint(CGPoint::new(0.5, 0.5));
 
             self.root.addSublayer(&ripple_layer);
@@ -67,21 +64,17 @@ impl UIDrawer {
             unsafe {
                 CATransaction::begin();
 
-                // Remove the layer after the animation finishes
                 remove_after_animation(ripple_layer.clone());
 
-                // Create the Scale Animation (Expanding)
                 let scale_anim =
                     CABasicAnimation::animationWithKeyPath(Some(ns_string!("transform.scale")));
                 scale_anim.setFromValue(Some(&NSNumber::new_f64(1.0)));
                 scale_anim.setToValue(Some(&NSNumber::new_f64(RIPPLE_SCALE_FACTOR))); // Grows 6x the initial radius
 
-                // Create the Opacity Animation (Fading Out)
                 let fade_anim = CABasicAnimation::animationWithKeyPath(Some(ns_string!("opacity")));
                 fade_anim.setFromValue(Some(&NSNumber::new_f64(1.0)));
                 fade_anim.setToValue(Some(&NSNumber::new_f64(0.0)));
 
-                // Group the animations together
                 let anim_group = CAAnimationGroup::animation();
                 let scale_anim: Retained<CAAnimation> = Retained::cast_unchecked(scale_anim);
                 let fade_anim: Retained<CAAnimation> = Retained::cast_unchecked(fade_anim);
@@ -90,7 +83,6 @@ impl UIDrawer {
                 anim_group.setAnimations(Some(&animations));
                 anim_group.setDuration(RIPPLE_DURATION);
 
-                // Smooth out the animation speed curve
                 let timing_function =
                     CAMediaTimingFunction::functionWithName(kCAMediaTimingFunctionEaseOut);
                 anim_group.setTimingFunction(Some(&timing_function));
@@ -98,7 +90,6 @@ impl UIDrawer {
                 // Tells Core Animation to automatically delete the animation once it finishes
                 anim_group.setRemovedOnCompletion(true);
 
-                // Bind animation to layer and add layer to window/view hierarchy
                 // The key "ripple" can be anything unique
                 ripple_layer.addAnimation_forKey(&anim_group, Some(ns_string!("ripple")));
 
@@ -124,7 +115,6 @@ impl UIDrawer {
             y: start_y,
         } = calibrated_origin(start_x, start_y, &self.overlay_frame);
         let CGPoint { x: end_x, y: end_y } = calibrated_origin(end_x, end_y, &self.overlay_frame);
-        // Skip if start and end are the same (no movement)
         if (start_x - end_x).abs() < 1.0 && (start_y - end_y).abs() < 1.0 {
             return;
         }
@@ -134,7 +124,6 @@ impl UIDrawer {
             let cx = end_x + CURSOR_OFFSET_X;
             let cy = end_y - CURSOR_OFFSET_Y;
 
-            // Calculate bounding box for the triangle
             let min_x = start_x.min(end_x).min(cx);
             let max_x = start_x.max(end_x).max(cx);
             let min_y = start_y.min(end_y).min(cy);
@@ -178,14 +167,12 @@ impl UIDrawer {
 
             self.root.addSublayer(&trail_layer);
 
-            // Create a gradient mask to achieve spatial fade
             let mask_layer = CAGradientLayer::new();
             mask_layer.setFrame(CGRect::new(
                 CGPoint::new(0.0, 0.0),
                 CGSize::new(width, height),
             ));
 
-            // Gradient from start point to end point
             mask_layer.setStartPoint(CGPoint::new(
                 (start_x - min_x) / width,
                 (start_y - min_y) / height,
@@ -196,7 +183,6 @@ impl UIDrawer {
             ));
 
             unsafe {
-                // Set colors for the mask (transparent to opaque)
                 let clear_color = CGColor::new_generic_rgb(1.0, 1.0, 1.0, 0.0);
                 let opaque_color = CGColor::new_generic_rgb(1.0, 1.0, 1.0, 1.0);
 

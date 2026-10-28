@@ -1158,7 +1158,7 @@ mod key_combo_format {
     use super::*;
     use serde::{Deserializer, Serializer};
 
-    /// --- Serialization: `Vec<Key>` -> e.g. "ALT + G" ---
+    // --- Serialization: `Vec<Key>` -> e.g. "ALT + G" ---
     pub fn serialize<S>(keys: &[Key], serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -1221,7 +1221,7 @@ mod nsfont_format {
     use super::*;
     use serde::{Deserializer, Serializer};
 
-    /// --- Serialization: NSFont -> e.g. "Helvetica:15" ---
+    // --- Serialization: NSFont -> e.g. "Helvetica:15" ---
     pub fn serialize<S>(font: &Retained<NSFont>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -1294,11 +1294,9 @@ mod tests {
             keys: vec![Key::ControlLeft, Key::ShiftLeft, Key::KeyZ],
         };
 
-        // Test Serialization
         let toml_str = toml::to_string(&binding).unwrap();
         assert_eq!(toml_str, "keys = \"CTRL + SHIFT + Z\"\n");
 
-        // Test Deserialization
         let decoded: KeyBinding = toml::from_str(&toml_str).unwrap();
         assert_eq!(
             decoded.keys,
@@ -1445,7 +1443,6 @@ mod tests {
 
     #[test]
     fn test_config_partial_deserialize() {
-        // Test that missing fields fill in with @serde(default)
         let toml_input = r#"
             [theme]
             hint_margin_size = 5
@@ -1456,14 +1453,12 @@ mod tests {
 
         let config: GlyphlowConfig = toml::from_str(toml_input).unwrap();
 
-        // Check explicit values
         assert_eq!(config.theme.hint_margin_size, 5);
         assert_eq!(
             config.global_trigger_key.keys,
             vec![Key::MetaLeft, Key::KeyP]
         );
 
-        // Check defaulted values
         assert!(config.theme.enable_animation);
         assert_eq!(config.scroll_distance, 0.05);
         assert_eq!(config.ocr_languages, vec!["en-US".to_string()]);

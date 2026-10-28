@@ -45,7 +45,6 @@ impl AppEngine {
         }
     }
 
-    /// Set the selected element and draw its frame box.
     pub(super) fn select(&mut self, eoi: ElementOfInterest) {
         self.drawer.draw_frame(&eoi.frame);
         self.selected = Some(eoi);

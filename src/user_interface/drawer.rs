@@ -193,7 +193,6 @@ impl Menu {
             container.setShadowOffset(CGSize::new(0.0, MENU_SHADOW_OFFSET_Y));
             container.addSublayer(&text_layer);
             container.setZPosition(1.0);
-            // Hidden by default
             container.setHidden(true);
 
             // Init mutable attributed string, need a dummy place holder to keep attributes
@@ -456,10 +455,8 @@ impl UIDrawer {
         selected_frame.setBorderWidth(BORDER_WIDTH);
         selected_frame.setBorderColor(Some(&theme.hint_bg_color));
         selected_frame.setZPosition(-1.0);
-        // Hide on init
         selected_frame.setHidden(true);
 
-        // Initialized to middle point on screen
         let current_screen_frame = screen_frames.first().cloned().unwrap_or_default();
         let (x, y) = current_screen_frame.center();
         let middle = calibrated_origin(x, y, &overlay_frame);
@@ -467,7 +464,6 @@ impl UIDrawer {
         menu.container.setFrame(middle_rect);
         selected_frame.setFrame(middle_rect);
 
-        // Search bar initialized as fixed width
         let dummy_text = format!("/{}", "_".repeat(SEARCH_BAR_WIDTH));
         search_bar.draw(
             &MenuString::from(dummy_text.as_str()),
@@ -524,7 +520,6 @@ impl UIDrawer {
         let msg = format!("/{}", format_fixed_width(prefix, SEARCH_BAR_WIDTH));
         autoreleasepool(|_| {
             if init {
-                // Disable movement animations
                 without_animations! {
                     self.reposition_search_bar();
                 }
@@ -735,7 +730,6 @@ fn create_overlay_window(mtm: MainThreadMarker) -> Retained<NSWindow> {
         )
         .to_cgrect();
 
-        // Use NSBackingStoreType::Buffered (the modern enum path)
         let window = NSWindow::initWithContentRect_styleMask_backing_defer(
             NSWindow::alloc(mtm),
             frame,
@@ -749,7 +743,6 @@ fn create_overlay_window(mtm: MainThreadMarker) -> Retained<NSWindow> {
         window.setIgnoresMouseEvents(true);
         window.setHasShadow(false);
 
-        // Front most
         window.setLevel(i32::MAX as isize);
         // To work across different macOS native workspaces
         window.setCollectionBehavior(

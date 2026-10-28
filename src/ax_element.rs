@@ -76,7 +76,6 @@ fn copy_attribute_values(
 }
 
 pub enum ElementSignal {
-    // Traversal
     ElementFound(Option<ElementOfInterest>),
     TraversalFinished(Target),
 }
@@ -376,7 +375,6 @@ impl ElementOfInterest {
                 if other == this {
                     return true;
                 }
-                // Early stop
                 if other.get_frame(zero_frame).contains(&self.frame) {
                     return false;
                 }
@@ -989,7 +987,6 @@ fn traverse_elements(
         return;
     }
 
-    // If invisible, return early
     // NOTE: `parent_frame` should be monotonically decreasing,
     // and always included in `window_frame`
     let new_frame = match vis_level {
@@ -999,7 +996,6 @@ fn traverse_elements(
             };
             new_frame
         }
-        // Check intersection with parent frame
         _ => {
             let Some(new_frame) = ele_fp.visible_frame(parent_frame) else {
                 return;
@@ -1015,7 +1011,6 @@ fn traverse_elements(
         }
     };
 
-    // Try matching custom target first
     if let Target::Custom(ct) = target
         && ele_fp.match_custom_target(ct)
         && element.match_custom_target(ct)

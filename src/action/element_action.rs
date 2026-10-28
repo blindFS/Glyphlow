@@ -116,7 +116,6 @@ pub(crate) fn screen_shot(frame: &Frame) -> bool {
         };
 
         let pb = NSPasteboard::generalPasteboard();
-        // Clear the clipboard before writing
         pb.clearContents();
         pb.setData_forType(
             jpeg_data.as_deref(),

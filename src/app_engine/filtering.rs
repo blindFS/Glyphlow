@@ -129,7 +129,6 @@ impl AppEngine {
     async fn filter_by_key(&mut self) {
         let filtered_indices = self.update_hints();
 
-        // Only 1 remaining, take some actions
         if let Some(hb_idx) = self.sole_hint(&filtered_indices)
             && let Some(HintBox { idx, .. }) = self.hint_boxes.get(hb_idx)
             && let Some(eoi) = self.element_cache.cache.get(*idx)
@@ -199,7 +198,6 @@ impl AppEngine {
                         self.activate(Target::ChildElement);
                     }
 
-                    // Actions for current selected element
                     if self.element_cache.cache.is_empty() {
                         let role = self
                             .selected
@@ -398,7 +396,6 @@ impl AppEngine {
                         .expect("Internal Error: wrong word picker indexing.");
                     new_text = Some(text)
                 } else {
-                    // Reset for another side
                     self.hint_prefix.clear();
                     self.search_prefix.clear();
                     self.draw_word_picker();

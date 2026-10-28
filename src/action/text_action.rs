@@ -50,7 +50,6 @@ pub(crate) fn get_dictionary_attributed_string(
             }
             let dicts: CFSet<DCSDictionaryRef> = CFSet::wrap_under_create_rule(dicts_set_ref);
 
-            // Allocate a buffer to hold the pointers
             let count = CFSetGetCount(dicts.as_concrete_TypeRef());
             let mut values: Vec<*const c_void> = vec![std::ptr::null(); count as usize];
             CFSetGetValues(dicts.as_concrete_TypeRef(), values.as_mut_ptr());
@@ -64,7 +63,6 @@ pub(crate) fn get_dictionary_attributed_string(
                 }
                 let dict_ptr = dict_ptr as DCSDictionaryRef;
 
-                // Get dictionary name
                 let name_ref = DCSDictionaryGetName(dict_ptr);
                 if name_ref.is_null() {
                     continue;
@@ -92,7 +90,6 @@ pub(crate) fn get_dictionary_attributed_string(
                     continue;
                 }
 
-                // Get the first entry
                 let record: CFArray<AnyObject> = CFArray::wrap_under_create_rule(records_ptr);
                 let count = CFArrayGetCount(record.as_concrete_TypeRef());
                 if count == 0 {
@@ -108,8 +105,6 @@ pub(crate) fn get_dictionary_attributed_string(
                 let html_ptr = DCSRecordCopyData(first_record, 2);
                 if !html_ptr.is_null() {
                     let html = CFString::wrap_under_create_rule(html_ptr);
-                    // println!("{html:?}");
-
                     if let Some(attr_string) = html_to_attributed_string(&html.to_string(), None) {
                         let full_range = NSRange::new(0, attr_string.length());
                         attr_string.addAttribute_value_range(

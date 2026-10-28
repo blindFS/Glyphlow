@@ -163,7 +163,6 @@ impl HintBox {
     ) {
         let bg_color = self.color.as_ref().unwrap_or(&theme.hint_bg_color);
 
-        // Frame Layer
         if let Some(fl) = &self.frame_layer {
             let x = self.frame.top_left.x;
             let y = self.frame.bottom_right.y;
@@ -178,7 +177,6 @@ impl HintBox {
             }
         }
 
-        // Text & Box Layer
         self.box_layer.setBackgroundColor(Some(bg_color));
         self.box_layer
             .setCornerRadius(theme.hint_margin_size as f64);
@@ -279,7 +277,6 @@ impl HintBox {
         }
     }
 
-    /// Undo disabling
     pub fn restore(&mut self) {
         if self.disabled {
             self.disabled = false;
@@ -366,7 +363,6 @@ pub const MAX_COLLISION_OPS: usize = 150;
 /// The thresholds are estimated from the font rather than measured, because this
 /// also runs before the boxes are laid out.
 pub fn resolve_collisions(boxes: &mut Vec<HintBox>, digits: u32, theme: &GlyphlowTheme) {
-    // Estimate box size
     let x_thres =
         theme.hint_font.pointSize() * digits as f64 * 0.8 + 2.0 * theme.hint_margin_size as f64;
     let y_thres = theme.hint_font.pointSize() * 1.5 + 2.0 * theme.hint_margin_size as f64;
@@ -406,7 +402,6 @@ fn resolve_collisions_reactive(boxes: &mut [HintBox], x_thres: f64, y_thres: f64
     let mut queue = VecDeque::with_capacity(boxes.len());
     let mut in_queue = vec![true; boxes.len()];
 
-    // Initial setup
     for (i, hb) in boxes.iter().enumerate() {
         if hb.disabled {
             continue;
@@ -432,7 +427,6 @@ fn resolve_collisions_reactive(boxes: &mut [HintBox], x_thres: f64, y_thres: f64
 
         let (cx, cy) = cell_coords[i];
 
-        // Check 9 neighboring cells
         'outer: for dx in -1..=1 {
             for dy in -1..=1 {
                 let target_cell = (cx + dx, cy + dy);
@@ -451,7 +445,6 @@ fn resolve_collisions_reactive(boxes: &mut [HintBox], x_thres: f64, y_thres: f64
                     let abs_dy = diff_y.abs();
 
                     if abs_dx < x_thres && abs_dy < y_thres {
-                        // Collision found! Resolve it.
                         let (shift_x, shift_y) = (x_thres - abs_dx, y_thres - abs_dy);
 
                         // Move in a less crowded direction
@@ -476,7 +469,6 @@ fn resolve_collisions_reactive(boxes: &mut [HintBox], x_thres: f64, y_thres: f64
                             boxes[j].delta.1 -= move_dist;
                         }
 
-                        // Update grid positions and mark both as dirty
                         update_and_requeue(
                             i,
                             boxes,

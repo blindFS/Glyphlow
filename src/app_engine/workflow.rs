@@ -98,7 +98,6 @@ impl AppEngine {
             }
         };
 
-        // Actions don't need a selected element
         match act {
             WorkFlowAction::Repeat(n, actions) => {
                 for round in 0..*n {
@@ -146,7 +145,6 @@ impl AppEngine {
                     self.clear_hints();
                     self.select(self.element_cache.cache[0].clone());
                 } else {
-                    // Stop on empty result/multiple results
                     return true;
                 }
                 return false;
@@ -194,7 +192,6 @@ impl AppEngine {
             _ => (),
         }
 
-        // Actions that require a selected element
         let Some(selected) = self.selected.as_ref() else {
             self.notify_then_deactivate(
                 &format!("Running a workflow action with no element selected. {act:?}"),
@@ -224,7 +221,6 @@ impl AppEngine {
             _ => (),
         }
 
-        // Actions that require an AX element
         let Some(element) = selected.element() else {
             self.notify_then_deactivate(
                 &format!("Running a workflow action with no accessibility element. {act:?}"),
