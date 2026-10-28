@@ -208,6 +208,7 @@ impl AppEngine {
         let (root, parent_frame) = self
             .selected
             .as_ref()
+            .filter(|_| !app_wide)
             .and_then(|sel| sel.element().map(|e| (e.clone(), sel.frame)))
             .unwrap_or((scope_root, window_frame));
 

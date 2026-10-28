@@ -87,12 +87,11 @@ pub enum WorkFlowAction {
 }
 
 impl WorkFlowAction {
-    /// Whether this works on the focused window rather than on the picked
-    /// element, so the window has to be looked up again before it runs.
+    /// Whether this works on the focused window rather than on the picked element
     pub(crate) fn reads_front_window(&self) -> bool {
         matches!(
             self,
-            Self::Activate(_) | Self::SearchFor(_) | Self::GridMove | Self::ScreenShot
+            Self::Activate(_) | Self::SearchFor(_) | Self::GridMove | Self::GlyphlowMenu
         )
     }
 }
