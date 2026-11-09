@@ -510,6 +510,7 @@ impl UIDrawer {
     pub fn draw_menu(&self, msg: &MenuString, theme: &GlyphlowTheme) {
         self.menu
             .draw(msg, &self.current_screen_frame, &self.overlay_frame, theme);
+        self.reposition_notifications();
     }
 
     pub fn hide_search_bar(&self) {
@@ -560,6 +561,36 @@ impl UIDrawer {
             .setFrame(NSRect::new(origin, search_frame.size));
     }
 
+    /// Keep notifications below the main menu, or inside it sharing its bottom
+    /// edge when the screen leaves no room below.
+    fn reposition_notifications(&self) {
+        if self.menu.container.isHidden() || self.notifications.is_empty() {
+            return;
+        }
+
+        let menu_bottom = self.menu.container.frame().origin.y;
+        let screen_bottom = flip_y(
+            self.current_screen_frame.bottom_right.y,
+            &self.overlay_frame,
+        );
+        // A menu taller than the screen has no on-screen bottom edge to share.
+        let bottom_edge = menu_bottom.max(screen_bottom);
+
+        for (_, notification) in &self.notifications {
+            let frame = notification.container.frame();
+            let below = bottom_edge - frame.size.height;
+            let y = if below >= screen_bottom {
+                below
+            } else {
+                bottom_edge
+            };
+            // `resize_and_show` already clamped x to the screen.
+            notification
+                .container
+                .setFrame(NSRect::new(NSPoint::new(frame.origin.x, y), frame.size));
+        }
+    }
+
     /// Draw `attr_string` in the menu, shrinking the font if `auto_resize` is
     /// set.
     pub fn draw_attributed_string(
@@ -575,6 +606,7 @@ impl UIDrawer {
             theme,
             auto_resize,
         );
+        self.reposition_notifications();
     }
 
     pub fn draw_frame(&self, frame: &Frame) {
@@ -600,6 +632,7 @@ impl UIDrawer {
         self.root.addSublayer(&nl.container);
         nl.draw(msg, &self.current_screen_frame, &self.overlay_frame, theme);
         self.notifications.push((id, nl));
+        self.reposition_notifications();
         id
     }
 
