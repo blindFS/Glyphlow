@@ -114,7 +114,7 @@ impl AppEngine {
         };
 
         self.drawer.select_screen_frame(&app_win_info.frame);
-        self.drawer.draw_frame_instant(&app_win_info.frame);
+        self.drawer.draw_frame(&app_win_info.frame);
         // Only an app change can alter the overrides; this runs on every refresh.
         let app_changed = app_win_info.bundle_id != self.last_app_window_info.bundle_id;
         self.last_app_window_info = app_win_info;
