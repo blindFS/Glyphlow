@@ -8,6 +8,7 @@ use crate::{
     ax_element::{ElementOfInterest, GetAttribute, SetAttribute},
     config::RoleOfInterest,
     os_util::pointer_position,
+    util::text_edits,
 };
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
 use accessibility_sys::{
@@ -179,26 +180,24 @@ impl AppEngine {
     /// something deactivating would tear down — the word picker or the
     /// dictionary view.
     pub(super) fn perform_text_action(&mut self, ta: TextAction) {
-        let Some(ElementOfInterest {
-            context: Some(text),
-            ..
-        }) = self.selected.as_ref()
-        else {
-            panic!("Internal Error: No selected text in the text action menu.");
-        };
+        let text = self
+            .selected
+            .as_ref()
+            .and_then(|eoi| eoi.context.clone())
+            .expect("Internal Error: No selected text in the text action menu.");
 
         let mut keep_drawing = true;
         // TODO:
         // 1. URL handling
         match ta {
             TextAction::Copy => {
-                text_to_clipboard(text);
+                text_to_clipboard(&text);
                 self.resume_or_notify_deactivate("Copied to clipboard.");
             }
             TextAction::Dictionary => {
                 log::trace!("Looking up `{text}` in Apple Dictionary.");
                 if let Some(attr_string) = get_dictionary_attributed_string(
-                    text,
+                    &text,
                     &self.config.dictionaries,
                     &self.config.theme,
                 ) {
@@ -213,7 +212,6 @@ impl AppEngine {
                 }
             }
             TextAction::Split => {
-                let text = text.to_string();
                 self.set_mode(Mode::WordPicking);
                 self.clear_cache();
                 let (w, h) = self.drawer.current_screen_frame.size();
@@ -230,7 +228,8 @@ impl AppEngine {
                 self.word_picker = Some(word_picker);
             }
             TextAction::Editor => {
-                if let Err(e) = self.open_editor(text) {
+                self.editing = self.selected.clone();
+                if let Err(e) = self.open_editor(&text) {
                     self.notify_then_deactivate(
                         &format!("Failed to open editor: {e}"),
                         Level::Error,
@@ -240,7 +239,7 @@ impl AppEngine {
                 }
             }
             TextAction::UserDefined(idx) => {
-                self.take_external_action(idx, &text.to_string());
+                self.take_external_action(idx, &text);
             }
         };
 
@@ -379,13 +378,36 @@ impl AppEngine {
         }
     }
 
+    /// Rewrite only the changed spans: a whole-value write drops formatting.
     pub(super) fn update_editing_text(&mut self, new_text: String) {
-        if let Some(selected) = self.editing.as_ref()
-            && let Some(ele) = selected.element()
-            && let Err(e) = ele.set_value(CFString::new(&new_text).as_CFType())
-        {
-            log::warn!("Failed to set the text of focused element: {ele:?}\n Error: {e}");
-            self.editing = None;
+        let Some(ele) = self.editing.as_ref().and_then(|eoi| eoi.element()).cloned() else {
+            return;
+        };
+        let Some(current) = ele
+            .value()
+            .ok()
+            .and_then(|v| v.downcast::<CFString>())
+            .map(|s| s.to_string())
+        else {
+            return;
+        };
+        if current == new_text {
+            return;
+        }
+
+        let edits = text_edits(&current, &new_text);
+        for edit in edits.iter().rev() {
+            if ele.set_selected_range(edit.location, edit.length)
+                && ele.set_selected_text(&edit.replacement)
+            {
+                continue;
+            }
+            log::warn!("Incremental text edit failed, replacing the whole value.");
+            if let Err(e) = ele.set_value(CFString::new(&new_text).as_CFType()) {
+                log::warn!("Failed to set the text of focused element: {ele:?}\n Error: {e}");
+                self.editing = None;
+            }
+            return;
         }
     }
 

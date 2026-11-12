@@ -8,8 +8,9 @@ use accessibility_sys::{
     kAXButtonRole, kAXCellRole, kAXCheckBoxRole, kAXComboBoxRole, kAXErrorSuccess, kAXGroupRole,
     kAXHiddenAttribute, kAXImageRole, kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute,
     kAXPressAction, kAXRoleAttribute, kAXRowRole, kAXScrollAreaRole, kAXScrollBarRole,
-    kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
-    kAXTextFieldRole, kAXValueTypeCFRange, kAXValueTypeCGPoint, kAXValueTypeCGSize, kAXWindowRole,
+    kAXSelectedTextAttribute, kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole,
+    kAXTextAreaRole, kAXTextFieldRole, kAXValueTypeCFRange, kAXValueTypeCGPoint,
+    kAXValueTypeCGSize, kAXWindowRole,
 };
 use core_foundation::{
     array::{CFArray, CFArrayRef},
@@ -776,23 +777,27 @@ impl GetAttribute for AXUIElement {
 }
 
 pub trait SetAttribute {
-    fn set_attribute_by_name(&self, attribute_name: &str, value: CFType);
-    fn set_selected_range(&self, location: isize, length: isize);
+    /// Set an attribute, returning whether the app accepted it.
+    fn set_attribute_by_name(&self, attribute_name: &str, value: CFType) -> bool;
+    fn set_selected_range(&self, location: isize, length: isize) -> bool;
+    fn set_selected_text(&self, text: &str) -> bool;
 }
 
 impl SetAttribute for AXUIElement {
-    fn set_attribute_by_name(&self, attribute_name: &str, value: CFType) {
+    fn set_attribute_by_name(&self, attribute_name: &str, value: CFType) -> bool {
         let attr = AXAttribute::new(&CFString::new(attribute_name));
-        if let Err(e) = self.set_attribute(&attr, value) {
-            log::warn!("Failed to set attribute: {e}");
-        };
+        self.set_attribute(&attr, value)
+            .inspect_err(|e| log::warn!("Failed to set attribute: {e}"))
+            .is_ok()
     }
 
-    fn set_selected_range(&self, location: isize, length: isize) {
-        let range = CFRange::init(location, length);
-        if let Some(wrapped_range) = rust_type_to_cftype(range, kAXValueTypeCFRange) {
-            self.set_attribute_by_name(kAXSelectedTextRangeAttribute, wrapped_range);
-        }
+    fn set_selected_range(&self, location: isize, length: isize) -> bool {
+        rust_type_to_cftype(CFRange::init(location, length), kAXValueTypeCFRange)
+            .is_some_and(|range| self.set_attribute_by_name(kAXSelectedTextRangeAttribute, range))
+    }
+
+    fn set_selected_text(&self, text: &str) -> bool {
+        self.set_attribute_by_name(kAXSelectedTextAttribute, CFString::new(text).as_CFType())
     }
 }
 
