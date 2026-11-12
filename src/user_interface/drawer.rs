@@ -619,12 +619,6 @@ impl UIDrawer {
         self.selected_frame.setHidden(false);
     }
 
-    pub fn draw_frame_instant(&self, frame: &Frame) {
-        without_animations! {
-            self.draw_frame(frame);
-        }
-    }
-
     pub fn notify(&mut self, theme: &GlyphlowTheme, msg: &MenuString) -> usize {
         let id = self.next_notification_id;
         self.next_notification_id += 1;
