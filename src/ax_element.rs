@@ -4,18 +4,19 @@ use crate::{
 };
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
-    AXUIElementCopyMultipleAttributeValues, AXValueCreate, AXValueGetValue, AXValueRef,
-    kAXButtonRole, kAXCellRole, kAXCheckBoxRole, kAXComboBoxRole, kAXErrorSuccess, kAXGroupRole,
-    kAXHiddenAttribute, kAXImageRole, kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute,
-    kAXPressAction, kAXRoleAttribute, kAXRowRole, kAXScrollAreaRole, kAXScrollBarRole,
-    kAXSelectedTextAttribute, kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole,
-    kAXTextAreaRole, kAXTextFieldRole, kAXValueTypeCFRange, kAXValueTypeCGPoint,
-    kAXValueTypeCGSize, kAXWindowRole,
+    AXUIElementCopyMultipleAttributeValues, AXUIElementCopyParameterizedAttributeValue,
+    AXValueCreate, AXValueGetValue, AXValueRef, kAXButtonRole, kAXCellRole, kAXCheckBoxRole,
+    kAXComboBoxRole, kAXErrorSuccess, kAXGroupRole, kAXHiddenAttribute, kAXImageRole,
+    kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute, kAXPressAction, kAXRoleAttribute,
+    kAXRowRole, kAXScrollAreaRole, kAXScrollBarRole, kAXSelectedTextAttribute,
+    kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
+    kAXTextFieldRole, kAXValueTypeCFRange, kAXValueTypeCGPoint, kAXValueTypeCGSize, kAXWindowRole,
 };
 use core_foundation::{
     array::{CFArray, CFArrayRef},
     base::{CFRange, CFType, CFTypeRef, TCFType},
     boolean::CFBoolean,
+    dictionary::CFDictionary,
     string::CFString,
 };
 use objc2::rc::autoreleasepool;
@@ -27,6 +28,11 @@ use std::{
     sync::{OnceLock, mpsc::Sender},
     time::{Duration, Instant},
 };
+
+// Undocumented AppKit/WebKit ranged replacement attribute and its parameter keys.
+const AX_REPLACE_RANGE_WITH_TEXT: &str = "AXReplaceRangeWithText";
+const AX_REPLACEMENT_RANGE: &str = "AXReplacementRange";
+const AX_REPLACEMENT_TEXT: &str = "AXReplacementText";
 
 const BASIC_ATTRIBUTES: [&str; 4] = [
     kAXRoleAttribute,
@@ -781,6 +787,9 @@ pub trait SetAttribute {
     fn set_attribute_by_name(&self, attribute_name: &str, value: CFType) -> bool;
     fn set_selected_range(&self, location: isize, length: isize) -> bool;
     fn set_selected_text(&self, text: &str) -> bool;
+    /// Ranged replacement; the returned `CFBoolean` says the app applied it.
+    fn replace_text_in_range(&self, location: isize, length: isize, text: &str) -> bool;
+    fn is_selected_text_settable(&self) -> bool;
 }
 
 impl SetAttribute for AXUIElement {
@@ -798,6 +807,39 @@ impl SetAttribute for AXUIElement {
 
     fn set_selected_text(&self, text: &str) -> bool {
         self.set_attribute_by_name(kAXSelectedTextAttribute, CFString::new(text).as_CFType())
+    }
+
+    fn replace_text_in_range(&self, location: isize, length: isize, text: &str) -> bool {
+        let Some(range) = rust_type_to_cftype(CFRange::init(location, length), kAXValueTypeCFRange)
+        else {
+            return false;
+        };
+        let parameter = CFDictionary::from_CFType_pairs(&[
+            (CFString::new(AX_REPLACEMENT_RANGE), range),
+            (
+                CFString::new(AX_REPLACEMENT_TEXT),
+                CFString::new(text).as_CFType(),
+            ),
+        ]);
+        let attribute = CFString::new(AX_REPLACE_RANGE_WITH_TEXT);
+        let mut result: CFTypeRef = std::ptr::null();
+        let err = unsafe {
+            AXUIElementCopyParameterizedAttributeValue(
+                self.as_concrete_TypeRef(),
+                attribute.as_concrete_TypeRef(),
+                parameter.as_CFTypeRef(),
+                &mut result,
+            )
+        };
+        (err == kAXErrorSuccess && !result.is_null())
+            .then(|| unsafe { CFType::wrap_under_create_rule(result) })
+            .and_then(|value| value.downcast::<CFBoolean>())
+            .is_some_and(bool::from)
+    }
+
+    fn is_selected_text_settable(&self) -> bool {
+        let attr = AXAttribute::new(&CFString::new(kAXSelectedTextAttribute));
+        self.is_settable(&attr).unwrap_or(false)
     }
 }
 

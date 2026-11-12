@@ -378,37 +378,54 @@ impl AppEngine {
         }
     }
 
-    /// Rewrite only the changed spans: a whole-value write drops formatting.
+    /// Rewrite changed spans to keep formatting; Electron gets a whole-value write.
     pub(super) fn update_editing_text(&mut self, new_text: String) {
         let Some(ele) = self.editing.as_ref().and_then(|eoi| eoi.element()).cloned() else {
             return;
         };
-        let Some(current) = ele
-            .value()
-            .ok()
-            .and_then(|v| v.downcast::<CFString>())
-            .map(|s| s.to_string())
-        else {
-            return;
-        };
-        if current == new_text {
+        let current = ele.value().ok().and_then(|v| v.downcast::<CFString>());
+        if current.as_ref().is_some_and(|s| *s == new_text.as_str()) {
             return;
         }
-
-        let edits = text_edits(&current, &new_text);
-        for edit in edits.iter().rev() {
-            if ele.set_selected_range(edit.location, edit.length)
-                && ele.set_selected_text(&edit.replacement)
-            {
-                continue;
-            }
-            log::warn!("Incremental text edit failed, replacing the whole value.");
+        // Electron ignores both ranged primitives, so it keeps the old
+        // whole-value write; an unreadable AXValue ends up there too.
+        let incremental = !self.last_app_window_info.is_electron;
+        let Some(current) = current.filter(|_| incremental) else {
             if let Err(e) = ele.set_value(CFString::new(&new_text).as_CFType()) {
                 log::warn!("Failed to set the text of focused element: {ele:?}\n Error: {e}");
                 self.editing = None;
             }
             return;
+        };
+
+        // Either channel can acknowledge a write without editing anything, so a
+        // readback is the only way to pick the working one. It never leads to a
+        // whole-value write: that would drop every formatting run.
+        let write = |legacy: bool, location: isize, length: isize, replacement: &str| {
+            if legacy {
+                ele.set_selected_range(location, length);
+                ele.set_selected_text(replacement);
+            } else {
+                ele.replace_text_in_range(location, length, replacement);
+            }
+        };
+        let edits = text_edits(&current.to_string(), &new_text);
+        // Settability only picks the order; an inconclusive readback must not
+        // apply the same edits twice through the other channel.
+        let legacy_first = ele.is_selected_text_settable();
+        for legacy in [legacy_first, !legacy_first] {
+            for edit in edits.iter().rev() {
+                write(legacy, edit.location, edit.length, &edit.replacement);
+            }
+            let Some(after) = ele.value().ok().and_then(|v| v.downcast::<CFString>()) else {
+                log::warn!("Could not read back the edited text; leaving it as-is.");
+                return;
+            };
+            if after != current {
+                return;
+            }
         }
+        log::warn!("Ranged text edits were not applied; leaving the text untouched.");
     }
 
     /// Write `text` to the temp file and launch the editor on it.
