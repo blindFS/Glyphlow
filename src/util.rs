@@ -280,6 +280,231 @@ pub fn select_text_range(
     Some((text, Frame::new(x_min, y_min, x_max, y_max)))
 }
 
+/// A replacement in UTF-16 units, the unit accessibility ranges use.
+pub(crate) struct TextEdit {
+    pub location: isize,
+    pub length: isize,
+    pub replacement: String,
+}
+
+/// Byte ranges of the changed middle; `prefix_units` is its UTF-16 start.
+struct Changed {
+    old_start: usize,
+    old_end: usize,
+    new_start: usize,
+    new_end: usize,
+    prefix_units: usize,
+}
+
+fn changed_middle(old: &str, new: &str) -> Changed {
+    let mut old_rev = old.char_indices().rev();
+    let mut new_rev = new.char_indices().rev();
+    let mut suffix_bytes = 0;
+    while let (Some((_, oc)), Some((_, nc))) = (old_rev.next(), new_rev.next()) {
+        if oc != nc {
+            break;
+        }
+        suffix_bytes += oc.len_utf8();
+    }
+
+    // Equal chars have equal UTF-8 lengths, so one byte count serves both
+    // sides; clamping it keeps the head and tail from overlapping.
+    let limit = old.len().min(new.len()) - suffix_bytes;
+    let mut prefix_bytes = 0;
+    let mut prefix_units = 0;
+    for ((i, oc), (_, nc)) in old.char_indices().zip(new.char_indices()) {
+        if oc != nc || i + oc.len_utf8() > limit {
+            break;
+        }
+        prefix_bytes = i + oc.len_utf8();
+        prefix_units += oc.len_utf16();
+    }
+
+    Changed {
+        old_start: prefix_bytes,
+        old_end: old.len() - suffix_bytes,
+        new_start: prefix_bytes,
+        new_end: new.len() - suffix_bytes,
+        prefix_units,
+    }
+}
+
+/// Minimal edits turning `old` into `new`, in ascending UTF-16 offset order.
+/// Apply back-to-front so earlier offsets stay valid.
+pub(crate) fn text_edits(old: &str, new: &str) -> Vec<TextEdit> {
+    let mid = changed_middle(old, new);
+    let old_mid = &old[mid.old_start..mid.old_end];
+    let new_mid = &new[mid.new_start..mid.new_end];
+
+    if old_mid.is_empty() {
+        return if new_mid.is_empty() {
+            Vec::new()
+        } else {
+            vec![TextEdit {
+                location: mid.prefix_units as isize,
+                length: 0,
+                replacement: new_mid.into(),
+            }]
+        };
+    }
+    // A pure deletion, or a middle past the diff cap: one replacement of the
+    // whole middle, without collecting chars or running Myers.
+    if new_mid.is_empty() || old_mid.chars().count() + new_mid.chars().count() > MAX_DIFF_CHARS {
+        return vec![TextEdit {
+            location: mid.prefix_units as isize,
+            length: old_mid.encode_utf16().count() as isize,
+            replacement: new_mid.into(),
+        }];
+    }
+
+    let before: Vec<char> = old_mid.chars().collect();
+    let after: Vec<char> = new_mid.chars().collect();
+    let mut edits = Vec::new();
+    let mut cursor = 0;
+    let mut units = mid.prefix_units;
+    diff(&before, &after, |(start, end, new_start, new_end)| {
+        while cursor < start {
+            units += before[cursor].len_utf16();
+            cursor += 1;
+        }
+        let location = units;
+        while cursor < end {
+            units += before[cursor].len_utf16();
+            cursor += 1;
+        }
+        edits.push(TextEdit {
+            location: location as isize,
+            length: (units - location) as isize,
+            replacement: after[new_start..new_end].iter().collect(),
+        });
+    });
+    edits
+}
+
+const MAX_DIFF_CHARS: usize = 8000;
+const MAX_DIFF_COST: usize = 256;
+
+type CharEdit = (usize, usize, usize, usize);
+
+#[derive(Clone, Copy)]
+enum Step {
+    Equal(usize),
+    Delete(usize),
+    Insert(usize),
+}
+
+/// Myers' shortest edit script as `(old_start, old_end, new_start, new_end)`
+/// char ranges, or one whole replacement past the cost cap. Ranges arrive in
+/// ascending order, so the caller needs no intermediate buffer.
+fn diff(a: &[char], b: &[char], mut emit: impl FnMut(CharEdit)) {
+    let (n, m) = (a.len(), b.len());
+    let full = || (0, n, 0, m);
+    let max = (n + m).max(1);
+    let offset = max;
+    let stride = 2 * max + 1;
+    let mut v = vec![0isize; stride];
+    // One flat buffer instead of a Vec per edit distance; every row is stride
+    // wide, so backtracking only needs `d * stride + offset + k`.
+    let mut trace = Vec::new();
+    let mut found = false;
+
+    for d in 0..=(n + m).min(MAX_DIFF_COST) {
+        trace.extend_from_slice(&v);
+        let di = d as isize;
+        let mut k = -di;
+        while k <= di {
+            let idx = (offset as isize + k) as usize;
+            let mut x = if k == -di || (k != di && v[idx - 1] < v[idx + 1]) {
+                v[idx + 1]
+            } else {
+                v[idx - 1] + 1
+            };
+            let mut y = x - k;
+            while (x as usize) < n && (y as usize) < m && a[x as usize] == b[y as usize] {
+                x += 1;
+                y += 1;
+            }
+            v[idx] = x;
+            if x as usize == n && y as usize == m {
+                found = true;
+                break;
+            }
+            k += 2;
+        }
+        if found {
+            break;
+        }
+    }
+    if !found {
+        emit(full());
+        return;
+    }
+
+    let (mut x, mut y) = (n as isize, m as isize);
+    let mut steps = Vec::new();
+    let at = |d: usize, k: isize| trace[d * stride + (offset as isize + k) as usize];
+    for d in (0..trace.len() / stride).rev() {
+        let k = x - y;
+        let di = d as isize;
+        let insert = k == -di || (k != di && at(d, k - 1) < at(d, k + 1));
+        let prev_k = if insert { k + 1 } else { k - 1 };
+        let prev_x = at(d, prev_k);
+        let prev_y = prev_x - prev_k;
+        let snake_x = if d == 0 {
+            0
+        } else if insert {
+            prev_x
+        } else {
+            prev_x + 1
+        };
+        if x > snake_x {
+            steps.push(Step::Equal((x - snake_x) as usize));
+        }
+        if d > 0 {
+            steps.push(if insert {
+                Step::Insert(1)
+            } else {
+                Step::Delete(1)
+            });
+        }
+        x = prev_x;
+        y = prev_y;
+    }
+
+    let (mut old_pos, mut new_pos) = (0, 0);
+    let (mut pending_old, mut pending_new) = (0, 0);
+    for step in steps
+        .into_iter()
+        .rev()
+        .chain(std::iter::once(Step::Equal(0)))
+    {
+        match step {
+            Step::Equal(len) => {
+                if pending_old > 0 || pending_new > 0 {
+                    emit((
+                        old_pos - pending_old,
+                        old_pos,
+                        new_pos - pending_new,
+                        new_pos,
+                    ));
+                    pending_old = 0;
+                    pending_new = 0;
+                }
+                old_pos += len;
+                new_pos += len;
+            }
+            Step::Delete(len) => {
+                pending_old += len;
+                old_pos += len;
+            }
+            Step::Insert(len) => {
+                pending_new += len;
+                new_pos += len;
+            }
+        }
+    }
+}
+
 /// What `Key::Space` becomes while searching, so a typed space separates terms
 /// instead of being another character to look for.
 pub const SEARCH_TERM_SEPARATOR: char = '󱁐';
@@ -834,5 +1059,140 @@ mod search_tests {
         assert!(every_ascii.is_ascii());
         assert_eq!(lower_ascii(&every_ascii), every_ascii.to_ascii_lowercase());
         assert!(lower_ascii(&every_ascii).is_ascii());
+    }
+}
+
+#[cfg(test)]
+mod text_edit_tests {
+    use super::*;
+    use rstest::rstest;
+
+    fn tuples(edits: &[TextEdit]) -> Vec<(isize, isize, &str)> {
+        edits
+            .iter()
+            .map(|e| (e.location, e.length, e.replacement.as_str()))
+            .collect()
+    }
+
+    /// Mirrors `update_editing_text`: AX ranges are UTF-16 code units and the
+    /// edits are applied back-to-front so earlier offsets stay valid.
+    fn apply(old: &str, edits: &[TextEdit]) -> String {
+        let mut units: Vec<u16> = old.encode_utf16().collect();
+        let len = units.len() as isize;
+        let mut previous_end = 0;
+        for edit in edits {
+            assert!(
+                edit.location >= previous_end,
+                "edits overlap or go backwards"
+            );
+            assert!(edit.length >= 0);
+            assert!(edit.location + edit.length <= len, "edit past the end");
+            assert!(
+                edit.length > 0 || !edit.replacement.is_empty(),
+                "an edit that changes nothing"
+            );
+            previous_end = edit.location + edit.length;
+        }
+        for edit in edits.iter().rev() {
+            let start = edit.location as usize;
+            let end = start + edit.length as usize;
+            let replacement: Vec<u16> = edit.replacement.encode_utf16().collect();
+            units.splice(start..end, replacement);
+        }
+        String::from_utf16(&units).expect("edits must not split a surrogate pair")
+    }
+
+    fn make(rng: &mut impl FnMut(usize) -> usize, alphabet: &[char], len: usize) -> String {
+        (0..len).map(|_| alphabet[rng(alphabet.len())]).collect()
+    }
+
+    // Locations and lengths are UTF-16 units.
+    #[rstest]
+    #[case::unchanged("abc", "abc", vec![])]
+    #[case::unchanged_astral("a🦀", "a🦀", vec![])]
+    #[case::insert_middle("ac", "abc", vec![(1, 0, "b")])]
+    #[case::prepend("ab", "Xab", vec![(0, 0, "X")])]
+    #[case::append("ab", "abX", vec![(2, 0, "X")])]
+    #[case::delete_middle("abc", "ac", vec![(1, 1, "")])]
+    #[case::trailing_delete("abc", "ab", vec![(2, 1, "")])]
+    #[case::replace_middle("abc", "aXc", vec![(1, 1, "X")])]
+    #[case::trailing_replace("abc", "abX", vec![(2, 1, "X")])]
+    #[case::into_empty("abc", "", vec![(0, 3, "")])]
+    #[case::from_empty("", "abc", vec![(0, 0, "abc")])]
+    // One `char` is two UTF-16 units: locations and lengths must be code units,
+    // not chars or bytes.
+    #[case::replace_astral("a🦀b", "a🌏b", vec![(1, 2, "🌏")])]
+    #[case::delete_astral("a🦀b", "ab", vec![(1, 2, "")])]
+    #[case::insert_after_astral("🦀x", "🦀Xx", vec![(2, 0, "X")])]
+    fn emits_minimal_edits_in_utf16_units(
+        #[case] old: &str,
+        #[case] new: &str,
+        #[case] expected: Vec<(isize, isize, &str)>,
+    ) {
+        let edits = text_edits(old, new);
+        assert_eq!(tuples(&edits), expected);
+        assert_eq!(apply(old, &edits), new);
+    }
+
+    #[rstest]
+    #[case::cjk("深圳笔记内容", "深圳笔记的新内容")]
+    #[case::combining("xyz\u{301} abc", "xyz\u{300} ABCD")]
+    #[case::multiline("one\ntwo\nthree", "one\nTWO\nthree\nfour")]
+    #[case::emoji_run("🦀🌏𝄞", "🦀𝄞🌏")]
+    fn round_trips_realistic_edits(#[case] old: &str, #[case] new: &str) {
+        let edits = text_edits(old, new);
+        assert!(!edits.is_empty());
+        assert_eq!(apply(old, &edits), new);
+    }
+
+    #[test]
+    fn separate_changes_stay_separate() {
+        let old = "the quick brown fox";
+        let new = "the Quick brown cat!";
+        let edits = text_edits(old, new);
+        assert!(edits.len() >= 2, "expected one edit per changed span");
+        assert_eq!(apply(old, &edits), new);
+    }
+
+    #[test]
+    fn over_the_char_cap_collapses_to_one_replacement() {
+        let old = "a".repeat(MAX_DIFF_CHARS + 1);
+        let new = "b".repeat(MAX_DIFF_CHARS + 1);
+        let edits = text_edits(&old, &new);
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].location, 0);
+        assert_eq!(edits[0].length, old.encode_utf16().count() as isize);
+        assert_eq!(apply(&old, &edits), new);
+    }
+
+    #[test]
+    fn over_the_cost_cap_collapses_to_one_replacement() {
+        let old = "a".repeat(300);
+        let new = "b".repeat(300);
+        let edits = text_edits(&old, &new);
+        assert_eq!(edits.len(), 1, "600 substitutions exceed MAX_DIFF_COST");
+        assert_eq!(apply(&old, &edits), new);
+    }
+
+    /// Deterministic stand-in for the ad-hoc harness: mixed-width text and
+    /// full rewrites both have to round-trip.
+    #[test]
+    fn round_trips_a_mixed_corpus() {
+        let alphabet: Vec<char> = "ab 12\néß深圳🦀\u{301}".chars().collect();
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut rng = move |bound: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state as usize % bound
+        };
+
+        for _ in 0..512 {
+            let old_len = rng(24);
+            let old = make(&mut rng, &alphabet, old_len);
+            let new_len = rng(24);
+            let new = make(&mut rng, &alphabet, new_len);
+            assert_eq!(apply(&old, &text_edits(&old, &new)), new);
+        }
     }
 }

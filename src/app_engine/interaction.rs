@@ -8,6 +8,7 @@ use crate::{
     ax_element::{ElementOfInterest, GetAttribute, SetAttribute},
     config::RoleOfInterest,
     os_util::pointer_position,
+    util::{TextEdit, text_edits},
 };
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
 use accessibility_sys::{
@@ -16,8 +17,37 @@ use accessibility_sys::{
 use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber, string::CFString};
 use log::Level;
 use monio::{Button, Event, Key, ScrollDirection};
+use std::borrow::Cow;
 
 const SCALE_FACTOR: f64 = 1.5;
+
+/// Either ranged primitive can acknowledge a write without editing anything.
+#[derive(Clone, Copy)]
+enum TextChannel {
+    SelectedText,
+    ReplaceRange,
+}
+
+impl TextChannel {
+    fn other(self) -> Self {
+        match self {
+            Self::SelectedText => Self::ReplaceRange,
+            Self::ReplaceRange => Self::SelectedText,
+        }
+    }
+
+    fn write(self, ele: &AXUIElement, edit: &TextEdit) {
+        match self {
+            Self::SelectedText => {
+                ele.set_selected_range(edit.location, edit.length);
+                ele.set_selected_text(&edit.replacement);
+            }
+            Self::ReplaceRange => {
+                ele.replace_text_in_range(edit.location, edit.length, &edit.replacement);
+            }
+        }
+    }
+}
 
 impl AppEngine {
     pub(super) const KEY_OP_INTERVAL_IN_MS: u64 = 20;
@@ -179,26 +209,24 @@ impl AppEngine {
     /// something deactivating would tear down — the word picker or the
     /// dictionary view.
     pub(super) fn perform_text_action(&mut self, ta: TextAction) {
-        let Some(ElementOfInterest {
-            context: Some(text),
-            ..
-        }) = self.selected.as_ref()
-        else {
-            panic!("Internal Error: No selected text in the text action menu.");
-        };
+        let text = self
+            .selected
+            .as_ref()
+            .and_then(|eoi| eoi.context.clone())
+            .expect("Internal Error: No selected text in the text action menu.");
 
         let mut keep_drawing = true;
         // TODO:
         // 1. URL handling
         match ta {
             TextAction::Copy => {
-                text_to_clipboard(text);
+                text_to_clipboard(&text);
                 self.resume_or_notify_deactivate("Copied to clipboard.");
             }
             TextAction::Dictionary => {
                 log::trace!("Looking up `{text}` in Apple Dictionary.");
                 if let Some(attr_string) = get_dictionary_attributed_string(
-                    text,
+                    &text,
                     &self.config.dictionaries,
                     &self.config.theme,
                 ) {
@@ -213,7 +241,6 @@ impl AppEngine {
                 }
             }
             TextAction::Split => {
-                let text = text.to_string();
                 self.set_mode(Mode::WordPicking);
                 self.clear_cache();
                 let (w, h) = self.drawer.current_screen_frame.size();
@@ -230,7 +257,8 @@ impl AppEngine {
                 self.word_picker = Some(word_picker);
             }
             TextAction::Editor => {
-                if let Err(e) = self.open_editor(text) {
+                self.editing = self.selected.clone();
+                if let Err(e) = self.open_editor(&text) {
                     self.notify_then_deactivate(
                         &format!("Failed to open editor: {e}"),
                         Level::Error,
@@ -240,7 +268,7 @@ impl AppEngine {
                 }
             }
             TextAction::UserDefined(idx) => {
-                self.take_external_action(idx, &text.to_string());
+                self.take_external_action(idx, &text);
             }
         };
 
@@ -379,14 +407,53 @@ impl AppEngine {
         }
     }
 
+    /// Rewrite changed spans to keep formatting; Electron gets a whole-value write.
     pub(super) fn update_editing_text(&mut self, new_text: String) {
-        if let Some(selected) = self.editing.as_ref()
-            && let Some(ele) = selected.element()
-            && let Err(e) = ele.set_value(CFString::new(&new_text).as_CFType())
-        {
-            log::warn!("Failed to set the text of focused element: {ele:?}\n Error: {e}");
-            self.editing = None;
+        let Some(ele) = self.editing.as_ref().and_then(|eoi| eoi.element()).cloned() else {
+            return;
+        };
+        let current = ele.value().ok().and_then(|v| v.downcast::<CFString>());
+        if current.as_ref().is_some_and(|s| *s == new_text.as_str()) {
+            return;
         }
+        // Electron ignores both ranged primitives, so it keeps the old
+        // whole-value write; an unreadable AXValue ends up there too.
+        let incremental = !self.last_app_window_info.is_electron;
+        let Some(current) = current.filter(|_| incremental) else {
+            if let Err(e) = ele.set_value(CFString::new(&new_text).as_CFType()) {
+                log::warn!("Failed to set the text of focused element: {ele:?}\n Error: {e}");
+                self.editing = None;
+            }
+            return;
+        };
+
+        Self::apply_ranged_edits(&ele, current, &new_text);
+    }
+
+    /// Try both ranged primitives until one actually changes the text. A
+    /// whole-value write here would drop every formatting run.
+    fn apply_ranged_edits(ele: &AXUIElement, current: CFString, new_text: &str) {
+        let edits = text_edits(&Cow::from(&current), new_text);
+        // Settability only picks the order; an inconclusive readback must not
+        // apply the same edits twice through the other channel.
+        let first = if ele.is_selected_text_settable() {
+            TextChannel::SelectedText
+        } else {
+            TextChannel::ReplaceRange
+        };
+        for channel in [first, first.other()] {
+            for edit in edits.iter().rev() {
+                channel.write(ele, edit);
+            }
+            let Some(after) = ele.value().ok().and_then(|v| v.downcast::<CFString>()) else {
+                log::warn!("Could not read back the edited text; leaving it as-is.");
+                return;
+            };
+            if after != current {
+                return;
+            }
+        }
+        log::warn!("Ranged text edits were not applied; leaving the text untouched.");
     }
 
     /// Write `text` to the temp file and launch the editor on it.
