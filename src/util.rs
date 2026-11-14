@@ -287,27 +287,98 @@ pub(crate) struct TextEdit {
     pub replacement: String,
 }
 
-/// Minimal edits turning `old` into `new`. Apply back-to-front so earlier
-/// offsets stay valid.
-pub(crate) fn text_edits(old: &str, new: &str) -> Vec<TextEdit> {
-    let before: Vec<char> = old.chars().collect();
-    let after: Vec<char> = new.chars().collect();
-    let mut offsets = Vec::with_capacity(before.len() + 1);
-    let mut offset = 0;
-    offsets.push(0);
-    for c in &before {
-        offset += c.len_utf16();
-        offsets.push(offset);
+/// Byte ranges of the changed middle; `prefix_units` is its UTF-16 start.
+struct Changed {
+    old_start: usize,
+    old_end: usize,
+    new_start: usize,
+    new_end: usize,
+    prefix_units: usize,
+}
+
+fn changed_middle(old: &str, new: &str) -> Changed {
+    let mut old_rev = old.char_indices().rev();
+    let mut new_rev = new.char_indices().rev();
+    let mut suffix_bytes = 0;
+    while let (Some((_, oc)), Some((_, nc))) = (old_rev.next(), new_rev.next()) {
+        if oc != nc {
+            break;
+        }
+        suffix_bytes += oc.len_utf8();
     }
 
-    diff(&before, &after)
-        .into_iter()
-        .map(|(start, end, new_start, new_end)| TextEdit {
-            location: offsets[start] as isize,
-            length: (offsets[end] - offsets[start]) as isize,
+    // Equal chars have equal UTF-8 lengths, so one byte count serves both
+    // sides; clamping it keeps the head and tail from overlapping.
+    let limit = old.len().min(new.len()) - suffix_bytes;
+    let mut prefix_bytes = 0;
+    let mut prefix_units = 0;
+    for ((i, oc), (_, nc)) in old.char_indices().zip(new.char_indices()) {
+        if oc != nc || i + oc.len_utf8() > limit {
+            break;
+        }
+        prefix_bytes = i + oc.len_utf8();
+        prefix_units += oc.len_utf16();
+    }
+
+    Changed {
+        old_start: prefix_bytes,
+        old_end: old.len() - suffix_bytes,
+        new_start: prefix_bytes,
+        new_end: new.len() - suffix_bytes,
+        prefix_units,
+    }
+}
+
+/// Minimal edits turning `old` into `new`, in ascending UTF-16 offset order.
+/// Apply back-to-front so earlier offsets stay valid.
+pub(crate) fn text_edits(old: &str, new: &str) -> Vec<TextEdit> {
+    let mid = changed_middle(old, new);
+    let old_mid = &old[mid.old_start..mid.old_end];
+    let new_mid = &new[mid.new_start..mid.new_end];
+
+    if old_mid.is_empty() {
+        return if new_mid.is_empty() {
+            Vec::new()
+        } else {
+            vec![TextEdit {
+                location: mid.prefix_units as isize,
+                length: 0,
+                replacement: new_mid.into(),
+            }]
+        };
+    }
+    // A pure deletion, or a middle past the diff cap: one replacement of the
+    // whole middle, without collecting chars or running Myers.
+    if new_mid.is_empty() || old_mid.chars().count() + new_mid.chars().count() > MAX_DIFF_CHARS {
+        return vec![TextEdit {
+            location: mid.prefix_units as isize,
+            length: old_mid.encode_utf16().count() as isize,
+            replacement: new_mid.into(),
+        }];
+    }
+
+    let before: Vec<char> = old_mid.chars().collect();
+    let after: Vec<char> = new_mid.chars().collect();
+    let mut edits = Vec::new();
+    let mut cursor = 0;
+    let mut units = mid.prefix_units;
+    diff(&before, &after, |(start, end, new_start, new_end)| {
+        while cursor < start {
+            units += before[cursor].len_utf16();
+            cursor += 1;
+        }
+        let location = units;
+        while cursor < end {
+            units += before[cursor].len_utf16();
+            cursor += 1;
+        }
+        edits.push(TextEdit {
+            location: location as isize,
+            length: (units - location) as isize,
             replacement: after[new_start..new_end].iter().collect(),
-        })
-        .collect()
+        });
+    });
+    edits
 }
 
 const MAX_DIFF_CHARS: usize = 8000;
@@ -323,22 +394,22 @@ enum Step {
 }
 
 /// Myers' shortest edit script as `(old_start, old_end, new_start, new_end)`
-/// char ranges, or one whole replacement past the caps.
-fn diff(a: &[char], b: &[char]) -> Vec<CharEdit> {
+/// char ranges, or one whole replacement past the cost cap. Ranges arrive in
+/// ascending order, so the caller needs no intermediate buffer.
+fn diff(a: &[char], b: &[char], mut emit: impl FnMut(CharEdit)) {
     let (n, m) = (a.len(), b.len());
-    let full = || vec![(0, n, 0, m)];
-    if n + m > MAX_DIFF_CHARS {
-        return full();
-    }
-
+    let full = || (0, n, 0, m);
     let max = (n + m).max(1);
     let offset = max;
-    let mut v = vec![0isize; 2 * max + 1];
-    let mut trace: Vec<Vec<isize>> = Vec::new();
+    let stride = 2 * max + 1;
+    let mut v = vec![0isize; stride];
+    // One flat buffer instead of a Vec per edit distance; every row is stride
+    // wide, so backtracking only needs `d * stride + offset + k`.
+    let mut trace = Vec::new();
     let mut found = false;
 
     for d in 0..=(n + m).min(MAX_DIFF_COST) {
-        trace.push(v.clone());
+        trace.extend_from_slice(&v);
         let di = d as isize;
         let mut k = -di;
         while k <= di {
@@ -365,20 +436,19 @@ fn diff(a: &[char], b: &[char]) -> Vec<CharEdit> {
         }
     }
     if !found {
-        return full();
+        emit(full());
+        return;
     }
 
     let (mut x, mut y) = (n as isize, m as isize);
     let mut steps = Vec::new();
-    for d in (0..trace.len()).rev() {
-        let v = &trace[d];
+    let at = |d: usize, k: isize| trace[d * stride + (offset as isize + k) as usize];
+    for d in (0..trace.len() / stride).rev() {
         let k = x - y;
         let di = d as isize;
-        let insert = k == -di
-            || (k != di
-                && v[(offset as isize + k - 1) as usize] < v[(offset as isize + k + 1) as usize]);
+        let insert = k == -di || (k != di && at(d, k - 1) < at(d, k + 1));
         let prev_k = if insert { k + 1 } else { k - 1 };
-        let prev_x = v[(offset as isize + prev_k) as usize];
+        let prev_x = at(d, prev_k);
         let prev_y = prev_x - prev_k;
         let snake_x = if d == 0 {
             0
@@ -401,15 +471,17 @@ fn diff(a: &[char], b: &[char]) -> Vec<CharEdit> {
         y = prev_y;
     }
 
-    steps.reverse();
-    let mut edits = Vec::new();
     let (mut old_pos, mut new_pos) = (0, 0);
     let (mut pending_old, mut pending_new) = (0, 0);
-    for step in steps.into_iter().chain(std::iter::once(Step::Equal(0))) {
+    for step in steps
+        .into_iter()
+        .rev()
+        .chain(std::iter::once(Step::Equal(0)))
+    {
         match step {
             Step::Equal(len) => {
                 if pending_old > 0 || pending_new > 0 {
-                    edits.push((
+                    emit((
                         old_pos - pending_old,
                         old_pos,
                         new_pos - pending_new,
@@ -431,7 +503,6 @@ fn diff(a: &[char], b: &[char]) -> Vec<CharEdit> {
             }
         }
     }
-    edits
 }
 
 /// What `Key::Space` becomes while searching, so a typed space separates terms
@@ -1035,13 +1106,12 @@ mod text_edit_tests {
         (0..len).map(|_| alphabet[rng(alphabet.len())]).collect()
     }
 
+    // Locations and lengths are UTF-16 units.
     #[rstest]
     #[case::unchanged("abc", "abc", vec![])]
     #[case::unchanged_astral("a🦀", "a🦀", vec![])]
     #[case::insert_middle("ac", "abc", vec![(1, 0, "b")])]
     #[case::prepend("ab", "Xab", vec![(0, 0, "X")])]
-    // The last step is an insertion with no trailing `Equal`, so this is the
-    // `Step::Equal(0)` sentinel doing the final flush.
     #[case::append("ab", "abX", vec![(2, 0, "X")])]
     #[case::delete_middle("abc", "ac", vec![(1, 1, "")])]
     #[case::trailing_delete("abc", "ab", vec![(2, 1, "")])]
@@ -1087,7 +1157,7 @@ mod text_edit_tests {
     #[test]
     fn over_the_char_cap_collapses_to_one_replacement() {
         let old = "a".repeat(MAX_DIFF_CHARS + 1);
-        let new = format!("{old}b");
+        let new = "b".repeat(MAX_DIFF_CHARS + 1);
         let edits = text_edits(&old, &new);
         assert_eq!(edits.len(), 1);
         assert_eq!(edits[0].location, 0);

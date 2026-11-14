@@ -8,7 +8,7 @@ use crate::{
     ax_element::{ElementOfInterest, GetAttribute, SetAttribute},
     config::RoleOfInterest,
     os_util::pointer_position,
-    util::text_edits,
+    util::{TextEdit, text_edits},
 };
 use accessibility::{AXUIElement, AXUIElementActions, AXUIElementAttributes};
 use accessibility_sys::{
@@ -17,8 +17,37 @@ use accessibility_sys::{
 use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber, string::CFString};
 use log::Level;
 use monio::{Button, Event, Key, ScrollDirection};
+use std::borrow::Cow;
 
 const SCALE_FACTOR: f64 = 1.5;
+
+/// Either ranged primitive can acknowledge a write without editing anything.
+#[derive(Clone, Copy)]
+enum TextChannel {
+    SelectedText,
+    ReplaceRange,
+}
+
+impl TextChannel {
+    fn other(self) -> Self {
+        match self {
+            Self::SelectedText => Self::ReplaceRange,
+            Self::ReplaceRange => Self::SelectedText,
+        }
+    }
+
+    fn write(self, ele: &AXUIElement, edit: &TextEdit) {
+        match self {
+            Self::SelectedText => {
+                ele.set_selected_range(edit.location, edit.length);
+                ele.set_selected_text(&edit.replacement);
+            }
+            Self::ReplaceRange => {
+                ele.replace_text_in_range(edit.location, edit.length, &edit.replacement);
+            }
+        }
+    }
+}
 
 impl AppEngine {
     pub(super) const KEY_OP_INTERVAL_IN_MS: u64 = 20;
@@ -398,24 +427,23 @@ impl AppEngine {
             return;
         };
 
-        // Either channel can acknowledge a write without editing anything, so a
-        // readback is the only way to pick the working one. It never leads to a
-        // whole-value write: that would drop every formatting run.
-        let write = |legacy: bool, location: isize, length: isize, replacement: &str| {
-            if legacy {
-                ele.set_selected_range(location, length);
-                ele.set_selected_text(replacement);
-            } else {
-                ele.replace_text_in_range(location, length, replacement);
-            }
-        };
-        let edits = text_edits(&current.to_string(), &new_text);
+        Self::apply_ranged_edits(&ele, current, &new_text);
+    }
+
+    /// Try both ranged primitives until one actually changes the text. A
+    /// whole-value write here would drop every formatting run.
+    fn apply_ranged_edits(ele: &AXUIElement, current: CFString, new_text: &str) {
+        let edits = text_edits(&Cow::from(&current), new_text);
         // Settability only picks the order; an inconclusive readback must not
         // apply the same edits twice through the other channel.
-        let legacy_first = ele.is_selected_text_settable();
-        for legacy in [legacy_first, !legacy_first] {
+        let first = if ele.is_selected_text_settable() {
+            TextChannel::SelectedText
+        } else {
+            TextChannel::ReplaceRange
+        };
+        for channel in [first, first.other()] {
             for edit in edits.iter().rev() {
-                write(legacy, edit.location, edit.length, &edit.replacement);
+                channel.write(ele, edit);
             }
             let Some(after) = ele.value().ok().and_then(|v| v.downcast::<CFString>()) else {
                 log::warn!("Could not read back the edited text; leaving it as-is.");
