@@ -3,7 +3,7 @@ use crate::{
     MenuScope, Mode,
     ax_element::ElementOfInterest,
     config::BACKSPACE_CHAR,
-    user_interface::{MenuString, MenuStyle},
+    user_interface::{MenuString, MenuStyle, hint_boxes_from_frames},
     util::search_regex,
 };
 use objc2::rc::autoreleasepool;
@@ -212,7 +212,53 @@ impl AppEngine {
         self.show_menu(MenuScope::Dashboard, "");
     }
 
+    /// Whether the split words can be drawn in place over the source text.
+    pub(super) fn word_picking_in_place(&self) -> bool {
+        self.word_picker.as_ref().is_some_and(|wp| wp.in_place())
+    }
+
+    /// Turn the words of an in-place word picker into hint boxes, once.
+    ///
+    /// The source element placed every word, so no menu is needed: the hints sit
+    /// on the words themselves and are filtered exactly like element hints.
+    pub(super) fn start_word_hints(&mut self) {
+        let (frames, font_size, search_targets) = match self.word_picker.as_ref() {
+            Some(wp) => match wp.frames() {
+                Some(frames) => (
+                    frames.to_vec(),
+                    wp.hint_font_size(&self.config.theme),
+                    wp.ascii_targets(),
+                ),
+                None => return,
+            },
+            None => return,
+        };
+
+        let (digits, hint_boxes) = hint_boxes_from_frames(
+            frames.len(),
+            frames.into_iter(),
+            &self.overlay_frame,
+            &self.config.theme,
+            &self.config.hint_keys,
+            font_size,
+            self.config.colored_frame_min_size as f64,
+        );
+        self.hint_width = digits;
+        self.search_targets = search_targets;
+        self.hint_boxes = hint_boxes;
+        self.draw_hints();
+    }
+
     pub(super) fn draw_word_picker(&mut self) {
+        if self.word_picking_in_place() {
+            if self.hint_boxes.is_empty() {
+                self.start_word_hints();
+            } else {
+                self.update_hints();
+            }
+            return;
+        }
+
         let word_picker = self
             .word_picker
             .as_mut()

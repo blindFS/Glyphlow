@@ -4,12 +4,14 @@ use crate::{
 };
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
 use accessibility_sys::{
-    AXUIElementCopyMultipleAttributeValues, AXValueCreate, AXValueGetValue, AXValueRef,
+    AXUIElementCopyMultipleAttributeValues, AXUIElementCopyParameterizedAttributeValue,
+    AXValueCreate, AXValueGetValue, AXValueRef, kAXBoundsForRangeParameterizedAttribute,
     kAXButtonRole, kAXCellRole, kAXCheckBoxRole, kAXComboBoxRole, kAXErrorSuccess, kAXGroupRole,
     kAXHiddenAttribute, kAXImageRole, kAXMenuItemRole, kAXPopUpButtonRole, kAXPositionAttribute,
     kAXPressAction, kAXRoleAttribute, kAXRowRole, kAXScrollAreaRole, kAXScrollBarRole,
     kAXSelectedTextRangeAttribute, kAXSizeAttribute, kAXStaticTextRole, kAXTextAreaRole,
-    kAXTextFieldRole, kAXValueTypeCFRange, kAXValueTypeCGPoint, kAXValueTypeCGSize, kAXWindowRole,
+    kAXTextFieldRole, kAXValueTypeCFRange, kAXValueTypeCGPoint, kAXValueTypeCGRect,
+    kAXValueTypeCGSize, kAXWindowRole,
 };
 use core_foundation::{
     array::{CFArray, CFArrayRef},
@@ -18,7 +20,7 @@ use core_foundation::{
     string::CFString,
 };
 use objc2::rc::autoreleasepool;
-use objc2_core_foundation::{CGPoint, CGSize};
+use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -303,6 +305,11 @@ pub enum ElementKind {
 pub struct ElementOfInterest {
     pub kind: ElementKind,
     pub context: Option<String>,
+    /// Where `context` starts in the element's text, in UTF-16 units — the
+    /// coordinates `AXBoundsForRange` uses. Narrowing the context (a word or a
+    /// range picked from a split) keeps the element, so this has to move with it
+    /// for a later split to land on the right words.
+    pub context_offset: usize,
     pub frame: Frame,
 }
 
@@ -319,6 +326,7 @@ impl ElementOfInterest {
                 role,
             },
             context,
+            context_offset: 0,
             frame,
         }
     }
@@ -336,6 +344,7 @@ impl ElementOfInterest {
         Self {
             kind: ElementKind::Pseudo,
             context,
+            context_offset: 0,
             frame,
         }
     }
@@ -453,6 +462,7 @@ impl ElementCache {
         let ElementOfInterest {
             kind: ElementKind::Standard { element, role },
             context,
+            context_offset: _,
             frame,
         } = &eoi
         else {
@@ -570,6 +580,10 @@ pub trait GetAttribute {
     /// The element's frame clipped to `default_frame`, or `default_frame` itself
     /// when its position or size is unavailable.
     fn get_frame(&self, default: Frame) -> Frame;
+    /// The screen frame of `length` characters from `location`, in the element's
+    /// text coordinates (UTF-16 units, as AX uses). `None` when the element does
+    /// not answer `AXBoundsForRange` — most non-text elements, and some text ones.
+    fn bounds_for_range(&self, location: usize, length: usize) -> Option<Frame>;
     fn inspect(&self, bundle_id: &str) -> String;
     fn search_target(&self) -> String;
     fn is_clickable(&self) -> bool;
@@ -613,6 +627,42 @@ impl GetAttribute for AXUIElement {
             }
         });
         frame.unwrap_or(default_frame)
+    }
+
+    fn bounds_for_range(&self, location: usize, length: usize) -> Option<Frame> {
+        let range = CFRange::init(location as isize, length as isize);
+        let wrapped_range = rust_type_to_cftype(range, kAXValueTypeCFRange)?;
+        let attribute = CFString::new(kAXBoundsForRangeParameterizedAttribute);
+        let mut value_ref: CFTypeRef = std::ptr::null();
+
+        let err = unsafe {
+            AXUIElementCopyParameterizedAttributeValue(
+                self.as_concrete_TypeRef(),
+                attribute.as_concrete_TypeRef(),
+                wrapped_range.as_CFTypeRef(),
+                &mut value_ref,
+            )
+        };
+        if err != kAXErrorSuccess || value_ref.is_null() {
+            return None;
+        }
+        let value = unsafe { CFType::wrap_under_create_rule(value_ref) };
+
+        let mut rect = CGRect {
+            origin: CGPoint { x: 0.0, y: 0.0 },
+            size: CGSize {
+                width: 0.0,
+                height: 0.0,
+            },
+        };
+        let has_rect = unsafe {
+            AXValueGetValue(
+                value.as_CFTypeRef() as AXValueRef,
+                kAXValueTypeCGRect,
+                &mut rect as *mut CGRect as *mut _,
+            )
+        };
+        has_rect.then(|| Frame::from_cgrect(&rect))
     }
 
     fn inspect(&self, bundle_id: &str) -> String {

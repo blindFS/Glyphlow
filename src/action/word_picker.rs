@@ -1,8 +1,10 @@
 use crate::{
+    ax_element::GetAttribute,
     config::{BACKSPACE_CHAR, GlyphlowTheme, HintKeys},
     user_interface::{MenuString, MenuStyle, UIDrawer},
-    util::{lower_ascii, search_regex},
+    util::{Frame, lower_ascii, search_regex},
 };
+use accessibility::AXUIElement;
 use regex::Regex;
 use std::{ops::Range, sync::OnceLock};
 use unicode_width::UnicodeWidthStr;
@@ -27,22 +29,40 @@ struct Word {
     ascii: String,
 }
 
-/// Splits a text into pickable words and draws them as a hint-labelled block.
+/// Splits a text into pickable words.
+///
+/// When the source element can place a ranged piece of its text on screen, each
+/// word has a `frame` and the picker is drawn as hint boxes over the words
+/// themselves. Otherwise it falls back to a hint-labelled block in a menu.
 pub(crate) struct WordPicker {
     raw: String,
     words: Vec<Word>,
     screen_ratio: f64,
     pub(crate) digits: u32,
     matched: Vec<usize>,
+    /// Where `raw` starts in the source element's text, in UTF-16 units. AX
+    /// ranges are absolute within the element, so every word frame query has to
+    /// be shifted by this much.
+    context_offset: usize,
+    /// One screen frame per word, in `words` order, when AX can provide them.
+    frames: Option<Vec<Frame>>,
 }
 
 impl WordPicker {
+    /// `element` is the source the text was read from. It is only used to place
+    /// the words on screen; `None`, or an element that cannot answer
+    /// `AXBoundsForRange`, keeps the menu fallback. `context_offset` is where
+    /// `text` starts in that element, since a split of an already-picked word or
+    /// range only owns a slice of it.
     pub(crate) fn new(
         text: String,
         screen_ratio: f64,
+        screen_frame: &Frame,
+        context_offset: usize,
         theme: &GlyphlowTheme,
         hint_keys: &HintKeys,
         drawer: &UIDrawer,
+        element: Option<&AXUIElement>,
     ) -> Self {
         let (word_strings, offsets) = multilingual_split(&text);
         let digits = hint_keys.digits_for_len(word_strings.len());
@@ -57,18 +77,82 @@ impl WordPicker {
             });
         }
 
+        let frames = element
+            .and_then(|element| word_frames(element, &text, &words, screen_frame, context_offset));
+
         let word_picker = Self {
             raw: text,
             words,
             digits,
             screen_ratio,
             matched: Vec::new(),
+            context_offset,
+            frames,
         };
 
-        let (msg, _) = word_picker.menu_string(None, "", "");
-        drawer.draw_menu(&msg, theme);
+        if !word_picker.in_place() {
+            let (msg, _) = word_picker.menu_string(None, "", "");
+            drawer.draw_menu(&msg, theme);
+        }
 
         word_picker
+    }
+
+    /// Whether every word was placed on screen, so the picker can be drawn as
+    /// hint boxes over the source text instead of as a menu.
+    pub(crate) fn in_place(&self) -> bool {
+        self.frames.is_some()
+    }
+
+    /// The frames of the words, when [`Self::in_place`] holds.
+    pub(crate) fn frames(&self) -> Option<&[Frame]> {
+        self.frames.as_deref()
+    }
+
+    /// The folded search form of every word, for the hint box search.
+    pub(crate) fn ascii_targets(&self) -> Vec<String> {
+        self.words.iter().map(|word| word.ascii.clone()).collect()
+    }
+
+    /// The word at `idx` as it appears in [`Self::raw`].
+    pub(crate) fn word_text(&self, idx: usize) -> Option<&str> {
+        self.words.get(idx).map(|word| &self.raw[word.text.clone()])
+    }
+
+    /// Where word `idx` starts in the source element's text, in UTF-16 units.
+    pub(crate) fn word_offset(&self, idx: usize) -> Option<usize> {
+        let word = self.words.get(idx)?;
+        let prefix = self.raw[..word.text.start].encode_utf16().count();
+        Some(self.context_offset + prefix)
+    }
+
+    /// The hint font size that keeps a label inside the narrowest word, or
+    /// `None` when the configured font already fits.
+    ///
+    /// A box is about `digits * size * 0.8 + 2 * margin` wide — the same
+    /// estimate collision resolution uses. Inverting that for the smallest word
+    /// width stops short words from turning the hints into a pile of overlapping
+    /// boxes. The result is never larger than the configured font, and never
+    /// below a legible floor: a word with no width at all (or one narrower than
+    /// the box's margins) gets the floor, not a zero-size font.
+    pub(crate) fn hint_font_size(&self, theme: &GlyphlowTheme) -> Option<f64> {
+        const MIN_HINT_FONT_SIZE: f64 = 8.0;
+
+        let frames = self.frames.as_ref()?;
+        let configured = theme.hint_font.pointSize();
+        let min_width = frames
+            .iter()
+            .map(|frame| frame.size().0)
+            .fold(f64::INFINITY, f64::min);
+        let margins = theme.hint_margin_size as f64 * 2.0;
+        let label_em = self.digits.max(1) as f64 * 0.8;
+        let fitting = (min_width - margins).max(0.0) / label_em;
+
+        // Collapsing the floor to the configured size keeps both bounds in order
+        // when the configured font is already smaller than the floor.
+        let floor = MIN_HINT_FONT_SIZE.min(configured);
+        let size = fitting.clamp(floor, configured);
+        (size < configured).then_some(size)
     }
 
     pub(crate) fn update_text_layer(
@@ -206,7 +290,9 @@ impl WordPicker {
             .then_some((idx, text))
     }
 
-    pub(crate) fn select_range(&self, idx1: usize, idx2: usize) -> Option<String> {
+    /// The text of the range between `idx1` and `idx2`, plus where it starts in
+    /// the source element's text (UTF-16 units).
+    pub(crate) fn select_range(&self, idx1: usize, idx2: usize) -> Option<(String, usize)> {
         let (start, end) = if idx1 < idx2 {
             (idx1, idx2)
         } else {
@@ -214,8 +300,11 @@ impl WordPicker {
         };
         let s_off = self.words.get(start)?.text.start;
         let e_off = self.words.get(end)?.text.end;
+        let offset = self.word_offset(start)?;
 
-        self.raw.get(s_off..e_off).map(String::from)
+        self.raw
+            .get(s_off..e_off)
+            .map(|text| (text.to_string(), offset))
     }
 }
 
@@ -233,6 +322,55 @@ fn get_url_re() -> &'static Regex {
 fn get_segment_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(SCRIPT_SEGMENT_PATTERN).unwrap())
+}
+
+/// The byte range of `text` as an AX text range (UTF-16 units from the start),
+/// which is what `AXBoundsForRange` takes.
+fn utf16_range(text: &str, range: &Range<usize>) -> (usize, usize) {
+    let location = text[..range.start].encode_utf16().count();
+    let length = text[range.clone()].encode_utf16().count();
+    (location, length)
+}
+
+/// Query the screen frame of every word, keeping the picker in place only if
+/// **all** of them resolve to a real, distinct rectangle on screen: a single
+/// missing one would leave a word that cannot be picked, and two words sharing
+/// a rectangle would stack their hints on top of each other.
+fn word_frames(
+    element: &AXUIElement,
+    text: &str,
+    words: &[Word],
+    screen_frame: &Frame,
+    context_offset: usize,
+) -> Option<Vec<Frame>> {
+    if words.is_empty() {
+        return None;
+    }
+
+    let frames = words
+        .iter()
+        .map(|word| {
+            let (location, length) = utf16_range(text, &word.text);
+            let frame = element.bounds_for_range(context_offset + location, length)?;
+            let visible = frame.intersect(screen_frame)?;
+            let (w, h) = visible.size();
+            (w > 0.0 && h > 0.0).then_some(frame)
+        })
+        .collect::<Option<Vec<Frame>>>()?;
+
+    frames_are_distinct(&frames).then_some(frames)
+}
+
+/// Whether every word got a rectangle of its own.
+///
+/// AX can report one rectangle for several ranges (a text field that only
+/// exposes a single range, for instance). Hints drawn there could not be told
+/// apart, so such a split has to fall back to the menu.
+fn frames_are_distinct(frames: &[Frame]) -> bool {
+    frames
+        .iter()
+        .enumerate()
+        .all(|(idx, frame)| !frames[..idx].contains(frame))
 }
 
 /// Split `input` into pickable tokens, with each token's byte offset in `input`.
@@ -358,6 +496,86 @@ mod tests {
         assert_eq!(multilingual_split(input), expected);
     }
 
+    /// `AXBoundsForRange` addresses text in UTF-16 units, while the split works
+    /// in byte offsets, so the conversion is what keeps the frames on the right
+    /// words once anything outside ASCII is involved.
+    #[rstest]
+    #[case::ascii("hello world", 0..5, (0, 5))]
+    #[case::multibyte_prefix("é alpha", 3..8, (2, 5))]
+    #[case::emoji_counts_as_two_units("😁 hi", 5..7, (3, 2))]
+    fn maps_byte_ranges_to_ax_utf16_ranges(
+        #[case] input: &str,
+        #[case] range: Range<usize>,
+        #[case] expected: (usize, usize),
+    ) {
+        assert_eq!(utf16_range(input, &range), expected);
+    }
+
+    /// Picking a range on a split that already owns a slice of the element must
+    /// carry that slice's start along, or the next split would place its hints
+    /// at the top of the element.
+    #[test]
+    fn picked_range_keeps_its_offset_in_the_element() {
+        let mut picker = picker_with(&["alpha", "beta", "gamma"], &[]);
+        picker.context_offset = 40;
+
+        assert_eq!(picker.word_offset(1), Some(46));
+        assert_eq!(
+            picker.select_range(2, 1),
+            Some(("beta gamma".to_string(), 46))
+        );
+    }
+
+    /// AX reporting one rectangle for several words is the signal that the split
+    /// cannot be drawn in place: the hints would stack on the same spot.
+    #[test]
+    fn identical_word_frames_are_not_distinct() {
+        let first = Frame::new(0.0, 0.0, 40.0, 20.0);
+        let second = Frame::new(40.0, 0.0, 80.0, 20.0);
+
+        assert!(frames_are_distinct(&[]));
+        assert!(frames_are_distinct(&[first]));
+        assert!(frames_are_distinct(&[first, second]));
+        assert!(!frames_are_distinct(&[first, first]));
+        assert!(!frames_are_distinct(&[first, second, first]));
+    }
+
+    /// The smallest word decides the font, so that is the width varied here.
+    /// `None` means the configured font already fits.
+    #[rstest]
+    #[case::wide_words_keep_the_configured_font(60.0, None)]
+    #[case::narrow_words_shrink_to_the_floor(10.0, Some(8.0))]
+    #[case::zero_width_still_gets_a_legible_font(0.0, Some(8.0))]
+    fn hint_font_size_fits_the_narrowest_word(
+        #[case] min_width: f64,
+        #[case] expected: Option<f64>,
+    ) {
+        let mut picker = picker_with(&["a", "b"], &[]);
+        picker.frames = Some(vec![
+            Frame::new(0.0, 0.0, min_width, 20.0),
+            Frame::new(0.0, 0.0, 100.0, 20.0),
+        ]);
+
+        assert_eq!(picker.hint_font_size(&GlyphlowTheme::default()), expected);
+    }
+
+    /// The floor collapses to the configured size when that is already smaller,
+    /// so the clamp never receives inverted bounds — and never enlarges a label.
+    #[test]
+    fn hint_font_size_never_enlarges_a_small_configured_font() {
+        let mut theme = GlyphlowTheme::default();
+        theme.hint_font = objc2_app_kit::NSFont::fontWithName_size(
+            objc2_foundation::ns_string!("Andale Mono"),
+            6.0,
+        )
+        .unwrap();
+
+        let mut picker = picker_with(&["a"], &[]);
+        picker.frames = Some(vec![Frame::new(0.0, 0.0, 0.0, 20.0)]);
+
+        assert_eq!(picker.hint_font_size(&theme), None);
+    }
+
     /// A picker over `words` whose `matched` list is set verbatim, so the match
     /// queries can be exercised without a live `UIDrawer` (which is what
     /// [`WordPicker::new`] needs and a headless test cannot build).
@@ -383,6 +601,8 @@ mod tests {
             screen_ratio: 1.0,
             digits: 1,
             matched: matched.to_vec(),
+            context_offset: 0,
+            frames: None,
         }
     }
 

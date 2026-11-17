@@ -3,6 +3,7 @@ use crate::config::{GlyphlowTheme, HintKeys};
 use crate::os_util::move_pointer;
 use crate::util::{Frame, estimate_frame_for_text};
 use objc2::{AnyThread, rc::Retained};
+use objc2_app_kit::NSFont;
 use objc2_core_foundation::{CFRetained, CGSize};
 use objc2_core_graphics::{CGColor, CGMutablePath};
 use objc2_foundation::{NSMutableAttributedString, NSPoint, NSRange, NSRect, NSSize, NSString};
@@ -23,6 +24,9 @@ pub struct HintBox {
     delta: (f64, f64),
     pub frame: Frame,
     color: Option<CFRetained<CGColor>>,
+    /// Overrides the theme's hint font, for hints that have to shrink to fit
+    /// the text they point at. `None` uses the theme's font.
+    font: Option<Retained<NSFont>>,
     text_layer: Retained<CATextLayer>,
     pub(super) box_layer: Retained<CALayer>,
     tri_layer: Retained<CAShapeLayer>,
@@ -66,6 +70,7 @@ impl HintBox {
             delta: (0.0, 0.0),
             frame,
             color,
+            font: None,
             text_layer: tl,
             box_layer: bl,
             tri_layer,
@@ -88,9 +93,14 @@ impl HintBox {
         self.layout(overlay_frame, theme);
     }
 
+    /// The font this box draws its label with.
+    fn font<'a>(&'a self, theme: &'a GlyphlowTheme) -> &'a NSFont {
+        self.font.as_ref().unwrap_or(&theme.hint_font)
+    }
+
     /// Size of the triangle pointing from the box at the element.
-    fn geometry(theme: &GlyphlowTheme) -> (f64, f64) {
-        let font_size = theme.hint_font.pointSize();
+    fn geometry(&self, theme: &GlyphlowTheme) -> (f64, f64) {
+        let font_size = self.font(theme).pointSize();
         (font_size / 2.0, font_size / 2.0) // (width, height)
     }
 
@@ -104,7 +114,13 @@ impl HintBox {
             NSMutableAttributedString::alloc(),
             &label_string,
         );
-        update_hint_text_with_attr(&attr_string, &self.label, prefix_len, theme);
+        update_hint_text_with_attr(
+            &attr_string,
+            &self.label,
+            prefix_len,
+            theme,
+            self.font(theme),
+        );
         attr_string
     }
 
@@ -219,7 +235,7 @@ impl HintBox {
 
     /// Puts the box at the origin `box_size` gives it, and redraws its triangle.
     fn place_box(&self, box_size: CGSize, overlay_frame: &Frame, theme: &GlyphlowTheme) {
-        let (tri_width, tri_height) = Self::geometry(theme);
+        let (tri_width, tri_height) = self.geometry(theme);
         let (origin, x_offset, y_offset) =
             self.calculate_origin(box_size, overlay_frame, tri_height);
 
@@ -323,12 +339,15 @@ pub fn hint_boxes_from_frames(
     screen_frame: &Frame,
     theme: &GlyphlowTheme,
     hint_keys: &HintKeys,
+    font_size: Option<f64>,
     colored_frame_min_size: f64,
 ) -> (u32, Vec<HintBox>) {
     if len == 0 {
         return (0, Vec::new());
     }
     let digits = hint_keys.digits_for_len(len);
+    let font =
+        font_size.and_then(|size| NSFont::fontWithName_size(&theme.hint_font.fontName(), size));
     let mut color_idx = 0;
 
     // One spare slot for the pointer's stand-in. `collect` would size this
@@ -341,14 +360,16 @@ pub fn hint_boxes_from_frames(
         let (x, y) = frame.center();
         let color = frame_color(theme, &mut color_idx, frame.size(), colored_frame_min_size);
 
-        HintBox::new(
+        let mut hb = HintBox::new(
             idx,
             hint_keys.label_for_index(idx, Some(digits)),
             x,
             y,
             frame,
             color,
-        )
+        );
+        hb.font = font.clone();
+        hb
     }));
 
     resolve_collisions(&mut boxes, digits, theme);
@@ -363,9 +384,14 @@ pub const MAX_COLLISION_OPS: usize = 150;
 /// The thresholds are estimated from the font rather than measured, because this
 /// also runs before the boxes are laid out.
 pub fn resolve_collisions(boxes: &mut Vec<HintBox>, digits: u32, theme: &GlyphlowTheme) {
-    let x_thres =
-        theme.hint_font.pointSize() * digits as f64 * 0.8 + 2.0 * theme.hint_margin_size as f64;
-    let y_thres = theme.hint_font.pointSize() * 1.5 + 2.0 * theme.hint_margin_size as f64;
+    // A set that overrides the font shares one size, so the first override is
+    // the whole answer; otherwise the theme's font decides.
+    let font_size = boxes
+        .iter()
+        .find_map(|hb| hb.font.as_ref().map(|font| font.pointSize()))
+        .unwrap_or_else(|| theme.hint_font.pointSize());
+    let x_thres = font_size * digits as f64 * 0.8 + 2.0 * theme.hint_margin_size as f64;
+    let y_thres = font_size * 1.5 + 2.0 * theme.hint_margin_size as f64;
     // A test has no pointer worth respecting, and reading the real one would make
     // the layout depend on where the mouse happens to be.
     #[cfg(not(test))]
@@ -540,10 +566,10 @@ fn update_hint_text_with_attr(
     label: &str,
     key_prefix_len: usize,
     theme: &GlyphlowTheme,
+    font: &NSFont,
 ) {
     let hl_color = &theme.hint_hl_color;
     let fg_color = &theme.hint_fg_color;
-    let font = &theme.hint_font;
 
     unsafe {
         attr_string.addAttribute_value_range(
@@ -761,6 +787,7 @@ mod hint_label_tests {
             &screen(),
             &GlyphlowTheme::default(),
             &HintKeys::new("asdfjkl;"),
+            None,
             200.0,
         );
 
@@ -782,6 +809,7 @@ mod hint_label_tests {
             &screen(),
             &theme,
             &HintKeys::default(),
+            None,
             200.0,
         );
         assert_eq!(digits, 1);
@@ -794,6 +822,7 @@ mod hint_label_tests {
             &screen(),
             &theme,
             &HintKeys::new("asdfjkl;"),
+            None,
             200.0,
         );
         assert_eq!(digits, 2);
@@ -856,6 +885,7 @@ mod hint_label_tests {
             &screen(),
             &GlyphlowTheme::default(),
             &HintKeys::default(),
+            None,
             200.0,
         );
         assert_eq!(digits, 0);

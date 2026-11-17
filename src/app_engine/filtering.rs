@@ -51,6 +51,7 @@ impl AppEngine {
                     &self.overlay_frame,
                     &self.config.theme,
                     &self.config.hint_keys,
+                    None,
                     self.config.colored_frame_min_size as f64,
                 )
             };
@@ -261,8 +262,12 @@ impl AppEngine {
                     self.draw_word_picker();
                 } else if !self.multi_selection.is_on || self.multi_selection.one_side_idx.is_none()
                 {
-                    // Go back to text action menu
+                    // Go back to text action menu, taking the in-place hints down
+                    // with the picker.
                     self.word_picker = None;
+                    self.clear_hints();
+                    self.hint_boxes.clear();
+                    self.search_targets.clear();
                     self.show_element_menu(RoleOfInterest::PseudoText);
                 } else {
                     self.multi_selection.clear_one_side();
@@ -370,7 +375,11 @@ impl AppEngine {
                 self.filter_by_key().await;
             }
             FilterMode::WordPicking => {
-                self.draw_word_picker();
+                // In place, checking redraws the hints as it filters them, so
+                // drawing here as well would update twice.
+                if !self.word_picking_in_place() {
+                    self.draw_word_picker();
+                }
                 self.check_word_picker();
             }
         }
@@ -378,6 +387,11 @@ impl AppEngine {
 
     /// If the match is unambiguous, update the selected text and show the menu.
     pub(super) fn check_word_picker(&mut self) {
+        if self.word_picking_in_place() {
+            self.check_word_hints();
+            return;
+        }
+
         if !self.ready_for_unique() {
             return;
         }
@@ -391,22 +405,71 @@ impl AppEngine {
         if let Some((idx, text)) = wp.unambiguous_match(self.multi_selection.is_on) {
             if self.multi_selection.is_on {
                 if let Some((idx1, idx2)) = self.multi_selection.set_one_side(idx) {
-                    let text = wp
-                        .select_range(idx1, idx2)
-                        .expect("Internal Error: wrong word picker indexing.");
-                    new_text = Some(text)
+                    new_text = wp.select_range(idx1, idx2);
                 } else {
                     self.hint_prefix.clear();
                     self.search_prefix.clear();
                     self.draw_word_picker();
                 }
             } else {
-                new_text = Some(text.to_string())
+                new_text = wp.word_offset(idx).map(|offset| (text.to_string(), offset));
             }
         };
-        if let Some(nt) = new_text {
-            self.update_selected_text_and_show_menu(nt);
+        if let Some((text, offset)) = new_text {
+            self.update_selected_text_at_and_show_menu(text, offset);
         }
+    }
+
+    /// The in-place counterpart of [`Self::check_word_picker`]: filter the word
+    /// hint boxes and act on the word once only one is left visible.
+    fn check_word_hints(&mut self) {
+        // Refresh first: a partial prefix still narrows what is visible, even
+        // though it cannot act yet.
+        let visible = self.update_hints();
+        let Some(hb_idx) = self.sole_hint(&visible) else {
+            return;
+        };
+        let Some(word_idx) = self.hint_boxes.get(hb_idx).map(|hb| hb.idx) else {
+            return;
+        };
+
+        let picked = if self.multi_selection.is_on {
+            match self.multi_selection.set_one_side(word_idx) {
+                Some((idx1, idx2)) => self
+                    .word_picker
+                    .as_ref()
+                    .and_then(|wp| wp.select_range(idx1, idx2)),
+                None => {
+                    self.hint_prefix.clear();
+                    self.search_prefix.clear();
+                    self.update_hints();
+                    None
+                }
+            }
+        } else {
+            self.word_picker.as_ref().and_then(|wp| {
+                let offset = wp.word_offset(word_idx)?;
+                wp.word_text(word_idx)
+                    .map(|text| (text.to_string(), offset))
+            })
+        };
+
+        if let Some((text, offset)) = picked {
+            self.commit_word(text, offset);
+        }
+    }
+
+    /// Take the picked word as the selection and offer the text menu for it.
+    /// `offset` is where it starts in the source element, so another split of it
+    /// still knows where the words are.
+    fn commit_word(&mut self, text: String, offset: usize) {
+        self.clear_hints();
+        self.hint_boxes.clear();
+        self.search_targets.clear();
+        self.hint_prefix.clear();
+        self.search_prefix.clear();
+        self.word_picker = None;
+        self.update_selected_text_at_and_show_menu(text, offset);
     }
 
     /// A tap is a sticky click modifier in the grid and on a clickable target,
