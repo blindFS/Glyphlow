@@ -575,12 +575,14 @@ mod tests {
     /// so the clamp never receives inverted bounds — and never enlarges a label.
     #[test]
     fn hint_font_size_never_enlarges_a_small_configured_font() {
-        let mut theme = GlyphlowTheme::default();
-        theme.hint_font = objc2_app_kit::NSFont::fontWithName_size(
-            objc2_foundation::ns_string!("Andale Mono"),
-            6.0,
-        )
-        .unwrap();
+        let theme = GlyphlowTheme {
+            hint_font: objc2_app_kit::NSFont::fontWithName_size(
+                objc2_foundation::ns_string!("Andale Mono"),
+                6.0,
+            )
+            .unwrap(),
+            ..Default::default()
+        };
 
         let mut picker = picker_with(&["a"], &[]);
         picker.words[0].frame = Some(Frame::new(0.0, 0.0, 0.0, 20.0));
