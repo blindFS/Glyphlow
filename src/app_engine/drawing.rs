@@ -2,7 +2,7 @@ use super::{AppEngine, menu::MenuRow};
 use crate::{
     MenuScope, Mode,
     ax_element::ElementOfInterest,
-    config::BACKSPACE_CHAR,
+    config::{BACKSPACE_CHAR, GlyphlowTheme},
     user_interface::{MenuString, MenuStyle, hint_boxes_from_frames},
     util::search_regex,
 };
@@ -50,12 +50,27 @@ impl AppEngine {
         self.selected = Some(eoi);
     }
 
+    /// The theme hint layers draw with: the configured one, or — when an
+    /// in-place word picker has to shrink the hints to fit its words — the same
+    /// theme with the hint font rescaled.
+    fn hint_theme(&self) -> GlyphlowTheme {
+        let Some(size) = self
+            .word_picker
+            .as_ref()
+            .and_then(|wp| wp.hint_font_size(&self.config.theme))
+        else {
+            return self.config.theme.clone();
+        };
+        self.config.theme.with_hint_font_size(size)
+    }
+
     pub(super) fn draw_hints(&mut self) {
+        let theme = self.hint_theme();
         autoreleasepool(|_| {
             for hb in self.hint_boxes.iter_mut() {
                 hb.draw(
                     &self.drawer.root,
-                    &self.config.theme,
+                    &theme,
                     self.hint_prefix.len(),
                     &self.overlay_frame,
                 );
@@ -69,13 +84,14 @@ impl AppEngine {
     /// box out, so relabelling earlier would move the layer twice and restart
     /// its animation.
     pub(super) fn relabel_hints(&mut self) {
+        let theme = self.hint_theme();
         for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
             let label = self
                 .config
                 .hint_keys
                 .label_for_index(i, Some(self.hint_width));
             if label != hb.label {
-                hb.set_label(label, &self.overlay_frame, &self.config.theme);
+                hb.set_label(label, &self.overlay_frame, &theme);
             }
         }
     }
@@ -83,14 +99,16 @@ impl AppEngine {
     /// Push the final positions and labels to the layers without clearing, so
     /// nothing flickers.
     pub(super) fn finalize_hints(&self) {
-        self.hint_boxes.iter().for_each(|hb| {
-            hb.refresh(0, &self.overlay_frame, &self.config.theme);
-        })
+        let theme = self.hint_theme();
+        self.hint_boxes
+            .iter()
+            .for_each(|hb| hb.refresh(0, &self.overlay_frame, &theme));
     }
 
     /// Show or hide the hint boxes, refresh their text and positions, and return
     /// the indices of the ones left visible.
     pub(super) fn update_hints(&mut self) -> Vec<usize> {
+        let theme = self.hint_theme();
         let mut visible_indices = vec![];
         if self.hint_boxes.is_empty() {
             return visible_indices;
@@ -117,7 +135,7 @@ impl AppEngine {
                 hb.set_visible(visible);
 
                 if visible {
-                    hb.refresh(prefix_len, &self.overlay_frame, &self.config.theme);
+                    hb.refresh(prefix_len, &self.overlay_frame, &theme);
                     nothing_visible = false;
                     visible_indices.push(idx);
                 }
@@ -222,25 +240,20 @@ impl AppEngine {
     /// The source element placed every word, so no menu is needed: the hints sit
     /// on the words themselves and are filtered exactly like element hints.
     pub(super) fn start_word_hints(&mut self) {
-        let (frames, font_size, search_targets) = match self.word_picker.as_ref() {
-            Some(wp) => match wp.frames() {
-                Some(frames) => (
-                    frames.to_vec(),
-                    wp.hint_font_size(&self.config.theme),
-                    wp.ascii_targets(),
-                ),
-                None => return,
-            },
-            None => return,
+        let Some(wp) = self.word_picker.as_ref() else {
+            return;
         };
+        let Some(frames) = wp.frames() else {
+            return;
+        };
+        let search_targets = wp.ascii_targets();
 
+        let theme = self.hint_theme();
         let (digits, hint_boxes) = hint_boxes_from_frames(
-            frames.len(),
             frames.into_iter(),
             &self.overlay_frame,
-            &self.config.theme,
+            &theme,
             &self.config.hint_keys,
-            font_size,
             self.config.colored_frame_min_size as f64,
         );
         self.hint_width = digits;

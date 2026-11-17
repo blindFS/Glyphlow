@@ -43,15 +43,12 @@ impl AppEngine {
                 return;
             };
             let (digits, ocr_hints) = {
-                let len = ocr_res.len();
                 let iter = ocr_res.iter().map(|(_, rect)| Frame::from_cgrect(rect));
                 hint_boxes_from_frames(
-                    len,
                     iter,
                     &self.overlay_frame,
                     &self.config.theme,
                     &self.config.hint_keys,
-                    None,
                     self.config.colored_frame_min_size as f64,
                 )
             };
@@ -412,7 +409,7 @@ impl AppEngine {
                     self.draw_word_picker();
                 }
             } else {
-                new_text = wp.word_offset(idx).map(|offset| (text.to_string(), offset));
+                new_text = wp.word(idx).map(|(_, offset)| (text.to_string(), offset));
             }
         };
         if let Some((text, offset)) = new_text {
@@ -447,11 +444,10 @@ impl AppEngine {
                 }
             }
         } else {
-            self.word_picker.as_ref().and_then(|wp| {
-                let offset = wp.word_offset(word_idx)?;
-                wp.word_text(word_idx)
-                    .map(|text| (text.to_string(), offset))
-            })
+            self.word_picker
+                .as_ref()
+                .and_then(|wp| wp.word(word_idx))
+                .map(|(text, offset)| (text.to_string(), offset))
         };
 
         if let Some((text, offset)) = picked {

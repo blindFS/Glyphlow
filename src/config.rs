@@ -267,6 +267,20 @@ impl Default for GlyphlowTheme {
     }
 }
 
+impl GlyphlowTheme {
+    /// The same theme with the hint font at `size`.
+    ///
+    /// Used when hint boxes have to shrink to fit the text they point at. The
+    /// rest of the theme is reference counted, so the clone is cheap.
+    pub fn with_hint_font_size(&self, size: f64) -> Self {
+        Self {
+            hint_font: NSFont::fontWithName_size(&self.hint_font.fontName(), size)
+                .expect("Failed to resize the hint font."),
+            ..self.clone()
+        }
+    }
+}
+
 fn hex_to_rgba(hex: &str) -> Option<(f64, f64, f64, f64)> {
     let hex = hex.trim_start_matches('#');
     let to_float = |i: std::ops::Range<usize>| -> Option<f64> {

@@ -363,6 +363,16 @@ impl ElementOfInterest {
         }
     }
 
+    /// The screen frame of the element's text at `location` (UTF-16 units from
+    /// the start of [`Self::context`]), when the element can place it.
+    ///
+    /// The context may be a slice of the element's value, so its offset is added
+    /// here rather than left to every caller to remember.
+    pub fn bounds_for_range(&self, location: usize, length: usize) -> Option<Frame> {
+        self.element()?
+            .bounds_for_range(self.context_offset + location, length)
+    }
+
     pub fn equals_element(&self, other: &AXUIElement) -> bool {
         self.element().is_some_and(|this| this == other)
     }

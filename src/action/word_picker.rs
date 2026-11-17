@@ -1,10 +1,9 @@
 use crate::{
-    ax_element::GetAttribute,
+    ax_element::ElementOfInterest,
     config::{BACKSPACE_CHAR, GlyphlowTheme, HintKeys},
     user_interface::{MenuString, MenuStyle, UIDrawer},
     util::{Frame, lower_ascii, search_regex},
 };
-use accessibility::AXUIElement;
 use regex::Regex;
 use std::{ops::Range, sync::OnceLock};
 use unicode_width::UnicodeWidthStr;
@@ -21,12 +20,16 @@ fn entry_width(word: &str, digits: u32) -> usize {
 }
 
 /// A token of the picked text: where it sits in [`WordPicker::raw`], its hint
-/// label, and the folded form searches are matched against.
+/// label, the folded form searches are matched against, and — once the source
+/// element has placed it — its frame on screen.
 #[derive(Debug, Clone)]
 struct Word {
     text: Range<usize>,
     label: String,
     ascii: String,
+    /// All-or-nothing: either every word has one and the picker draws in place,
+    /// or none do and it draws a menu.
+    frame: Option<Frame>,
 }
 
 /// Splits a text into pickable words.
@@ -40,45 +43,42 @@ pub(crate) struct WordPicker {
     screen_ratio: f64,
     pub(crate) digits: u32,
     matched: Vec<usize>,
-    /// Where `raw` starts in the source element's text, in UTF-16 units. AX
-    /// ranges are absolute within the element, so every word frame query has to
-    /// be shifted by this much.
+    /// Where `raw` starts in the source element's text, in UTF-16 units, so a
+    /// picked word or range can report its absolute position.
     context_offset: usize,
-    /// One screen frame per word, in `words` order, when AX can provide them.
-    frames: Option<Vec<Frame>>,
 }
 
 impl WordPicker {
     /// `element` is the source the text was read from. It is only used to place
     /// the words on screen; `None`, or an element that cannot answer
-    /// `AXBoundsForRange`, keeps the menu fallback. `context_offset` is where
-    /// `text` starts in that element, since a split of an already-picked word or
-    /// range only owns a slice of it.
+    /// `AXBoundsForRange`, keeps the menu fallback. A narrowed context knows
+    /// where it sits in that element, so the picker does too.
     pub(crate) fn new(
         text: String,
         screen_ratio: f64,
         screen_frame: &Frame,
-        context_offset: usize,
         theme: &GlyphlowTheme,
         hint_keys: &HintKeys,
         drawer: &UIDrawer,
-        element: Option<&AXUIElement>,
+        element: Option<&ElementOfInterest>,
     ) -> Self {
         let (word_strings, offsets) = multilingual_split(&text);
         let digits = hint_keys.digits_for_len(word_strings.len());
-        let mut words = Vec::new();
-        for (i, (text, offset)) in word_strings.into_iter().zip(offsets).enumerate() {
+        let mut words = Vec::with_capacity(word_strings.len());
+        for (i, (word, offset)) in word_strings.into_iter().zip(offsets).enumerate() {
             let label = hint_keys.label_for_index(i, Some(digits));
-            let ascii = lower_ascii(&text);
             words.push(Word {
-                text: offset..offset + text.len(),
+                text: offset..offset + word.len(),
                 label,
-                ascii,
+                ascii: lower_ascii(&word),
+                frame: None,
             });
         }
 
-        let frames = element
-            .and_then(|element| word_frames(element, &text, &words, screen_frame, context_offset));
+        let context_offset = element.map_or(0, |element| element.context_offset);
+        if let Some(element) = element {
+            place_words(element, &text, &mut words, screen_frame);
+        }
 
         let word_picker = Self {
             raw: text,
@@ -87,7 +87,6 @@ impl WordPicker {
             screen_ratio,
             matched: Vec::new(),
             context_offset,
-            frames,
         };
 
         if !word_picker.in_place() {
@@ -101,12 +100,12 @@ impl WordPicker {
     /// Whether every word was placed on screen, so the picker can be drawn as
     /// hint boxes over the source text instead of as a menu.
     pub(crate) fn in_place(&self) -> bool {
-        self.frames.is_some()
+        !self.words.is_empty() && self.words.iter().all(|word| word.frame.is_some())
     }
 
     /// The frames of the words, when [`Self::in_place`] holds.
-    pub(crate) fn frames(&self) -> Option<&[Frame]> {
-        self.frames.as_deref()
+    pub(crate) fn frames(&self) -> Option<Vec<Frame>> {
+        self.words.iter().map(|word| word.frame).collect()
     }
 
     /// The folded search form of every word, for the hint box search.
@@ -114,16 +113,12 @@ impl WordPicker {
         self.words.iter().map(|word| word.ascii.clone()).collect()
     }
 
-    /// The word at `idx` as it appears in [`Self::raw`].
-    pub(crate) fn word_text(&self, idx: usize) -> Option<&str> {
-        self.words.get(idx).map(|word| &self.raw[word.text.clone()])
-    }
-
-    /// Where word `idx` starts in the source element's text, in UTF-16 units.
-    pub(crate) fn word_offset(&self, idx: usize) -> Option<usize> {
+    /// The word at `idx`, and where it starts in the source element's text
+    /// (UTF-16 units).
+    pub(crate) fn word(&self, idx: usize) -> Option<(&str, usize)> {
         let word = self.words.get(idx)?;
         let prefix = self.raw[..word.text.start].encode_utf16().count();
-        Some(self.context_offset + prefix)
+        Some((&self.raw[word.text.clone()], self.context_offset + prefix))
     }
 
     /// The hint font size that keeps a label inside the narrowest word, or
@@ -138,10 +133,14 @@ impl WordPicker {
     pub(crate) fn hint_font_size(&self, theme: &GlyphlowTheme) -> Option<f64> {
         const MIN_HINT_FONT_SIZE: f64 = 8.0;
 
-        let frames = self.frames.as_ref()?;
+        if !self.in_place() {
+            return None;
+        }
         let configured = theme.hint_font.pointSize();
-        let min_width = frames
+        let min_width = self
+            .words
             .iter()
+            .filter_map(|word| word.frame)
             .map(|frame| frame.size().0)
             .fold(f64::INFINITY, f64::min);
         let margins = theme.hint_margin_size as f64 * 2.0;
@@ -300,7 +299,7 @@ impl WordPicker {
         };
         let s_off = self.words.get(start)?.text.start;
         let e_off = self.words.get(end)?.text.end;
-        let offset = self.word_offset(start)?;
+        let offset = self.word(start)?.1;
 
         self.raw
             .get(s_off..e_off)
@@ -332,33 +331,33 @@ fn utf16_range(text: &str, range: &Range<usize>) -> (usize, usize) {
     (location, length)
 }
 
-/// Query the screen frame of every word, keeping the picker in place only if
-/// **all** of them resolve to a real, distinct rectangle on screen: a single
-/// missing one would leave a word that cannot be picked, and two words sharing
+/// Place every word on screen, or leave them all unplaced.
+///
+/// In place only works when **all** words resolve to a real, distinct rectangle:
+/// a missing one would leave a word that cannot be picked, and two words sharing
 /// a rectangle would stack their hints on top of each other.
-fn word_frames(
-    element: &AXUIElement,
-    text: &str,
-    words: &[Word],
-    screen_frame: &Frame,
-    context_offset: usize,
-) -> Option<Vec<Frame>> {
+fn place_words(element: &ElementOfInterest, text: &str, words: &mut [Word], screen_frame: &Frame) {
     if words.is_empty() {
-        return None;
+        return;
     }
 
     let frames = words
         .iter()
         .map(|word| {
             let (location, length) = utf16_range(text, &word.text);
-            let frame = element.bounds_for_range(context_offset + location, length)?;
+            let frame = element.bounds_for_range(location, length)?;
             let visible = frame.intersect(screen_frame)?;
             let (w, h) = visible.size();
             (w > 0.0 && h > 0.0).then_some(frame)
         })
-        .collect::<Option<Vec<Frame>>>()?;
+        .collect::<Option<Vec<Frame>>>();
 
-    frames_are_distinct(&frames).then_some(frames)
+    let Some(frames) = frames.filter(|frames| frames_are_distinct(frames)) else {
+        return;
+    };
+    for (word, frame) in words.iter_mut().zip(frames) {
+        word.frame = Some(frame);
+    }
 }
 
 /// Whether every word got a rectangle of its own.
@@ -519,11 +518,26 @@ mod tests {
         let mut picker = picker_with(&["alpha", "beta", "gamma"], &[]);
         picker.context_offset = 40;
 
-        assert_eq!(picker.word_offset(1), Some(46));
+        assert_eq!(picker.word(1).map(|(_, offset)| offset), Some(46));
         assert_eq!(
             picker.select_range(2, 1),
             Some(("beta gamma".to_string(), 46))
         );
+    }
+
+    /// In-place drawing needs a frame for every word: one left behind would be
+    /// a word the hints cannot point at.
+    #[test]
+    fn in_place_needs_every_word_placed() {
+        let mut picker = picker_with(&["alpha", "beta"], &[]);
+        assert!(!picker.in_place(), "nothing placed yet");
+
+        let frame = Frame::new(0.0, 0.0, 40.0, 20.0);
+        picker.words[0].frame = Some(frame);
+        assert!(!picker.in_place(), "one word would have no hint");
+
+        picker.words[1].frame = Some(Frame::new(0.0, 20.0, 40.0, 40.0));
+        assert!(picker.in_place());
     }
 
     /// AX reporting one rectangle for several words is the signal that the split
@@ -551,10 +565,8 @@ mod tests {
         #[case] expected: Option<f64>,
     ) {
         let mut picker = picker_with(&["a", "b"], &[]);
-        picker.frames = Some(vec![
-            Frame::new(0.0, 0.0, min_width, 20.0),
-            Frame::new(0.0, 0.0, 100.0, 20.0),
-        ]);
+        picker.words[0].frame = Some(Frame::new(0.0, 0.0, min_width, 20.0));
+        picker.words[1].frame = Some(Frame::new(0.0, 0.0, 100.0, 20.0));
 
         assert_eq!(picker.hint_font_size(&GlyphlowTheme::default()), expected);
     }
@@ -571,7 +583,7 @@ mod tests {
         .unwrap();
 
         let mut picker = picker_with(&["a"], &[]);
-        picker.frames = Some(vec![Frame::new(0.0, 0.0, 0.0, 20.0)]);
+        picker.words[0].frame = Some(Frame::new(0.0, 0.0, 0.0, 20.0));
 
         assert_eq!(picker.hint_font_size(&theme), None);
     }
@@ -592,6 +604,7 @@ mod tests {
                     text,
                     label: String::new(),
                     ascii: lower_ascii(w),
+                    frame: None,
                 }
             })
             .collect();
@@ -602,7 +615,6 @@ mod tests {
             digits: 1,
             matched: matched.to_vec(),
             context_offset: 0,
-            frames: None,
         }
     }
 

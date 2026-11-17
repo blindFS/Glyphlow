@@ -181,13 +181,11 @@ impl AppEngine {
     pub(super) fn perform_text_action(&mut self, ta: TextAction) {
         let Some(ElementOfInterest {
             context: Some(text),
-            context_offset,
             ..
         }) = self.selected.as_ref()
         else {
             panic!("Internal Error: No selected text in the text action menu.");
         };
-        let context_offset = *context_offset;
 
         let mut keep_drawing = true;
         // TODO:
@@ -220,19 +218,14 @@ impl AppEngine {
                 self.clear_cache();
                 let (w, h) = self.drawer.current_screen_frame.size();
                 let screen_ratio = w / (h + 0.01);
-                let element = self
-                    .selected
-                    .as_ref()
-                    .and_then(|eoi| eoi.element().cloned());
                 let word_picker = WordPicker::new(
                     text,
                     screen_ratio,
                     &self.overlay_frame,
-                    context_offset,
                     &self.config.theme,
                     &self.config.hint_keys,
                     &self.drawer,
-                    element.as_ref(),
+                    self.selected.as_ref(),
                 );
                 self.hint_width = word_picker.digits;
                 let in_place = word_picker.in_place();
