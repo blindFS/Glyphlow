@@ -76,8 +76,18 @@ impl WordPicker {
         }
 
         let context_offset = element.map_or(0, |element| element.context_offset);
-        if let Some(element) = element {
-            place_words(element, &text, &mut words, screen_frame);
+        match element {
+            Some(element) if element.element().is_some() => {
+                place_words(element, &text, &mut words, screen_frame)
+            }
+            Some(_) => log::info!(
+                "Word picker: the source is synthetic text with no AX element, so {} word(s) cannot be placed; falling back to the menu.",
+                words.len()
+            ),
+            None => log::info!(
+                "Word picker: there is no source element to place {} word(s) on; falling back to the menu.",
+                words.len()
+            ),
         }
 
         let word_picker = Self {
@@ -338,38 +348,56 @@ fn utf16_range(text: &str, range: &Range<usize>) -> (usize, usize) {
 /// a rectangle would stack their hints on top of each other.
 fn place_words(element: &ElementOfInterest, text: &str, words: &mut [Word], screen_frame: &Frame) {
     if words.is_empty() {
+        log::info!("Word picker: the text has no words to split; falling back to the menu.");
         return;
     }
 
-    let frames = words
-        .iter()
-        .map(|word| {
-            let (location, length) = utf16_range(text, &word.text);
-            let frame = element.bounds_for_range(location, length)?;
-            let visible = frame.intersect(screen_frame)?;
-            let (w, h) = visible.size();
-            (w > 0.0 && h > 0.0).then_some(frame)
-        })
-        .collect::<Option<Vec<Frame>>>();
+    let mut frames = Vec::with_capacity(words.len());
+    for (idx, word) in words.iter().enumerate() {
+        let word_text = &text[word.text.clone()];
+        let (location, length) = utf16_range(text, &word.text);
+        let Some(frame) = element.bounds_for_range(location, length) else {
+            log::info!(
+                "Word picker: AX could not place word {idx} `{word_text}` (range {location}..+{length}); falling back to the menu."
+            );
+            return;
+        };
+        let Some(visible) = frame.intersect(screen_frame) else {
+            log::info!(
+                "Word picker: word {idx} `{word_text}` at {frame:?} is outside the screen {screen_frame:?}; falling back to the menu."
+            );
+            return;
+        };
+        let (w, h) = visible.size();
+        if w <= 0.0 || h <= 0.0 {
+            log::info!(
+                "Word picker: word {idx} `{word_text}` at {frame:?} has no visible area {visible:?}; falling back to the menu."
+            );
+            return;
+        }
+        frames.push(frame);
+    }
 
-    let Some(frames) = frames.filter(|frames| frames_are_distinct(frames)) else {
+    if let Some((first, second, frame)) = first_shared_frame(&frames) {
+        log::info!(
+            "Word picker: words {first} `{}` and {second} `{}` share the frame {frame:?}; falling back to the menu.",
+            &text[words[first].text.clone()],
+            &text[words[second].text.clone()]
+        );
         return;
-    };
+    }
+
     for (word, frame) in words.iter_mut().zip(frames) {
         word.frame = Some(frame);
     }
 }
 
-/// Whether every word got a rectangle of its own.
-///
-/// AX can report one rectangle for several ranges (a text field that only
-/// exposes a single range, for instance). Hints drawn there could not be told
-/// apart, so such a split has to fall back to the menu.
-fn frames_are_distinct(frames: &[Frame]) -> bool {
-    frames
-        .iter()
-        .enumerate()
-        .all(|(idx, frame)| !frames[..idx].contains(frame))
+/// The first pair of frames that coincide, with both indices.
+fn first_shared_frame(frames: &[Frame]) -> Option<(usize, usize, Frame)> {
+    frames.iter().enumerate().find_map(|(idx, frame)| {
+        let earlier = frames[..idx].iter().position(|other| other == frame)?;
+        Some((earlier, idx, *frame))
+    })
 }
 
 /// Split `input` into pickable tokens, with each token's byte offset in `input`.
@@ -458,6 +486,15 @@ fn multilingual_split(input: &str) -> (Vec<String>, Vec<usize>) {
 mod tests {
     use super::*;
     use rstest::rstest;
+
+    /// Whether every word got a rectangle of its own.
+    ///
+    /// AX can report one rectangle for several ranges (a text field that only
+    /// exposes a single range, for instance). Hints drawn there could not be told
+    /// apart, so such a split has to fall back to the menu.
+    fn frames_are_distinct(frames: &[Frame]) -> bool {
+        first_shared_frame(frames).is_none()
+    }
 
     /// `multilingual_split` cuts a line into tokens at script boundaries and
     /// reports each token's *byte* offset, so every case pins both halves of

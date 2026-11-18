@@ -641,7 +641,12 @@ impl GetAttribute for AXUIElement {
 
     fn bounds_for_range(&self, location: usize, length: usize) -> Option<Frame> {
         let range = CFRange::init(location as isize, length as isize);
-        let wrapped_range = rust_type_to_cftype(range, kAXValueTypeCFRange)?;
+        let Some(wrapped_range) = rust_type_to_cftype(range, kAXValueTypeCFRange) else {
+            log::info!(
+                "AXBoundsForRange(location: {location}, length: {length}) failed: cannot wrap the range."
+            );
+            return None;
+        };
         let attribute = CFString::new(kAXBoundsForRangeParameterizedAttribute);
         let mut value_ref: CFTypeRef = std::ptr::null();
 
@@ -654,6 +659,14 @@ impl GetAttribute for AXUIElement {
             )
         };
         if err != kAXErrorSuccess || value_ref.is_null() {
+            log::info!(
+                "AXBoundsForRange(location: {location}, length: {length}) failed: error {err}{}.",
+                if value_ref.is_null() {
+                    ", null value"
+                } else {
+                    ""
+                }
+            );
             return None;
         }
         let value = unsafe { CFType::wrap_under_create_rule(value_ref) };
@@ -672,7 +685,13 @@ impl GetAttribute for AXUIElement {
                 &mut rect as *mut CGRect as *mut _,
             )
         };
-        has_rect.then(|| Frame::from_cgrect(&rect))
+        if !has_rect {
+            log::info!(
+                "AXBoundsForRange(location: {location}, length: {length}) failed: value is not a CGRect."
+            );
+            return None;
+        }
+        Some(Frame::from_cgrect(&rect))
     }
 
     fn inspect(&self, bundle_id: &str) -> String {
