@@ -2,11 +2,12 @@ use super::{AppEngine, menu::MenuRow};
 use crate::{
     MenuScope, Mode,
     ax_element::ElementOfInterest,
-    config::{BACKSPACE_CHAR, GlyphlowTheme},
+    config::BACKSPACE_CHAR,
     user_interface::{MenuString, MenuStyle, hint_boxes_from_frames},
     util::search_regex,
 };
-use objc2::rc::autoreleasepool;
+use objc2::{rc::Retained, rc::autoreleasepool};
+use objc2_app_kit::NSFont;
 use std::borrow::Cow;
 
 const MAX_TEXT_DISPLAY_LEN: usize = 30;
@@ -50,27 +51,29 @@ impl AppEngine {
         self.selected = Some(eoi);
     }
 
-    /// The theme hint layers draw with: the configured one, or — when an
-    /// in-place word picker has to shrink the hints to fit its words — the same
-    /// theme with the hint font rescaled.
-    fn hint_theme(&self) -> GlyphlowTheme {
+    /// The hint font: the configured one, or a smaller one when an in-place
+    /// word picker has to fit its labels inside short words.
+    fn hint_font(&self) -> Retained<NSFont> {
+        let theme = &self.config.theme;
         let Some(size) = self
             .word_picker
             .as_ref()
-            .and_then(|wp| wp.hint_font_size(&self.config.theme))
+            .and_then(|wp| wp.hint_font_size(theme))
         else {
-            return self.config.theme.clone();
+            return theme.hint_font.clone();
         };
-        self.config.theme.with_hint_font_size(size)
+        NSFont::fontWithName_size(&theme.hint_font.fontName(), size)
+            .expect("Failed to resize the hint font.")
     }
 
     pub(super) fn draw_hints(&mut self) {
-        let theme = self.hint_theme();
+        let font = self.hint_font();
         autoreleasepool(|_| {
             for hb in self.hint_boxes.iter_mut() {
                 hb.draw(
                     &self.drawer.root,
-                    &theme,
+                    &self.config.theme,
+                    &font,
                     self.hint_prefix.len(),
                     &self.overlay_frame,
                 );
@@ -84,14 +87,14 @@ impl AppEngine {
     /// box out, so relabelling earlier would move the layer twice and restart
     /// its animation.
     pub(super) fn relabel_hints(&mut self) {
-        let theme = self.hint_theme();
+        let font = self.hint_font();
         for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
             let label = self
                 .config
                 .hint_keys
                 .label_for_index(i, Some(self.hint_width));
             if label != hb.label {
-                hb.set_label(label, &self.overlay_frame, &theme);
+                hb.set_label(label, &self.overlay_frame, &self.config.theme, &font);
             }
         }
     }
@@ -99,20 +102,21 @@ impl AppEngine {
     /// Push the final positions and labels to the layers without clearing, so
     /// nothing flickers.
     pub(super) fn finalize_hints(&self) {
-        let theme = self.hint_theme();
-        self.hint_boxes
-            .iter()
-            .for_each(|hb| hb.refresh(0, &self.overlay_frame, &theme));
+        let font = self.hint_font();
+        self.hint_boxes.iter().for_each(|hb| {
+            hb.refresh(0, &self.overlay_frame, &self.config.theme, &font);
+        });
     }
 
     /// Show or hide the hint boxes, refresh their text and positions, and return
     /// the indices of the ones left visible.
     pub(super) fn update_hints(&mut self) -> Vec<usize> {
-        let theme = self.hint_theme();
         let mut visible_indices = vec![];
         if self.hint_boxes.is_empty() {
             return visible_indices;
         }
+        let font = self.hint_font();
+        let in_place = self.word_picking_in_place();
         let prefix_len = self.hint_prefix.len();
         let mut nothing_visible = true;
         let search_pattern = search_regex(&self.search_prefix);
@@ -124,9 +128,16 @@ impl AppEngine {
                         .multi_selection
                         .one_side_idx
                         .is_some_and(|idx| idx == hb.idx);
+                let search_target = if in_place {
+                    self.word_picker
+                        .as_ref()
+                        .and_then(|wp| wp.search_target(idx))
+                } else {
+                    self.search_targets.get(idx).map(String::as_str)
+                };
                 let matches_search_prefix = search_pattern
                     .as_ref()
-                    .is_none_or(|p| self.search_targets.get(idx).is_some_and(|h| p.is_match(h)));
+                    .is_none_or(|p| search_target.is_some_and(|h| p.is_match(h)));
                 let visible = !hb.disabled
                     && hb.label.starts_with(&self.hint_prefix)
                     && matches_search_prefix
@@ -135,7 +146,7 @@ impl AppEngine {
                 hb.set_visible(visible);
 
                 if visible {
-                    hb.refresh(prefix_len, &self.overlay_frame, &theme);
+                    hb.refresh(prefix_len, &self.overlay_frame, &self.config.theme, &font);
                     nothing_visible = false;
                     visible_indices.push(idx);
                 }
@@ -243,21 +254,16 @@ impl AppEngine {
         let Some(wp) = self.word_picker.as_ref() else {
             return;
         };
-        let Some(frames) = wp.frames() else {
-            return;
-        };
-        let search_targets = wp.ascii_targets();
-
-        let theme = self.hint_theme();
+        let font = self.hint_font();
         let (digits, hint_boxes) = hint_boxes_from_frames(
-            frames.into_iter(),
+            wp.frames(),
             &self.overlay_frame,
-            &theme,
+            &self.config.theme,
+            &font,
             &self.config.hint_keys,
             self.config.colored_frame_min_size as f64,
         );
         self.hint_width = digits;
-        self.search_targets = search_targets;
         self.hint_boxes = hint_boxes;
         self.draw_hints();
     }

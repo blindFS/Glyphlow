@@ -1,11 +1,11 @@
 use crate::{
-    ax_element::ElementOfInterest,
+    ax_element::{ElementOfInterest, GetAttribute},
     config::{BACKSPACE_CHAR, GlyphlowTheme, HintKeys},
     user_interface::{MenuString, MenuStyle, UIDrawer},
-    util::{Frame, lower_ascii, search_regex},
+    util::{Frame, lower_ascii, search_regex, shrink_font_size},
 };
 use regex::Regex;
-use std::{ops::Range, sync::OnceLock};
+use std::{collections::HashMap, ops::Range, sync::OnceLock};
 use unicode_width::UnicodeWidthStr;
 
 /// Between a word and its own label.
@@ -76,18 +76,15 @@ impl WordPicker {
         }
 
         let context_offset = element.map_or(0, |element| element.context_offset);
-        match element {
-            Some(element) if element.element().is_some() => {
-                place_words(element, &text, &mut words, screen_frame)
+        if let Some(element) = element {
+            if element.element().is_some() {
+                place_words(element, &text, &mut words, screen_frame);
+            } else {
+                log::info!(
+                    "Word picker: the source is synthetic text with no AX element, so {} word(s) cannot be placed; falling back to the menu.",
+                    words.len()
+                );
             }
-            Some(_) => log::info!(
-                "Word picker: the source is synthetic text with no AX element, so {} word(s) cannot be placed; falling back to the menu.",
-                words.len()
-            ),
-            None => log::info!(
-                "Word picker: there is no source element to place {} word(s) on; falling back to the menu.",
-                words.len()
-            ),
         }
 
         let word_picker = Self {
@@ -114,13 +111,15 @@ impl WordPicker {
     }
 
     /// The frames of the words, when [`Self::in_place`] holds.
-    pub(crate) fn frames(&self) -> Option<Vec<Frame>> {
-        self.words.iter().map(|word| word.frame).collect()
+    pub(crate) fn frames(&self) -> impl ExactSizeIterator<Item = Frame> + '_ {
+        self.words
+            .iter()
+            .map(|word| word.frame.expect("in_place checks every word's frame"))
     }
 
-    /// The folded search form of every word, for the hint box search.
-    pub(crate) fn ascii_targets(&self) -> Vec<String> {
-        self.words.iter().map(|word| word.ascii.clone()).collect()
+    /// The folded search form of the word at `idx`.
+    pub(crate) fn search_target(&self, idx: usize) -> Option<&str> {
+        self.words.get(idx).map(|word| word.ascii.as_str())
     }
 
     /// The word at `idx`, and where it starts in the source element's text
@@ -154,14 +153,13 @@ impl WordPicker {
             .map(|frame| frame.size().0)
             .fold(f64::INFINITY, f64::min);
         let margins = theme.hint_margin_size as f64 * 2.0;
-        let label_em = self.digits.max(1) as f64 * 0.8;
-        let fitting = (min_width - margins).max(0.0) / label_em;
+        let label_width = configured * self.digits.max(1) as f64 * 0.8;
 
         // Collapsing the floor to the configured size keeps both bounds in order
         // when the configured font is already smaller than the floor.
         let floor = MIN_HINT_FONT_SIZE.min(configured);
-        let size = fitting.clamp(floor, configured);
-        (size < configured).then_some(size)
+        let ratio = (min_width - margins).max(0.0) / label_width;
+        shrink_font_size(ratio, configured, floor).filter(|&size| size < configured)
     }
 
     pub(crate) fn update_text_layer(
@@ -309,7 +307,7 @@ impl WordPicker {
         };
         let s_off = self.words.get(start)?.text.start;
         let e_off = self.words.get(end)?.text.end;
-        let offset = self.word(start)?.1;
+        let offset = self.context_offset + self.raw[..s_off].encode_utf16().count();
 
         self.raw
             .get(s_off..e_off)
@@ -356,7 +354,10 @@ fn place_words(element: &ElementOfInterest, text: &str, words: &mut [Word], scre
     for (idx, word) in words.iter().enumerate() {
         let word_text = &text[word.text.clone()];
         let (location, length) = utf16_range(text, &word.text);
-        let Some(frame) = element.bounds_for_range(location, length) else {
+        let Some(frame) = element
+            .element()
+            .and_then(|ax| ax.bounds_for_range(element.context_offset + location, length))
+        else {
             log::info!(
                 "Word picker: AX could not place word {idx} `{word_text}` (range {location}..+{length}); falling back to the menu."
             );
@@ -378,7 +379,7 @@ fn place_words(element: &ElementOfInterest, text: &str, words: &mut [Word], scre
         frames.push(frame);
     }
 
-    if let Some((first, second, frame)) = first_shared_frame(&frames) {
+    if let Some((first, second, frame)) = duplicate_frame(&frames) {
         log::info!(
             "Word picker: words {first} `{}` and {second} `{}` share the frame {frame:?}; falling back to the menu.",
             &text[words[first].text.clone()],
@@ -393,10 +394,11 @@ fn place_words(element: &ElementOfInterest, text: &str, words: &mut [Word], scre
 }
 
 /// The first pair of frames that coincide, with both indices.
-fn first_shared_frame(frames: &[Frame]) -> Option<(usize, usize, Frame)> {
+fn duplicate_frame(frames: &[Frame]) -> Option<(usize, usize, Frame)> {
+    let mut seen = HashMap::with_capacity(frames.len());
     frames.iter().enumerate().find_map(|(idx, frame)| {
-        let earlier = frames[..idx].iter().position(|other| other == frame)?;
-        Some((earlier, idx, *frame))
+        seen.insert(*frame, idx)
+            .map(|earlier| (earlier, idx, *frame))
     })
 }
 
@@ -487,15 +489,6 @@ mod tests {
     use super::*;
     use rstest::rstest;
 
-    /// Whether every word got a rectangle of its own.
-    ///
-    /// AX can report one rectangle for several ranges (a text field that only
-    /// exposes a single range, for instance). Hints drawn there could not be told
-    /// apart, so such a split has to fall back to the menu.
-    fn frames_are_distinct(frames: &[Frame]) -> bool {
-        first_shared_frame(frames).is_none()
-    }
-
     /// `multilingual_split` cuts a line into tokens at script boundaries and
     /// reports each token's *byte* offset, so every case pins both halves of
     /// the returned tuple.
@@ -584,11 +577,14 @@ mod tests {
         let first = Frame::new(0.0, 0.0, 40.0, 20.0);
         let second = Frame::new(40.0, 0.0, 80.0, 20.0);
 
-        assert!(frames_are_distinct(&[]));
-        assert!(frames_are_distinct(&[first]));
-        assert!(frames_are_distinct(&[first, second]));
-        assert!(!frames_are_distinct(&[first, first]));
-        assert!(!frames_are_distinct(&[first, second, first]));
+        assert!(duplicate_frame(&[]).is_none());
+        assert!(duplicate_frame(&[first]).is_none());
+        assert!(duplicate_frame(&[first, second]).is_none());
+        assert_eq!(duplicate_frame(&[first, first]), Some((0, 1, first)));
+        assert_eq!(
+            duplicate_frame(&[first, second, first]),
+            Some((0, 2, first))
+        );
     }
 
     /// The smallest word decides the font, so that is the width varied here.

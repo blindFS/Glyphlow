@@ -84,14 +84,20 @@ impl HintBox {
     /// This is the only way a box's size changes, which is what lets every later
     /// [`Self::refresh`] skip measuring. Call it once the position is final: the
     /// layout moves the layer, and a later move restarts the animation.
-    pub fn set_label(&mut self, label: String, overlay_frame: &Frame, theme: &GlyphlowTheme) {
+    pub fn set_label(
+        &mut self,
+        label: String,
+        overlay_frame: &Frame,
+        theme: &GlyphlowTheme,
+        font: &NSFont,
+    ) {
         self.label = label;
-        self.layout(overlay_frame, theme);
+        self.layout(overlay_frame, theme, font);
     }
 
     /// Size of the triangle pointing from the box at the element.
-    fn geometry(&self, theme: &GlyphlowTheme) -> (f64, f64) {
-        let font_size = theme.hint_font.pointSize();
+    fn geometry(font: &NSFont) -> (f64, f64) {
+        let font_size = font.pointSize();
         (font_size / 2.0, font_size / 2.0) // (width, height)
     }
 
@@ -99,19 +105,14 @@ impl HintBox {
         &self,
         prefix_len: usize,
         theme: &GlyphlowTheme,
+        font: &NSFont,
     ) -> Retained<NSMutableAttributedString> {
         let label_string = NSString::from_str(&self.label);
         let attr_string = NSMutableAttributedString::initWithString(
             NSMutableAttributedString::alloc(),
             &label_string,
         );
-        update_hint_text_with_attr(
-            &attr_string,
-            &self.label,
-            prefix_len,
-            theme,
-            &theme.hint_font,
-        );
+        update_hint_text_with_attr(&attr_string, &self.label, prefix_len, theme, font);
         attr_string
     }
 
@@ -165,6 +166,7 @@ impl HintBox {
         &mut self,
         root_layer: &CALayer,
         theme: &GlyphlowTheme,
+        font: &NSFont,
         key_prefix_len: usize,
         overlay_frame: &Frame,
     ) {
@@ -195,8 +197,8 @@ impl HintBox {
             .setShadowOffset(CGSize::new(0.0, SHADOW_OFFSET_Y));
         self.tri_layer.setFillColor(Some(bg_color));
 
-        self.render(key_prefix_len, theme);
-        self.layout(overlay_frame, theme);
+        self.render(key_prefix_len, theme, font);
+        self.layout(overlay_frame, theme, font);
 
         if self.box_layer.superlayer().is_none() {
             root_layer.addSublayer(&self.box_layer);
@@ -206,8 +208,8 @@ impl HintBox {
     /// Measure the label and place the box. The size cannot be derived from the
     /// digit count — a `W` is wider than an `I` — so this runs wherever the
     /// label changes, and never on a redraw.
-    fn layout(&self, overlay_frame: &Frame, theme: &GlyphlowTheme) {
-        let attr_string = self.attributed_string(0, theme);
+    fn layout(&self, overlay_frame: &Frame, theme: &GlyphlowTheme, font: &NSFont) {
+        let attr_string = self.attributed_string(0, theme, font);
         let (text_size, _) = estimate_frame_for_text(
             &attr_string,
             (f64::MAX, f64::MAX), // No constraints for label
@@ -221,12 +223,12 @@ impl HintBox {
             text_size.width + (margin * 2.0),
             text_size.height + (margin * 2.0),
         );
-        self.place_box(box_size, overlay_frame, theme);
+        self.place_box(box_size, overlay_frame, font);
     }
 
     /// Puts the box at the origin `box_size` gives it, and redraws its triangle.
-    fn place_box(&self, box_size: CGSize, overlay_frame: &Frame, theme: &GlyphlowTheme) {
-        let (tri_width, tri_height) = self.geometry(theme);
+    fn place_box(&self, box_size: CGSize, overlay_frame: &Frame, font: &NSFont) {
+        let (tri_width, tri_height) = Self::geometry(font);
         let (origin, x_offset, y_offset) =
             self.calculate_origin(box_size, overlay_frame, tri_height);
 
@@ -241,8 +243,8 @@ impl HintBox {
     }
 
     /// The one place that builds the attributed string and hands it to the layer.
-    fn render(&self, prefix_len: usize, theme: &GlyphlowTheme) {
-        let attr_string = self.attributed_string(prefix_len, theme);
+    fn render(&self, prefix_len: usize, theme: &GlyphlowTheme, font: &NSFont) {
+        let attr_string = self.attributed_string(prefix_len, theme, font);
         unsafe {
             self.text_layer.setString(Some(&attr_string));
         }
@@ -252,17 +254,23 @@ impl HintBox {
     ///
     /// A resize needs no handling here: the label's size only changes through
     /// [`Self::set_label`], which lays the box out again on the spot.
-    fn update_position(&self, screen_frame: &Frame, theme: &GlyphlowTheme) {
+    fn update_position(&self, screen_frame: &Frame, font: &NSFont) {
         if self.delta == (0.0, 0.0) {
             return;
         }
-        self.place_box(self.box_layer.frame().size, screen_frame, theme);
+        self.place_box(self.box_layer.frame().size, screen_frame, font);
     }
 
     /// Re-render the text at `prefix_len`, then follow the box if it moved.
-    pub fn refresh(&self, prefix_len: usize, screen_frame: &Frame, theme: &GlyphlowTheme) {
-        self.render(prefix_len, theme);
-        self.update_position(screen_frame, theme);
+    pub fn refresh(
+        &self,
+        prefix_len: usize,
+        screen_frame: &Frame,
+        theme: &GlyphlowTheme,
+        font: &NSFont,
+    ) {
+        self.render(prefix_len, theme, font);
+        self.update_position(screen_frame, font);
         if prefix_len > 0
             && let Some(frame_layer) = &self.frame_layer
         {
@@ -328,6 +336,7 @@ pub fn hint_boxes_from_frames(
     frames: impl ExactSizeIterator<Item = Frame>,
     screen_frame: &Frame,
     theme: &GlyphlowTheme,
+    font: &NSFont,
     hint_keys: &HintKeys,
     colored_frame_min_size: f64,
 ) -> (u32, Vec<HintBox>) {
@@ -358,7 +367,7 @@ pub fn hint_boxes_from_frames(
         )
     }));
 
-    resolve_collisions(&mut boxes, digits, theme);
+    resolve_collisions(&mut boxes, digits, theme, font.pointSize());
 
     (digits, boxes)
 }
@@ -369,8 +378,12 @@ pub const MAX_COLLISION_OPS: usize = 150;
 ///
 /// The thresholds are estimated from the font rather than measured, because this
 /// also runs before the boxes are laid out.
-pub fn resolve_collisions(boxes: &mut Vec<HintBox>, digits: u32, theme: &GlyphlowTheme) {
-    let font_size = theme.hint_font.pointSize();
+pub fn resolve_collisions(
+    boxes: &mut Vec<HintBox>,
+    digits: u32,
+    theme: &GlyphlowTheme,
+    font_size: f64,
+) {
     let x_thres = font_size * digits as f64 * 0.8 + 2.0 * theme.hint_margin_size as f64;
     let y_thres = font_size * 1.5 + 2.0 * theme.hint_margin_size as f64;
     // A test has no pointer worth respecting, and reading the real one would make
@@ -762,10 +775,12 @@ mod hint_label_tests {
 
     #[test]
     fn test_hint_boxes_use_configured_keys() {
+        let theme = GlyphlowTheme::default();
         let (digits, boxes) = hint_boxes_from_frames(
             frames(4),
             &screen(),
-            &GlyphlowTheme::default(),
+            &theme,
+            &theme.hint_font,
             &HintKeys::new("asdfjkl;"),
             200.0,
         );
@@ -782,8 +797,14 @@ mod hint_label_tests {
         let theme = GlyphlowTheme::default();
 
         // The full alphabet addresses 10 hints with a single keystroke ...
-        let (digits, boxes) =
-            hint_boxes_from_frames(frames(10), &screen(), &theme, &HintKeys::default(), 200.0);
+        let (digits, boxes) = hint_boxes_from_frames(
+            frames(10),
+            &screen(),
+            &theme,
+            &theme.hint_font,
+            &HintKeys::default(),
+            200.0,
+        );
         assert_eq!(digits, 1);
         assert_eq!(boxes[9].label, "J");
 
@@ -792,6 +813,7 @@ mod hint_label_tests {
             frames(10),
             &screen(),
             &theme,
+            &theme.hint_font,
             &HintKeys::new("asdfjkl;"),
             200.0,
         );
@@ -821,7 +843,7 @@ mod hint_label_tests {
             None,
         );
 
-        hb.set_label("C".to_string(), &screen, &theme);
+        hb.set_label("C".to_string(), &screen, &theme, &theme.hint_font);
         let narrow = hb.box_layer.frame();
 
         // Collision resolution has already run, so the box's final position is in
@@ -830,11 +852,11 @@ mod hint_label_tests {
         hb.y += dy;
         hb.delta = (dx, dy);
 
-        hb.set_label("CA".to_string(), &screen, &theme);
+        hb.set_label("CA".to_string(), &screen, &theme, &theme.hint_font);
         let settled = hb.box_layer.frame();
 
         // What `finalize_hints` -> `refresh` -> `update_position` does afterwards.
-        hb.update_position(&screen, &theme);
+        hb.update_position(&screen, &theme.hint_font);
 
         assert!(
             settled.size.width > narrow.size.width,
@@ -849,10 +871,12 @@ mod hint_label_tests {
 
     #[test]
     fn test_hint_boxes_empty_input() {
+        let theme = GlyphlowTheme::default();
         let (digits, boxes) = hint_boxes_from_frames(
             frames(0),
             &screen(),
-            &GlyphlowTheme::default(),
+            &theme,
+            &theme.hint_font,
             &HintKeys::default(),
             200.0,
         );
