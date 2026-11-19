@@ -228,7 +228,7 @@ impl AppEngine {
                     self.selected.as_ref(),
                 );
                 self.hint_width = word_picker.digits;
-                let in_place = word_picker.in_place();
+                let in_place = word_picker.in_place;
 
                 self.word_picker = Some(word_picker);
                 if in_place {

@@ -243,7 +243,7 @@ impl AppEngine {
 
     /// Whether the split words can be drawn in place over the source text.
     pub(super) fn word_picking_in_place(&self) -> bool {
-        self.word_picker.as_ref().is_some_and(|wp| wp.in_place())
+        self.word_picker.as_ref().is_some_and(|wp| wp.in_place)
     }
 
     /// Turn the words of an in-place word picker into hint boxes, once.
