@@ -372,6 +372,7 @@ impl AppEngine {
             hb.draw(
                 &self.drawer.root,
                 &self.config.theme,
+                &self.config.theme.hint_font,
                 0,
                 &self.overlay_frame,
             );
@@ -397,7 +398,12 @@ impl AppEngine {
             {
                 self.resolve_overlapping();
             }
-            resolve_collisions(&mut self.hint_boxes, self.hint_width, &self.config.theme);
+            resolve_collisions(
+                &mut self.hint_boxes,
+                self.hint_width,
+                self.config.theme.hint_margin_size.into(),
+                self.config.theme.hint_font.pointSize(),
+            );
             // Positions are final now, so relabelling here resizes and repositions
             // in one transaction instead of animating the box twice.
             self.relabel_hints();

@@ -3,10 +3,11 @@ use crate::{
     MenuScope, Mode,
     ax_element::ElementOfInterest,
     config::BACKSPACE_CHAR,
-    user_interface::{MenuString, MenuStyle},
+    user_interface::{MenuString, MenuStyle, hint_boxes_from_frames},
     util::search_regex,
 };
-use objc2::rc::autoreleasepool;
+use objc2::{rc::Retained, rc::autoreleasepool};
+use objc2_app_kit::NSFont;
 use std::borrow::Cow;
 
 const MAX_TEXT_DISPLAY_LEN: usize = 30;
@@ -50,12 +51,29 @@ impl AppEngine {
         self.selected = Some(eoi);
     }
 
+    /// The hint font: the configured one, or a smaller one when an in-place
+    /// word picker has to fit its labels inside short words.
+    fn hint_font(&self) -> Retained<NSFont> {
+        let theme = &self.config.theme;
+        let Some(size) = self
+            .word_picker
+            .as_ref()
+            .and_then(|wp| wp.hint_font_size(theme))
+        else {
+            return theme.hint_font.clone();
+        };
+        NSFont::fontWithName_size(&theme.hint_font.fontName(), size)
+            .expect("Failed to resize the hint font.")
+    }
+
     pub(super) fn draw_hints(&mut self) {
+        let font = self.hint_font();
         autoreleasepool(|_| {
             for hb in self.hint_boxes.iter_mut() {
                 hb.draw(
                     &self.drawer.root,
                     &self.config.theme,
+                    &font,
                     self.hint_prefix.len(),
                     &self.overlay_frame,
                 );
@@ -69,13 +87,14 @@ impl AppEngine {
     /// box out, so relabelling earlier would move the layer twice and restart
     /// its animation.
     pub(super) fn relabel_hints(&mut self) {
+        let font = self.hint_font();
         for (i, hb) in self.hint_boxes.iter_mut().enumerate() {
             let label = self
                 .config
                 .hint_keys
                 .label_for_index(i, Some(self.hint_width));
             if label != hb.label {
-                hb.set_label(label, &self.overlay_frame, &self.config.theme);
+                hb.set_label(label, &self.overlay_frame, &self.config.theme, &font);
             }
         }
     }
@@ -83,9 +102,10 @@ impl AppEngine {
     /// Push the final positions and labels to the layers without clearing, so
     /// nothing flickers.
     pub(super) fn finalize_hints(&self) {
+        let font = self.hint_font();
         self.hint_boxes.iter().for_each(|hb| {
-            hb.refresh(0, &self.overlay_frame, &self.config.theme);
-        })
+            hb.refresh(0, &self.overlay_frame, &self.config.theme, &font);
+        });
     }
 
     /// Show or hide the hint boxes, refresh their text and positions, and return
@@ -95,6 +115,8 @@ impl AppEngine {
         if self.hint_boxes.is_empty() {
             return visible_indices;
         }
+        let font = self.hint_font();
+        let in_place = self.word_picking_in_place();
         let prefix_len = self.hint_prefix.len();
         let mut nothing_visible = true;
         let search_pattern = search_regex(&self.search_prefix);
@@ -106,9 +128,16 @@ impl AppEngine {
                         .multi_selection
                         .one_side_idx
                         .is_some_and(|idx| idx == hb.idx);
+                let search_target = if in_place {
+                    self.word_picker
+                        .as_ref()
+                        .and_then(|wp| wp.search_target(idx))
+                } else {
+                    self.search_targets.get(idx).map(String::as_str)
+                };
                 let matches_search_prefix = search_pattern
                     .as_ref()
-                    .is_none_or(|p| self.search_targets.get(idx).is_some_and(|h| p.is_match(h)));
+                    .is_none_or(|p| search_target.is_some_and(|h| p.is_match(h)));
                 let visible = !hb.disabled
                     && hb.label.starts_with(&self.hint_prefix)
                     && matches_search_prefix
@@ -117,7 +146,7 @@ impl AppEngine {
                 hb.set_visible(visible);
 
                 if visible {
-                    hb.refresh(prefix_len, &self.overlay_frame, &self.config.theme);
+                    hb.refresh(prefix_len, &self.overlay_frame, &self.config.theme, &font);
                     nothing_visible = false;
                     visible_indices.push(idx);
                 }
@@ -212,7 +241,46 @@ impl AppEngine {
         self.show_menu(MenuScope::Dashboard, "");
     }
 
+    /// Whether the split words can be drawn in place over the source text.
+    pub(super) fn word_picking_in_place(&self) -> bool {
+        self.word_picker.as_ref().is_some_and(|wp| wp.in_place)
+    }
+
+    /// Turn the words of an in-place word picker into hint boxes, once.
+    ///
+    /// The source element placed every word, so no menu is needed: the hints sit
+    /// on the words themselves and are filtered exactly like element hints.
+    pub(super) fn start_word_hints(&mut self) {
+        let Some(wp) = self.word_picker.as_ref() else {
+            return;
+        };
+        let font_size = self
+            .word_picker
+            .as_ref()
+            .and_then(|wp| wp.hint_font_size(&self.config.theme));
+        let (digits, hint_boxes) = hint_boxes_from_frames(
+            wp.frames(),
+            &self.overlay_frame,
+            &self.config.theme,
+            font_size,
+            &self.config.hint_keys,
+            self.config.colored_frame_min_size as f64,
+        );
+        self.hint_width = digits;
+        self.hint_boxes = hint_boxes;
+        self.draw_hints();
+    }
+
     pub(super) fn draw_word_picker(&mut self) {
+        if self.word_picking_in_place() {
+            if self.hint_boxes.is_empty() {
+                self.start_word_hints();
+            } else {
+                self.update_hints();
+            }
+            return;
+        }
+
         let word_picker = self
             .word_picker
             .as_mut()

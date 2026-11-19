@@ -43,13 +43,12 @@ impl AppEngine {
                 return;
             };
             let (digits, ocr_hints) = {
-                let len = ocr_res.len();
                 let iter = ocr_res.iter().map(|(_, rect)| Frame::from_cgrect(rect));
                 hint_boxes_from_frames(
-                    len,
                     iter,
                     &self.overlay_frame,
                     &self.config.theme,
+                    None,
                     &self.config.hint_keys,
                     self.config.colored_frame_min_size as f64,
                 )
@@ -261,8 +260,11 @@ impl AppEngine {
                     self.draw_word_picker();
                 } else if !self.multi_selection.is_on || self.multi_selection.one_side_idx.is_none()
                 {
-                    // Go back to text action menu
+                    // Go back to text action menu, taking the in-place hints down
+                    // with the picker.
                     self.word_picker = None;
+                    self.clear_hints();
+                    self.hint_boxes.clear();
                     self.show_element_menu(RoleOfInterest::PseudoText);
                 } else {
                     self.multi_selection.clear_one_side();
@@ -370,7 +372,11 @@ impl AppEngine {
                 self.filter_by_key().await;
             }
             FilterMode::WordPicking => {
-                self.draw_word_picker();
+                // In place, checking redraws the hints as it filters them, so
+                // drawing here as well would update twice.
+                if !self.word_picking_in_place() {
+                    self.draw_word_picker();
+                }
                 self.check_word_picker();
             }
         }
@@ -378,35 +384,64 @@ impl AppEngine {
 
     /// If the match is unambiguous, update the selected text and show the menu.
     pub(super) fn check_word_picker(&mut self) {
+        if self.word_picking_in_place() {
+            // Refresh first: a partial prefix still narrows what is visible,
+            // even though it cannot act yet.
+            let visible = self.update_hints();
+            if let Some(hb_idx) = self.sole_hint(&visible)
+                && let Some(word_idx) = self.hint_boxes.get(hb_idx).map(|hb| hb.idx)
+            {
+                self.take_word(word_idx);
+            }
+            return;
+        }
+
         if !self.ready_for_unique() {
             return;
         }
+        let Some(idx) = self
+            .word_picker
+            .as_ref()
+            .and_then(|wp| wp.unambiguous_match(self.multi_selection.is_on))
+            .map(|(idx, _)| idx)
+        else {
+            return;
+        };
+        self.take_word(idx);
+    }
 
-        let Some(wp) = self.word_picker.as_ref() else {
+    /// Take the word at `idx`, or start a multi-selection side and redraw the
+    /// picker. The picked word keeps its offset in the source element, so
+    /// another split of it still knows where its words are.
+    fn take_word(&mut self, idx: usize) {
+        let picked = {
+            let Some(wp) = self.word_picker.as_ref() else {
+                return;
+            };
+            if self.multi_selection.is_on {
+                self.multi_selection
+                    .set_one_side(idx)
+                    .and_then(|(idx1, idx2)| wp.select_range(idx1, idx2))
+            } else {
+                wp.word(idx)
+            }
+        };
+
+        let Some((text, offset)) = picked else {
+            if self.multi_selection.is_on {
+                self.hint_prefix.clear();
+                self.search_prefix.clear();
+                self.draw_word_picker();
+            }
             return;
         };
 
-        let mut new_text = None;
-
-        if let Some((idx, text)) = wp.unambiguous_match(self.multi_selection.is_on) {
-            if self.multi_selection.is_on {
-                if let Some((idx1, idx2)) = self.multi_selection.set_one_side(idx) {
-                    let text = wp
-                        .select_range(idx1, idx2)
-                        .expect("Internal Error: wrong word picker indexing.");
-                    new_text = Some(text)
-                } else {
-                    self.hint_prefix.clear();
-                    self.search_prefix.clear();
-                    self.draw_word_picker();
-                }
-            } else {
-                new_text = Some(text.to_string())
-            }
-        };
-        if let Some(nt) = new_text {
-            self.update_selected_text_and_show_menu(nt);
-        }
+        self.clear_hints();
+        self.hint_boxes.clear();
+        self.hint_prefix.clear();
+        self.search_prefix.clear();
+        self.update_selected_text_at_and_show_menu(text.into(), offset);
+        self.word_picker = None;
     }
 
     /// A tap is a sticky click modifier in the grid and on a clickable target,

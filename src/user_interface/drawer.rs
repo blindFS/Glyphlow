@@ -2,7 +2,9 @@ use super::SHADOW_OPACITY;
 use crate::{
     ScrollAction,
     config::{GlyphlowTheme, cgcolor_to_rgba},
-    util::{Frame, apply_line_spacing, estimate_frame_for_text, format_fixed_width},
+    util::{
+        Frame, apply_line_spacing, estimate_frame_for_text, format_fixed_width, shrink_font_size,
+    },
 };
 use objc2::{
     AnyThread, MainThreadMarker, MainThreadOnly,
@@ -263,9 +265,9 @@ impl Menu {
         let font = &theme.menu_font;
 
         // NOTE: if estimated size is too large, reduce font size and re-estimate
-        if auto_resize && shrinkage < 1.0 {
-            // Don't make it too small
-            let font_size = (font.pointSize() * shrinkage).max(MIN_FONT_SIZE);
+        if auto_resize
+            && let Some(font_size) = shrink_font_size(shrinkage, font.pointSize(), MIN_FONT_SIZE)
+        {
             unsafe {
                 self.menu_string.addAttribute_value_range(
                     NSFontAttributeName,

@@ -221,13 +221,22 @@ impl AppEngine {
                 let word_picker = WordPicker::new(
                     text,
                     screen_ratio,
+                    &self.overlay_frame,
                     &self.config.theme,
                     &self.config.hint_keys,
                     &self.drawer,
+                    self.selected.as_ref(),
                 );
                 self.hint_width = word_picker.digits;
+                let in_place = word_picker.in_place;
 
                 self.word_picker = Some(word_picker);
+                if in_place {
+                    // The hints take the words' place on screen, so the text
+                    // action menu that got us here has nothing left to say.
+                    self.drawer.clear_menus();
+                    self.start_word_hints();
+                }
             }
             TextAction::Editor => {
                 if let Err(e) = self.open_editor(text) {
@@ -338,15 +347,29 @@ impl AppEngine {
         }
     }
 
-    fn update_selected_text(&mut self, new_text: String) {
-        if let Some(ElementOfInterest { context, .. }) = self.selected.as_mut() {
+    /// Replace the selection's text, keeping where that text starts in the
+    /// element: a picked word or range is a slice of what the element holds.
+    pub(super) fn update_selected_text_at_and_show_menu(
+        &mut self,
+        new_text: String,
+        offset: usize,
+    ) {
+        if let Some(ElementOfInterest {
+            context,
+            context_offset,
+            ..
+        }) = self.selected.as_mut()
+        {
             *context = Some(new_text);
+            *context_offset = offset;
         }
+        self.show_element_menu(RoleOfInterest::PseudoText);
     }
 
+    /// Replace the selection's text with text that has no place in the element
+    /// (clipboard contents, an external action's output).
     pub(super) fn update_selected_text_and_show_menu(&mut self, new_text: String) {
-        self.update_selected_text(new_text);
-        self.show_element_menu(RoleOfInterest::PseudoText);
+        self.update_selected_text_at_and_show_menu(new_text, 0);
     }
 
     /// Put the clipboard's text up for action, or warn when it is empty.

@@ -6,7 +6,11 @@ use objc2_app_kit::{NSMutableParagraphStyle, NSParagraphStyleAttributeName};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize as OCGSize};
 use objc2_foundation::{NSMutableAttributedString, NSRange};
 use regex::Regex;
-use std::{borrow::Cow, cmp::Ordering};
+use std::{
+    borrow::Cow,
+    cmp::Ordering,
+    hash::{Hash, Hasher},
+};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 const MIN_HEIGHT_THRESHOLD: f64 = 10.0;
@@ -25,6 +29,12 @@ pub fn estimate_frame_for_text(
         CGSize::new(size.0, size.1),
     );
     (OCGSize::new(width, height), range.length)
+}
+
+/// `size` scaled down by `ratio`, but never below `floor`; `None` when the size
+/// already fits.
+pub fn shrink_font_size(ratio: f64, size: f64, floor: f64) -> Option<f64> {
+    (ratio < 1.0).then(|| (size * ratio).max(floor))
 }
 
 /// Give `text` the line spacing the app uses everywhere.
@@ -49,6 +59,20 @@ pub struct Frame {
 }
 
 impl Eq for Frame {}
+
+impl Hash for Frame {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for value in [
+            self.top_left.x,
+            self.top_left.y,
+            self.bottom_right.x,
+            self.bottom_right.y,
+        ] {
+            // `Eq` treats `-0.0` and `0.0` as equal, so they must hash alike.
+            if value == 0.0 { 0 } else { value.to_bits() }.hash(state);
+        }
+    }
+}
 
 impl PartialOrd for Frame {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
