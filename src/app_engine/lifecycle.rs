@@ -401,7 +401,7 @@ impl AppEngine {
             resolve_collisions(
                 &mut self.hint_boxes,
                 self.hint_width,
-                &self.config.theme,
+                self.config.theme.hint_margin_size.into(),
                 self.config.theme.hint_font.pointSize(),
             );
             // Positions are final now, so relabelling here resizes and repositions

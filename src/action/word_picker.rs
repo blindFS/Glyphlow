@@ -299,7 +299,7 @@ impl WordPicker {
 
     /// The text of the range between `idx1` and `idx2`, plus where it starts in
     /// the source element's text (UTF-16 units).
-    pub(crate) fn select_range(&self, idx1: usize, idx2: usize) -> Option<(String, usize)> {
+    pub(crate) fn select_range(&self, idx1: usize, idx2: usize) -> Option<(&str, usize)> {
         let (start, end) = if idx1 < idx2 {
             (idx1, idx2)
         } else {
@@ -309,9 +309,7 @@ impl WordPicker {
         let e_off = self.words.get(end)?.text.end;
         let offset = self.context_offset + self.raw[..s_off].encode_utf16().count();
 
-        self.raw
-            .get(s_off..e_off)
-            .map(|text| (text.to_string(), offset))
+        self.raw.get(s_off..e_off).map(|text| (text, offset))
     }
 }
 
@@ -549,10 +547,7 @@ mod tests {
         picker.context_offset = 40;
 
         assert_eq!(picker.word(1).map(|(_, offset)| offset), Some(46));
-        assert_eq!(
-            picker.select_range(2, 1),
-            Some(("beta gamma".to_string(), 46))
-        );
+        assert_eq!(picker.select_range(2, 1), Some(("beta gamma", 46)));
     }
 
     /// In-place drawing needs a frame for every word: one left behind would be

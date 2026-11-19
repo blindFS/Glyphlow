@@ -367,7 +367,12 @@ pub fn hint_boxes_from_frames(
         )
     }));
 
-    resolve_collisions(&mut boxes, digits, theme, font.pointSize());
+    resolve_collisions(
+        &mut boxes,
+        digits,
+        theme.hint_margin_size.into(),
+        font.pointSize(),
+    );
 
     (digits, boxes)
 }
@@ -378,14 +383,9 @@ pub const MAX_COLLISION_OPS: usize = 150;
 ///
 /// The thresholds are estimated from the font rather than measured, because this
 /// also runs before the boxes are laid out.
-pub fn resolve_collisions(
-    boxes: &mut Vec<HintBox>,
-    digits: u32,
-    theme: &GlyphlowTheme,
-    font_size: f64,
-) {
-    let x_thres = font_size * digits as f64 * 0.8 + 2.0 * theme.hint_margin_size as f64;
-    let y_thres = font_size * 1.5 + 2.0 * theme.hint_margin_size as f64;
+pub fn resolve_collisions(boxes: &mut Vec<HintBox>, digits: u32, margin_size: f64, font_size: f64) {
+    let x_thres = font_size * digits as f64 * 0.8 + 2.0 * margin_size;
+    let y_thres = font_size * 1.5 + 2.0 * margin_size;
     // A test has no pointer worth respecting, and reading the real one would make
     // the layout depend on where the mouse happens to be.
     #[cfg(not(test))]

@@ -424,7 +424,6 @@ impl AppEngine {
                     .and_then(|(idx1, idx2)| wp.select_range(idx1, idx2))
             } else {
                 wp.word(idx)
-                    .map(|(text, offset)| (text.to_string(), offset))
             }
         };
 
@@ -441,8 +440,8 @@ impl AppEngine {
         self.hint_boxes.clear();
         self.hint_prefix.clear();
         self.search_prefix.clear();
+        self.update_selected_text_at_and_show_menu(text.into(), offset);
         self.word_picker = None;
-        self.update_selected_text_at_and_show_menu(text, offset);
     }
 
     /// A tap is a sticky click modifier in the grid and on a clickable target,
