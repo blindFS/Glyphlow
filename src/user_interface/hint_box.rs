@@ -336,7 +336,7 @@ pub fn hint_boxes_from_frames(
     frames: impl ExactSizeIterator<Item = Frame>,
     screen_frame: &Frame,
     theme: &GlyphlowTheme,
-    font: &NSFont,
+    font_size: Option<f64>,
     hint_keys: &HintKeys,
     colored_frame_min_size: f64,
 ) -> (u32, Vec<HintBox>) {
@@ -367,12 +367,8 @@ pub fn hint_boxes_from_frames(
         )
     }));
 
-    resolve_collisions(
-        &mut boxes,
-        digits,
-        theme.hint_margin_size.into(),
-        font.pointSize(),
-    );
+    let font_size = font_size.unwrap_or_else(|| theme.hint_font.pointSize());
+    resolve_collisions(&mut boxes, digits, theme.hint_margin_size.into(), font_size);
 
     (digits, boxes)
 }
@@ -780,7 +776,7 @@ mod hint_label_tests {
             frames(4),
             &screen(),
             &theme,
-            &theme.hint_font,
+            None,
             &HintKeys::new("asdfjkl;"),
             200.0,
         );
@@ -801,7 +797,7 @@ mod hint_label_tests {
             frames(10),
             &screen(),
             &theme,
-            &theme.hint_font,
+            None,
             &HintKeys::default(),
             200.0,
         );
@@ -813,7 +809,7 @@ mod hint_label_tests {
             frames(10),
             &screen(),
             &theme,
-            &theme.hint_font,
+            None,
             &HintKeys::new("asdfjkl;"),
             200.0,
         );
@@ -876,7 +872,7 @@ mod hint_label_tests {
             frames(0),
             &screen(),
             &theme,
-            &theme.hint_font,
+            None,
             &HintKeys::default(),
             200.0,
         );

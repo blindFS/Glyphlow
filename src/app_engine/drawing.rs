@@ -254,12 +254,15 @@ impl AppEngine {
         let Some(wp) = self.word_picker.as_ref() else {
             return;
         };
-        let font = self.hint_font();
+        let font_size = self
+            .word_picker
+            .as_ref()
+            .and_then(|wp| wp.hint_font_size(&self.config.theme));
         let (digits, hint_boxes) = hint_boxes_from_frames(
             wp.frames(),
             &self.overlay_frame,
             &self.config.theme,
-            &font,
+            font_size,
             &self.config.hint_keys,
             self.config.colored_frame_min_size as f64,
         );

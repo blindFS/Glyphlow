@@ -48,7 +48,7 @@ impl AppEngine {
                     iter,
                     &self.overlay_frame,
                     &self.config.theme,
-                    &self.config.theme.hint_font,
+                    None,
                     &self.config.hint_keys,
                     self.config.colored_frame_min_size as f64,
                 )
