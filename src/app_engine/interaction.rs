@@ -16,11 +16,23 @@ use accessibility_sys::{
 use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber, string::CFString};
 use log::Level;
 use monio::{Button, Event, Key, ScrollDirection};
+use objc2_core_foundation::CGPoint;
+use objc2_core_graphics::{
+    CGEvent, CGEventField, CGEventFlags, CGEventSource, CGEventSourceStateID, CGEventTapLocation,
+    CGEventType, CGMouseButton,
+};
 
 const SCALE_FACTOR: f64 = 1.5;
 
 impl AppEngine {
     pub(super) const KEY_OP_INTERVAL_IN_MS: u64 = 20;
+    /// How far each move of a synthetic drag travels, in points.
+    ///
+    /// A single jump from the press point to the drop point does not register as
+    /// a drag; walking the pointer over in small moves does (monio#3).
+    const DRAG_STEP_IN_PX: f64 = 10.0;
+    /// How long to pause between those moves, in milliseconds.
+    const DRAG_STEP_IN_MS: u64 = 8;
     /// Move the mouse to `(end_x, end_y)` with a fading triangle cursor trail animation.
     pub(super) fn move_mouse_with_trail(&self, end_x: f64, end_y: f64) {
         // Both ends in AX coordinates, so `draw_trail` calibrates them alike.
@@ -74,6 +86,84 @@ impl AppEngine {
         }
         if let Err(e) = self.holding(keys, || monio::mouse_click(button)) {
             log::error!("Failed to click mouse button {button:?}: {e}");
+        }
+    }
+
+    /// Drag from where the pointer is to `(x, y)` with the sticky click
+    /// modifiers held, which are released afterwards.
+    pub(super) fn simulate_drag_with_modifiers(&mut self, x: f64, y: f64, button: Button) {
+        let modifiers = self.click_modifiers.keys();
+        self.simulate_drag_holding(x, y, button, &modifiers);
+        self.click_modifiers.reset();
+    }
+
+    /// Press `button` (with `keys` held), walk the pointer to `(x, y)` in small
+    /// steps, then release.
+    ///
+    /// The presses and moves are marked as simulated so the event tap does not
+    /// read the held keys back as user input, and the trailing pause lets the
+    /// drop target see the last move before the button comes up.
+    pub(super) fn simulate_drag_holding(&self, x: f64, y: f64, button: Button, keys: &[Key]) {
+        self.set_simulating_key(true);
+        for key in keys {
+            let _ = monio::key_press(*key);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(
+            Self::KEY_OP_INTERVAL_IN_MS,
+        ));
+
+        // The held modifiers travel on the mouse events themselves: an app reads
+        // them from the event, not from whether the matching key is down.
+        let flags = modifier_flags(keys);
+        let (start_x, start_y) = pointer_position().unwrap_or((x, y));
+        if let Err(e) = post_drag_event(
+            mouse_down_event_type(button),
+            start_x,
+            start_y,
+            button,
+            flags,
+        ) {
+            log::error!("Failed to press mouse button {button:?} for drag: {e}");
+        }
+        self.drag_pointer_to(x, y, button, flags);
+        std::thread::sleep(std::time::Duration::from_millis(
+            Self::KEY_OP_INTERVAL_IN_MS,
+        ));
+        if let Err(e) = post_drag_event(mouse_up_event_type(button), x, y, button, flags) {
+            log::error!("Failed to release mouse button {button:?} after drag: {e}");
+        }
+
+        for key in keys.iter().rev() {
+            let _ = monio::key_release(*key);
+        }
+        self.set_simulating_key(false);
+    }
+
+    /// Move the pointer to `(x, y)` one small drag event at a time, so the app
+    /// under the press sees a drag rather than a teleport.
+    fn drag_pointer_to(&self, x: f64, y: f64, button: Button, flags: CGEventFlags) {
+        let Some((start_x, start_y)) = pointer_position() else {
+            if let Err(e) = post_drag_event(drag_event_type(button), x, y, button, flags) {
+                log::error!("Failed to move mouse during drag: {e}");
+            }
+            return;
+        };
+
+        let (dx, dy) = (x - start_x, y - start_y);
+        let steps = (dx.hypot(dy) / Self::DRAG_STEP_IN_PX).ceil() as usize;
+        for step in 1..=steps {
+            let t = step as f64 / steps as f64;
+            if let Err(e) = post_drag_event(
+                drag_event_type(button),
+                start_x + dx * t,
+                start_y + dy * t,
+                button,
+                flags,
+            ) {
+                log::error!("Failed to move mouse during drag: {e}");
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(Self::DRAG_STEP_IN_MS));
         }
     }
 
@@ -508,4 +598,87 @@ fn is_false_alarm(e: &accessibility::Error) -> bool {
         accessibility::Error::Ax(err_num)
             if *err_num == kAXErrorCannotComplete || *err_num == kAXErrorAttributeUnsupported
     )
+}
+
+fn mouse_down_event_type(button: Button) -> CGEventType {
+    match button {
+        Button::Left => CGEventType::LeftMouseDown,
+        Button::Right => CGEventType::RightMouseDown,
+        _ => CGEventType::OtherMouseDown,
+    }
+}
+
+fn mouse_up_event_type(button: Button) -> CGEventType {
+    match button {
+        Button::Left => CGEventType::LeftMouseUp,
+        Button::Right => CGEventType::RightMouseUp,
+        _ => CGEventType::OtherMouseUp,
+    }
+}
+
+fn drag_event_type(button: Button) -> CGEventType {
+    match button {
+        Button::Left => CGEventType::LeftMouseDragged,
+        Button::Right => CGEventType::RightMouseDragged,
+        _ => CGEventType::OtherMouseDragged,
+    }
+}
+
+fn cg_mouse_button(button: Button) -> CGMouseButton {
+    match button {
+        Button::Left => CGMouseButton::Left,
+        Button::Right => CGMouseButton::Right,
+        _ => CGMouseButton::Center,
+    }
+}
+
+/// The macOS modifier flags that stand for the held sticky modifiers.
+fn modifier_flags(keys: &[Key]) -> CGEventFlags {
+    let mut flags = CGEventFlags(0);
+    for key in keys {
+        match key {
+            Key::ShiftLeft | Key::ShiftRight => flags.insert(CGEventFlags::MaskShift),
+            Key::ControlLeft | Key::ControlRight => flags.insert(CGEventFlags::MaskControl),
+            Key::AltLeft | Key::AltRight => flags.insert(CGEventFlags::MaskAlternate),
+            Key::MetaLeft | Key::MetaRight => flags.insert(CGEventFlags::MaskCommand),
+            _ => {}
+        }
+    }
+    flags
+}
+
+/// Post one mouse event for a synthetic drag.
+///
+/// `monio`'s `mouse_move` always posts `MouseMoved`, which macOS does not treat as
+/// a drag even while a button is down, so the drag phases post their own events.
+fn post_drag_event(
+    event_type: CGEventType,
+    x: f64,
+    y: f64,
+    button: Button,
+    flags: CGEventFlags,
+) -> Result<(), &'static str> {
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .ok_or("Failed to create event source")?;
+    let event = CGEvent::new_mouse_event(
+        Some(&source),
+        event_type,
+        CGPoint { x, y },
+        cg_mouse_button(button),
+    )
+    .ok_or("Failed to create mouse event")?;
+
+    CGEvent::set_flags(Some(&event), flags);
+    if matches!(
+        button,
+        Button::Middle | Button::Button4 | Button::Button5 | Button::Unknown(_)
+    ) {
+        CGEvent::set_integer_value_field(
+            Some(&event),
+            CGEventField::MouseEventButtonNumber,
+            (button.number() - 1) as i64,
+        );
+    }
+    CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&event));
+    Ok(())
 }
