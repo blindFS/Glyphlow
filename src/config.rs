@@ -68,6 +68,7 @@ pub enum WorkFlowAction {
     Hover,
     Move(f64, f64),
     GridMove,
+    GridDrag,
     Click,
     RightClick,
     MiddleClick,
@@ -91,7 +92,11 @@ impl WorkFlowAction {
     pub(crate) fn reads_front_window(&self) -> bool {
         matches!(
             self,
-            Self::Activate(_) | Self::SearchFor(_) | Self::GridMove | Self::GlyphlowMenu
+            Self::Activate(_)
+                | Self::SearchFor(_)
+                | Self::GridMove
+                | Self::GridDrag
+                | Self::GlyphlowMenu
         )
     }
 }
@@ -661,7 +666,7 @@ pub struct KeyBinding {
 }
 
 /// The look and the size of the recursive grid used by
-/// [`WorkFlowAction::GridMove`].
+/// [`WorkFlowAction::GridMove`] and [`WorkFlowAction::GridDrag`].
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GridConfig {
     #[serde(default = "default_grid_rows")]

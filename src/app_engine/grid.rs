@@ -48,6 +48,8 @@ pub(crate) struct GridSession {
     overlay: GridOverlay,
     /// The mode to go back to once the grid closes.
     prev_mode: Mode,
+    /// `GridDrag`: drag to the settled cell instead of just moving there.
+    drag: bool,
 }
 
 impl AppEngine {
@@ -61,8 +63,7 @@ impl AppEngine {
             .unwrap_or(self.last_app_window_info.frame)
     }
 
-    /// Put the grid up over the window and wait for cell keys.
-    pub(super) fn start_grid(&mut self) {
+    pub(super) fn start_grid_session(&mut self, drag: bool) {
         let prev_mode = self.mode();
         self.drawer.clear_menus();
         self.clear_grid();
@@ -87,6 +88,7 @@ impl AppEngine {
             },
             overlay,
             prev_mode,
+            drag,
         });
         self.set_mode(Mode::Grid);
     }
@@ -133,6 +135,7 @@ impl AppEngine {
             level,
             overlay,
             prev_mode,
+            drag,
         }) = self.grid.take()
         else {
             return;
@@ -140,14 +143,20 @@ impl AppEngine {
         overlay.free();
 
         // At depth zero nothing was narrowed, so the pointer itself is the target.
-        // Otherwise the cursor only travels now, once, to the settled cell.
         let (x, y) = if level.depth == 0 {
             pointer_position().unwrap_or_else(|| level.region.center())
         } else {
-            let (x, y) = level.region.center();
-            self.move_mouse_with_trail(x, y);
-            (x, y)
+            level.region.center()
         };
+
+        if drag {
+            // The click modifier picked while the grid was up decides the button
+            // (Tab is a right click), and is spent on this drag.
+            let button = self.click_modifiers.button();
+            self.simulate_drag_with_modifiers(x, y, button);
+        } else if level.depth > 0 {
+            self.move_mouse_with_trail(x, y);
+        }
 
         // Element-relative actions (`Click`) need a frame to aim at.
         self.selected = Some(ElementOfInterest::pseudo(

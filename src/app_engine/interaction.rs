@@ -16,8 +16,13 @@ use accessibility_sys::{
 use core_foundation::{base::TCFType, boolean::CFBoolean, number::CFNumber, string::CFString};
 use log::Level;
 use monio::{Button, Event, Key, ScrollDirection};
+use std::{thread::sleep, time::Duration};
 
 const SCALE_FACTOR: f64 = 1.5;
+/// How far each move of a synthetic drag travels
+const DRAG_STEP_IN_PX: f64 = 20.0;
+/// How long to pause between those moves, in milliseconds.
+const DRAG_STEP_IN_MS: u64 = 8;
 
 impl AppEngine {
     pub(super) const KEY_OP_INTERVAL_IN_MS: u64 = 20;
@@ -77,6 +82,55 @@ impl AppEngine {
         }
     }
 
+    /// Drag from where the pointer is to `(x, y)` with the sticky click
+    /// modifiers held, which are released afterwards.
+    pub(super) fn simulate_drag_with_modifiers(&mut self, x: f64, y: f64, button: Button) {
+        let modifiers = self.click_modifiers.keys();
+        self.simulate_drag_holding(x, y, button, &modifiers);
+        self.click_modifiers.reset();
+    }
+
+    /// Press `button` (with `keys` held), walk the pointer to `(x, y)` in small
+    /// steps, then release.
+    ///
+    /// The trailing pause lets the drop target see the last move before the
+    /// button comes up.
+    pub(super) fn simulate_drag_holding(&self, x: f64, y: f64, button: Button, keys: &[Key]) {
+        self.holding(keys, || {
+            if let Err(e) = monio::mouse_press(button) {
+                log::error!("Failed to press mouse button {button:?} for drag: {e}");
+                return;
+            }
+            self.drag_pointer_to(x, y);
+            sleep(Duration::from_millis(Self::KEY_OP_INTERVAL_IN_MS));
+            if let Err(e) = monio::mouse_release(button) {
+                log::error!("Failed to release mouse button {button:?} after drag: {e}");
+            }
+        });
+    }
+
+    /// Move the pointer to `(x, y)` one small move at a time, so the app under
+    /// the press sees a drag rather than a teleport.
+    fn drag_pointer_to(&self, x: f64, y: f64) {
+        let Some((start_x, start_y)) = pointer_position() else {
+            if let Err(e) = monio::mouse_move(x, y) {
+                log::error!("Failed to move mouse during drag: {e}");
+            }
+            return;
+        };
+
+        let (dx, dy) = (x - start_x, y - start_y);
+        let steps = (dx.hypot(dy) / DRAG_STEP_IN_PX).ceil().max(1.0);
+        for step in 1..=steps as usize {
+            let t = step as f64 / steps;
+            if let Err(e) = monio::mouse_move(start_x + dx * t, start_y + dy * t) {
+                log::error!("Failed to move mouse during drag: {e}");
+                return;
+            }
+            sleep(Duration::from_millis(DRAG_STEP_IN_MS));
+        }
+    }
+
     /// Press `keys`, run `action`, then release them in reverse.
     ///
     /// The presses are marked as simulated so the event tap passes them on
@@ -87,9 +141,7 @@ impl AppEngine {
         for key in keys {
             let _ = monio::key_press(*key);
         }
-        std::thread::sleep(std::time::Duration::from_millis(
-            Self::KEY_OP_INTERVAL_IN_MS,
-        ));
+        sleep(Duration::from_millis(Self::KEY_OP_INTERVAL_IN_MS));
 
         let result = action();
 
