@@ -68,8 +68,6 @@ pub enum WorkFlowAction {
     Hover,
     Move(f64, f64),
     GridMove,
-    /// Press the mouse button (with the sticky click modifiers), let the user
-    /// settle the grid, then drag in small steps to the settled cell and release.
     GridDrag,
     Click,
     RightClick,

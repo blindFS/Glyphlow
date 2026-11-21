@@ -63,17 +63,7 @@ impl AppEngine {
             .unwrap_or(self.last_app_window_info.frame)
     }
 
-    /// Put the grid up over the window and wait for cell keys.
-    pub(super) fn start_grid(&mut self) {
-        self.start_grid_session(false);
-    }
-
-    /// Put the grid up, then drag from where the pointer is to the settled cell.
-    pub(super) fn start_grid_drag(&mut self) {
-        self.start_grid_session(true);
-    }
-
-    fn start_grid_session(&mut self, drag: bool) {
+    pub(super) fn start_grid_session(&mut self, drag: bool) {
         let prev_mode = self.mode();
         self.drawer.clear_menus();
         self.clear_grid();
