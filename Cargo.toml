@@ -4,8 +4,7 @@ version = "0.5.5"
 edition = "2024"
 
 [dependencies]
-# Not on crates.io yet: this commit posts *MouseDragged while a button is held (monio#3).
-monio = { git = "https://github.com/HuakunShen/monio", rev = "d1766e0dcd20dea0435be16cd80adaa749b86e30" }
+monio = "0.2.0"
 toml = "1.2.1"
 serde = { version = "1.0.229", features = ["derive"] }
 accessibility = "0.2.0"
