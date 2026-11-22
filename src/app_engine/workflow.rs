@@ -170,8 +170,13 @@ impl AppEngine {
                 return false;
             }
             WorkFlowAction::GridMove => {
-                self.start_grid();
+                self.start_grid_session(false);
                 // The queue resumes when Enter accepts a cell.
+                return true;
+            }
+            WorkFlowAction::GridDrag => {
+                self.start_grid_session(true);
+                // The queue resumes when Enter accepts a cell and the drag ends.
                 return true;
             }
             WorkFlowAction::KeyCombo(kb) => {

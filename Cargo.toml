@@ -4,7 +4,7 @@ version = "0.5.5"
 edition = "2024"
 
 [dependencies]
-monio = "0.1.1"
+monio = "0.2.0"
 toml = "1.2.1"
 serde = { version = "1.0.229", features = ["derive"] }
 accessibility = "0.2.0"
