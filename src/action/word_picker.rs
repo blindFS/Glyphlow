@@ -14,19 +14,26 @@ const WORD_LABEL_GAP: &str = " ";
 /// word it picks rather than the word after it.
 const LABEL_WORD_GAP: &str = "  ";
 
-/// One entry's width in monospace cells, matching the spaces the loop emits.
+/// One entry's width in monospace cells, matching the spaces the menu emits.
+///
+/// The words and their labels never change, so this is measured once when the
+/// picker is built rather than on every redraw.
 fn entry_width(word: &str, digits: u32) -> usize {
     word.width() + WORD_LABEL_GAP.len() + digits as usize + LABEL_WORD_GAP.len()
 }
 
 /// A token of the picked text: where it sits in [`WordPicker::raw`], its hint
-/// label, the folded form searches are matched against, and — once the source
-/// element has placed it — its frame on screen.
+/// label, the folded form searches are matched against, its width in the menu,
+/// and — once the source element has placed it — its frame on screen.
 #[derive(Debug, Clone)]
 struct Word {
     text: Range<usize>,
     label: String,
-    ascii: String,
+    /// The folded form searches are matched against, or `None` when the raw
+    /// slice is already lowercase ASCII and folds to itself.
+    ascii: Option<String>,
+    /// [`entry_width`] of this word, which the menu wraps its lines by.
+    width: usize,
     /// All-or-nothing: either every word has one and the picker draws in place,
     /// or none do and it draws a menu.
     frame: Option<Frame>,
@@ -40,7 +47,10 @@ struct Word {
 pub(crate) struct WordPicker {
     raw: String,
     words: Vec<Word>,
-    screen_ratio: f64,
+    /// How wide the menu should be, in monospace cells, for its block of entries
+    /// to look roughly square on screen. The words do not change, so neither
+    /// does this.
+    ideal_width: usize,
     pub(crate) digits: u32,
     matched: Vec<usize>,
     /// Where `raw` starts in the source element's text, in UTF-16 units, so a
@@ -63,37 +73,32 @@ impl WordPicker {
         drawer: &UIDrawer,
         element: Option<&ElementOfInterest>,
     ) -> Self {
-        let (word_strings, offsets) = multilingual_split(&text);
-        let digits = hint_keys.digits_for_len(word_strings.len());
-        let mut words = Vec::with_capacity(word_strings.len());
-        for (i, (word, offset)) in word_strings.into_iter().zip(offsets).enumerate() {
-            let label = hint_keys.label_for_index(i, Some(digits));
+        let ranges = multilingual_split(&text);
+        let digits = hint_keys.digits_for_len(ranges.len());
+        let mut words = Vec::with_capacity(ranges.len());
+        let mut total_width = 0;
+        for (i, range) in ranges.into_iter().enumerate() {
+            let word = &text[range.clone()];
+            let width = entry_width(word, digits);
+            total_width += width;
             words.push(Word {
-                text: offset..offset + word.len(),
-                label,
-                ascii: lower_ascii(&word),
+                text: range,
+                label: hint_keys.label_for_index(i, Some(digits)),
+                ascii: folded_form(word),
+                width,
                 frame: None,
             });
         }
 
         let context_offset = element.map_or(0, |element| element.context_offset);
-        let mut in_place = false;
-        if let Some(element) = element {
-            if element.element().is_some() {
-                in_place = place_words(element, &text, &mut words, screen_frame)
-            } else {
-                log::info!(
-                    "Word picker: the source is synthetic text with no AX element, so {} word(s) cannot be placed; falling back to the menu.",
-                    words.len()
-                );
-            }
-        };
+        let in_place =
+            element.is_some_and(|element| place_words(element, &text, &mut words, screen_frame));
 
         let word_picker = Self {
             raw: text,
             words,
+            ideal_width: ideal_width(total_width, screen_ratio),
             digits,
-            screen_ratio,
             matched: Vec::new(),
             context_offset,
             in_place,
@@ -116,7 +121,15 @@ impl WordPicker {
 
     /// The folded search form of the word at `idx`.
     pub(crate) fn search_target(&self, idx: usize) -> Option<&str> {
-        self.words.get(idx).map(|word| word.ascii.as_str())
+        self.words.get(idx).map(|word| self.folded(word))
+    }
+
+    /// A word's search form: its folded text, or the raw slice when folding it
+    /// would have been a no-op.
+    fn folded<'a>(&'a self, word: &'a Word) -> &'a str {
+        word.ascii
+            .as_deref()
+            .unwrap_or(&self.raw[word.text.clone()])
     }
 
     /// The word at `idx`, and where it starts in the source element's text
@@ -180,16 +193,6 @@ impl WordPicker {
         label_prefix: &str,
         text_prefix: &str,
     ) -> (MenuString, Vec<usize>) {
-        let total_unicode_width = self
-            .words
-            .iter()
-            .map(|w| entry_width(&self.raw[w.text.clone()], self.digits))
-            .sum::<usize>();
-        // ideal_width / (total_unicode_width / ideal_width) 󰾞 ratio * 3
-        let ideal_width = (total_unicode_width as f64 * self.screen_ratio * 3.0)
-            .sqrt()
-            .round() as usize;
-
         let filtering = !label_prefix.is_empty() || !text_prefix.is_empty();
         let typed = label_prefix.len();
         let text_pattern = search_regex(text_prefix);
@@ -198,7 +201,7 @@ impl WordPicker {
                 && word.label.starts_with(label_prefix)
                 && text_pattern
                     .as_ref()
-                    .is_none_or(|pattern| pattern.is_match(&word.ascii))
+                    .is_none_or(|pattern| pattern.is_match(self.folded(word)))
         };
 
         let matched: Vec<usize> = self
@@ -224,9 +227,9 @@ impl WordPicker {
         let mut line_width = 0;
         for (idx, word) in self.words.iter().enumerate() {
             let text = &self.raw[word.text.clone()];
-            let this_width = entry_width(text, self.digits);
+            let this_width = word.width;
             // Wrap when this word would overflow, unless the line is still empty.
-            if line_width + this_width > ideal_width && line_width > 0 {
+            if line_width + this_width > self.ideal_width && line_width > 0 {
                 buffer.push("\n");
                 line_width = 0;
             } else if line_width > 0 {
@@ -312,18 +315,18 @@ impl WordPicker {
 
 const URL_PATTERN: &str = r"^[a-zA-Z][a-zA-Z0-9+.-]*://\S+$";
 
-// Matches EITHER a sequence of CJK characters OR a sequence of everything else.
-// This naturally separates them when they are adjacent.
-const SCRIPT_SEGMENT_PATTERN: &str = r"([\u{4E00}-\u{9FFF}\u{3040}-\u{30FF}\u{AC00}-\u{D7AF}]+|[^\u{4E00}-\u{9FFF}\u{3040}-\u{30FF}\u{AC00}-\u{D7AF}]+)";
-
 fn get_url_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(URL_PATTERN).unwrap())
 }
 
-fn get_segment_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(SCRIPT_SEGMENT_PATTERN).unwrap())
+/// The character ranges the splitter treats as one script, so a run of them is a
+/// run of single-character words rather than one long one.
+fn is_cjk(c: char) -> bool {
+    matches!(
+        c,
+        '\u{4E00}'..='\u{9FFF}' | '\u{3040}'..='\u{30FF}' | '\u{AC00}'..='\u{D7AF}'
+    )
 }
 
 /// Converts byte ranges of one text to AX text ranges (UTF-16 units from the
@@ -377,15 +380,20 @@ fn place_words(
         return false;
     }
 
+    let Some(ax) = element.element() else {
+        log::info!(
+            "Word picker: the source is synthetic text with no AX element, so {} word(s) cannot be placed; falling back to the menu.",
+            words.len()
+        );
+        return false;
+    };
+
     let mut frames = Vec::with_capacity(words.len());
     let mut utf16 = Utf16Cursor::new(text);
     for (idx, word) in words.iter().enumerate() {
         let word_text = &text[word.text.clone()];
         let (location, length) = utf16.range(&word.text);
-        let Some(frame) = element
-            .element()
-            .and_then(|ax| ax.bounds_for_range(element.context_offset + location, length))
-        else {
+        let Some(frame) = ax.bounds_for_range(element.context_offset + location, length) else {
             log::info!(
                 "Word picker: AX could not place word {idx} `{word_text}` (range {location}..+{length}); falling back to the menu."
             );
@@ -431,86 +439,111 @@ fn duplicate_frame(frames: &[Frame]) -> Option<(usize, usize, Frame)> {
     })
 }
 
-/// Split `input` into pickable tokens, with each token's byte offset in `input`.
+/// The byte ranges of `input` that can be picked, in order.
 ///
 /// Three levels, fallen through only as far as needed: whitespace and script
 /// boundaries, then punctuation, then ASCII/non-ASCII — so a URL stays one token
 /// while `Hello世界` splits into `Hello`, `世`, `界`.
-fn multilingual_split(input: &str) -> (Vec<String>, Vec<usize>) {
-    let url_re = get_url_re();
-    let segment_re = get_segment_re();
-    let mut result = Vec::new();
-    let mut offsets = Vec::new();
-
-    // Level 1: Split by whitespace and Regex
-    for token in input.split_whitespace() {
-        // Calculate the absolute byte offset of the token within 'input'
-        let token_start = token.as_ptr() as usize - input.as_ptr() as usize;
-
-        if url_re.is_match(token) {
-            result.push(token.to_string());
-            offsets.push(token_start);
+///
+/// Ranges rather than the text they cover: the picker holds the whole text
+/// anyway, so a token costs an offset instead of an allocation, and no caller
+/// has to keep two vectors in step.
+fn multilingual_split(input: &str) -> Vec<Range<usize>> {
+    let mut words = Vec::new();
+    for token in token_ranges(input) {
+        if get_url_re().is_match(&input[token.clone()]) {
+            words.push(token);
         } else {
-            for mat in segment_re.find_iter(token) {
-                result.push(mat.as_str().to_string());
-                offsets.push(token_start + mat.start());
-            }
+            push_script_runs(input, token, &mut words);
         }
     }
 
-    if result.len() > 1 || result.is_empty() {
-        return (result, offsets);
+    // Only a lone block still has punctuation and ASCII/non-ASCII boundaries to
+    // split on; anything else is already as fine-grained as it gets.
+    if words.len() != 1 {
+        return words;
     }
-
-    // Level 2: Split by punctuation (only if we have a single block)
-    let base_offset = offsets[0];
-    let w = &result[0];
-    let mut l2_res = Vec::new();
-    let mut l2_off = Vec::new();
-
-    for s in w
-        .split(|c: char| c.is_ascii_punctuation())
-        .filter(|s| !s.is_empty())
-    {
-        let rel_offset = s.as_ptr() as usize - w.as_ptr() as usize;
-        l2_res.push(s.to_string());
-        l2_off.push(base_offset + rel_offset);
+    let words = punctuation_runs(input, words[0].clone());
+    if words.len() != 1 {
+        return words;
     }
+    ascii_runs(input, words[0].clone())
+}
 
-    if l2_res.len() > 1 || l2_res.is_empty() {
-        return (l2_res, l2_off);
+/// The whitespace-delimited byte ranges of `input`.
+fn token_ranges(input: &str) -> impl Iterator<Item = Range<usize>> + '_ {
+    input.split_whitespace().map(|token| {
+        // `token` is a slice of `input`, so this difference is its byte offset.
+        let start = token.as_ptr() as usize - input.as_ptr() as usize;
+        start..start + token.len()
+    })
+}
+
+/// Push the runs of characters that [`is_cjk`] agrees on in `range`, in order.
+fn push_script_runs(input: &str, range: Range<usize>, runs: &mut Vec<Range<usize>>) {
+    let mut previous = None;
+    for (i, c) in input[range.clone()].char_indices() {
+        let start = range.start + i;
+        let end = start + c.len_utf8();
+        let cjk = is_cjk(c);
+        match runs.last_mut() {
+            Some(run) if previous == Some(cjk) => run.end = end,
+            _ => runs.push(start..end),
+        }
+        previous = Some(cjk);
     }
+}
 
-    // Level 3: Split ASCII/Non-ASCII (only if Level 2 still returned one block)
-    let base_offset = l2_off[0];
-    let w = &l2_res[0];
-    let mut l3_res = Vec::new();
-    let mut l3_off = Vec::new();
-
-    let mut buffer = String::new();
-    let mut buffer_start = 0;
-
-    for (i, c) in w.char_indices() {
-        if c.is_ascii() {
-            if buffer.is_empty() {
-                buffer_start = i;
-            }
-            buffer.push(c);
+/// Split `range` at its ASCII punctuation, which is dropped.
+fn punctuation_runs(input: &str, range: Range<usize>) -> Vec<Range<usize>> {
+    let mut runs = Vec::new();
+    let mut piece: Option<Range<usize>> = None;
+    for (i, c) in input[range.clone()].char_indices() {
+        let start = range.start + i;
+        if c.is_ascii_punctuation() {
+            runs.extend(piece.take());
         } else {
-            if !buffer.is_empty() {
-                l3_res.push(std::mem::take(&mut buffer));
-                l3_off.push(base_offset + buffer_start);
+            match &mut piece {
+                Some(piece) => piece.end = start + c.len_utf8(),
+                None => piece = Some(start..start + c.len_utf8()),
             }
-            l3_res.push(c.to_string());
-            l3_off.push(base_offset + i);
         }
     }
-    if !buffer.is_empty() {
-        l3_res.push(buffer);
-        l3_off.push(base_offset + buffer_start);
-    }
+    runs.extend(piece);
+    runs
+}
 
-    (l3_res, l3_off)
+/// Split `range` into its ASCII runs, with every non-ASCII character a word of
+/// its own.
+fn ascii_runs(input: &str, range: Range<usize>) -> Vec<Range<usize>> {
+    let mut runs: Vec<Range<usize>> = Vec::new();
+    let mut previous_ascii = false;
+    for (i, c) in input[range.clone()].char_indices() {
+        let start = range.start + i;
+        let end = start + c.len_utf8();
+        let ascii = c.is_ascii();
+        match runs.last_mut() {
+            Some(run) if ascii && previous_ascii => run.end = end,
+            _ => runs.push(start..end),
+        }
+        previous_ascii = ascii;
+    }
+    runs
+}
+
+/// How wide the menu should be, in monospace cells, for `total_width` of them to
+/// look roughly square on screen.
+fn ideal_width(total_width: usize, screen_ratio: f64) -> usize {
+    (total_width as f64 * screen_ratio * 3.0).sqrt().round() as usize
+}
+
+/// The folded form of `word` for searches, or `None` when the word is already
+/// lowercase ASCII and folds to itself — then searching can use the raw slice,
+/// saving an allocation per word.
+fn folded_form(word: &str) -> Option<String> {
+    word.bytes()
+        .any(|b| !b.is_ascii() || b.is_ascii_uppercase())
+        .then(|| lower_ascii(word))
 }
 
 #[cfg(test)]
@@ -519,8 +552,8 @@ mod tests {
     use rstest::rstest;
 
     /// `multilingual_split` cuts a line into tokens at script boundaries and
-    /// reports each token's *byte* offset, so every case pins both halves of
-    /// the returned tuple.
+    /// reports each token as a *byte* range, so every case pins both ends of
+    /// every range.
     #[rstest]
     #[case::basic_latin("Hello world rust", &["Hello", "world", "rust"], &[0, 6, 12])]
     // "こんにちは" is 15 bytes, the space sits at byte 15, "世界" starts at 16.
@@ -539,19 +572,45 @@ mod tests {
     #[case::whitespace_only("   ", &[], &[])]
     // Emoji are 4 bytes each, so the offsets are byte offsets, not char counts.
     #[case::emoji_are_four_bytes_each("English😁👻", &["English", "😁", "👻"], &[0, 7, 11])]
+    // A lone token falls through to the punctuation and ASCII/non-ASCII levels,
+    // which the mixed cases above never reach.
+    #[case::single_word_stays_whole("Hello", &["Hello"], &[0])]
+    #[case::trailing_punctuation_is_dropped("Wait!", &["Wait"], &[0])]
+    #[case::internal_punctuation_splits("hello,world", &["hello", "world"], &[0, 6])]
+    #[case::punctuation_only_has_no_words("!!!", &[], &[])]
+    #[case::accents_split_off_the_ascii("café", &["caf", "é"], &[0, 3])]
+    #[case::accents_survive_on_both_sides("naïve", &["na", "ï", "ve"], &[0, 2, 4])]
+    #[case::ascii_between_emoji("a😁b", &["a", "😁", "b"], &[0, 1, 5])]
+    // A single CJK token reaches the last level too, which makes every character
+    // a word of its own.
+    #[case::lone_cjk_word(
+        "こんにちは",
+        &["こ", "ん", "に", "ち", "は"],
+        &[0, 3, 6, 9, 12]
+    )]
     fn splits_on_script_boundaries(
         #[case] input: &str,
         #[case] words: &[&str],
         #[case] offsets: &[usize],
     ) {
-        let expected = (
-            words
-                .iter()
-                .map(|w| (*w).to_owned())
-                .collect::<Vec<String>>(),
-            offsets.to_vec(),
-        );
+        let expected: Vec<Range<usize>> = words
+            .iter()
+            .zip(offsets)
+            .map(|(word, offset)| *offset..*offset + word.len())
+            .collect();
         assert_eq!(multilingual_split(input), expected);
+    }
+
+    /// Skipping the fold must not change what a word matches: the raw slice is
+    /// only used when folding it would return it unchanged.
+    #[rstest]
+    #[case::already_folded("alpha")]
+    #[case::capitalised("Alpha")]
+    #[case::accented("café")]
+    #[case::emoji("😁")]
+    fn folded_form_agrees_with_lower_ascii(#[case] word: &str) {
+        let folded = folded_form(word);
+        assert_eq!(folded.as_deref().unwrap_or(word), lower_ascii(word));
     }
 
     /// `AXBoundsForRange` addresses text in UTF-16 units, while the split works
@@ -653,7 +712,7 @@ mod tests {
     fn picker_with(words: &[&str], matched: &[usize]) -> WordPicker {
         let raw = words.join(" ");
         let mut start = 0;
-        let words = words
+        let words: Vec<Word> = words
             .iter()
             .map(|w| {
                 let text = start..start + w.len();
@@ -662,15 +721,17 @@ mod tests {
                 Word {
                     text,
                     label: String::new(),
-                    ascii: lower_ascii(w),
+                    ascii: folded_form(w),
+                    width: entry_width(w, 1),
                     frame: None,
                 }
             })
             .collect();
+        let total_width = words.iter().map(|word| word.width).sum();
         WordPicker {
             raw,
             words,
-            screen_ratio: 1.0,
+            ideal_width: ideal_width(total_width, 1.0),
             digits: 1,
             matched: matched.to_vec(),
             context_offset: 0,
