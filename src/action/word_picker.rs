@@ -11,59 +11,46 @@ use unicode_width::UnicodeWidthStr;
 /// Between a word and its own label.
 const WORD_LABEL_GAP: &str = " ";
 /// Between a label and the next word, wider so the label reads as part of the
-/// word it picks rather than the word after it.
+/// word it picks.
 const LABEL_WORD_GAP: &str = "  ";
 
 /// One entry's width in monospace cells, matching the spaces the menu emits.
-///
-/// The words and their labels never change, so this is measured once when the
-/// picker is built rather than on every redraw.
 fn entry_width(word: &str, digits: u32) -> usize {
     word.width() + WORD_LABEL_GAP.len() + digits as usize + LABEL_WORD_GAP.len()
 }
 
-/// A token of the picked text: where it sits in [`WordPicker::raw`], its hint
-/// label, the folded form searches are matched against, its width in the menu,
-/// and — once the source element has placed it — its frame on screen.
+/// A token of the picked text: where it sits in [`WordPicker::raw`], its label,
+/// its folded search form, its menu width, and its frame once placed.
 #[derive(Debug, Clone)]
 struct Word {
     text: Range<usize>,
     label: String,
-    /// The folded form searches are matched against, or `None` when the raw
-    /// slice is already lowercase ASCII and folds to itself.
+    /// Folded search form, or `None` when the raw slice already folds to itself.
     ascii: Option<String>,
-    /// [`entry_width`] of this word, which the menu wraps its lines by.
+    /// [`entry_width`], which the menu wraps its lines by.
     width: usize,
-    /// All-or-nothing: either every word has one and the picker draws in place,
-    /// or none do and it draws a menu.
+    /// All or nothing: either every word has one, or the picker draws a menu.
     frame: Option<Frame>,
 }
 
-/// Splits a text into pickable words.
-///
-/// When the source element can place a ranged piece of its text on screen, each
-/// word has a `frame` and the picker is drawn as hint boxes over the words
-/// themselves. Otherwise it falls back to a hint-labelled block in a menu.
+/// A text split into pickable words, drawn as hint boxes over the words when the
+/// source can place them on screen, and as a hint-labelled menu otherwise.
 pub(crate) struct WordPicker {
     raw: String,
     words: Vec<Word>,
-    /// How wide the menu should be, in monospace cells, for its block of entries
-    /// to look roughly square on screen. The words do not change, so neither
-    /// does this.
+    /// How wide the menu should be, in monospace cells. The words never change,
+    /// so neither does this.
     ideal_width: usize,
     pub(crate) digits: u32,
     matched: Vec<usize>,
-    /// Where `raw` starts in the source element's text, in UTF-16 units, so a
-    /// picked word or range can report its absolute position.
+    /// Where `raw` starts in the source element's text, in UTF-16 units.
     context_offset: usize,
     pub in_place: bool,
 }
 
 impl WordPicker {
-    /// `element` is the source the text was read from. It is only used to place
-    /// the words on screen; `None`, or an element that cannot answer
-    /// `AXBoundsForRange`, keeps the menu fallback. A narrowed context knows
-    /// where it sits in that element, so the picker does too.
+    /// `element` is the text's source, used only to place the words on screen;
+    /// `None`, or one that cannot answer `AXBoundsForRange`, keeps the menu.
     pub(crate) fn new(
         text: String,
         screen_ratio: f64,
@@ -124,8 +111,8 @@ impl WordPicker {
         self.words.get(idx).map(|word| self.folded(word))
     }
 
-    /// A word's search form: its folded text, or the raw slice when folding it
-    /// would have been a no-op.
+    /// A word's search form: its folded text, or the raw slice when folding is a
+    /// no-op.
     fn folded<'a>(&'a self, word: &'a Word) -> &'a str {
         word.ascii
             .as_deref()
@@ -145,12 +132,10 @@ impl WordPicker {
     /// The hint font size that keeps a label inside the narrowest word, or
     /// `None` when the configured font already fits.
     ///
-    /// A box is about `digits * size * 0.8 + 2 * margin` wide — the same
-    /// estimate collision resolution uses. Inverting that for the smallest word
-    /// width stops short words from turning the hints into a pile of overlapping
-    /// boxes. The result is never larger than the configured font, and never
-    /// below a legible floor: a word with no width at all (or one narrower than
-    /// the box's margins) gets the floor, not a zero-size font.
+    /// A box is about `digits * size * 0.8 + 2 * margin` wide — the estimate
+    /// collision resolution uses — so inverting that keeps short words from
+    /// piling their hints up. The result is clamped to the configured font and
+    /// to `MIN_HINT_FONT_SIZE`, so a word with no width still gets a legible font.
     pub(crate) fn hint_font_size(&self, theme: &GlyphlowTheme) -> Option<f64> {
         if !self.in_place {
             return None;
@@ -165,8 +150,8 @@ impl WordPicker {
         let margins = theme.hint_margin_size as f64 * 2.0;
         let label_width = configured * self.digits.max(1) as f64 * 0.8;
 
-        // Collapsing the floor to the configured size keeps both bounds in order
-        // when the configured font is already smaller than the floor.
+        // Collapsing the floor keeps both bounds in order when the configured
+        // font is already smaller than the floor.
         let floor = Self::MIN_HINT_FONT_SIZE.min(configured);
         let ratio = (min_width - margins).max(0.0) / label_width;
         shrink_font_size(ratio, configured, floor).filter(|&size| size < configured)
@@ -211,8 +196,7 @@ impl WordPicker {
             .filter_map(|(idx, word)| matches(word).then_some(idx))
             .collect();
 
-        // The header names the picker, so every part of it is styled as a header;
-        // the key inside it stays a key.
+        // The key inside the header stays a key.
         let (hint_key, hint) = if filtering && matched.is_empty() {
             (BACKSPACE_CHAR, " to return")
         } else {
@@ -228,24 +212,24 @@ impl WordPicker {
         for (idx, word) in self.words.iter().enumerate() {
             let text = &self.raw[word.text.clone()];
             let this_width = word.width;
-            // Wrap when this word would overflow, unless the line is still empty.
+            // A word wider than the line still starts it.
             if line_width + this_width > self.ideal_width && line_width > 0 {
                 buffer.push("\n");
                 line_width = 0;
             } else if line_width > 0 {
-                // Separate entries on a line, but keep the gap off either end.
+                // Keep the gap off the ends of a line.
                 buffer.push(LABEL_WORD_GAP);
             }
             line_width += this_width;
 
             if multi_selection_idx == Some(idx) {
-                // A picked end of the range: its key cannot be pressed again.
+                // Its key cannot be pressed again.
                 buffer
                     .push_styled(text, MenuStyle::Text)
                     .push(WORD_LABEL_GAP)
                     .push_styled(&word.label, MenuStyle::Dim);
             } else if matched.binary_search(&idx).is_ok() {
-                // The typed part of the key cannot be pressed again either.
+                // The typed part cannot be pressed again.
                 buffer
                     .push(text)
                     .push(WORD_LABEL_GAP)
@@ -268,11 +252,8 @@ impl WordPicker {
         (buffer, matched)
     }
 
-    /// The matches that still resolve to a word, in match order.
-    ///
-    /// Indices come from [`Self::menu_string`], so a stale one should not happen;
-    /// skipping it rather than panicking keeps a bad index from taking down an
-    /// input handler.
+    /// The matches that still resolve to a word, in match order. A stale index is
+    /// skipped rather than panicking, so it cannot take down an input handler.
     fn live_matches(&self) -> impl Iterator<Item = (usize, &str)> + '_ {
         self.matched.iter().filter_map(|idx| {
             self.words
@@ -281,11 +262,9 @@ impl WordPicker {
         })
     }
 
-    /// The match to pick, when the matches leave no choice: the only one, or
-    /// several that are all the same word while `multi_selection` is off, since
-    /// then there is nothing to tell apart.
-    ///
-    /// `None` when nothing matched or the pick is ambiguous.
+    /// The match to pick when the matches leave no choice: the only one, or
+    /// several that are the same word while `multi_selection` is off. `None` when
+    /// nothing matched or the pick is ambiguous.
     pub(crate) fn unambiguous_match(&self, multi_selection: bool) -> Option<(usize, &str)> {
         let mut live = self.live_matches();
         let (idx, text) = live.next()?;
@@ -320,8 +299,7 @@ fn get_url_re() -> &'static Regex {
     RE.get_or_init(|| Regex::new(URL_PATTERN).unwrap())
 }
 
-/// The character ranges the splitter treats as one script, so a run of them is a
-/// run of single-character words rather than one long one.
+/// The scripts whose characters each split into a word of their own.
 fn is_cjk(c: char) -> bool {
     matches!(
         c,
@@ -329,12 +307,10 @@ fn is_cjk(c: char) -> bool {
     )
 }
 
-/// Converts byte ranges of one text to AX text ranges (UTF-16 units from the
-/// start), which is what `AXBoundsForRange` takes.
+/// Converts byte ranges to the UTF-16 ranges `AXBoundsForRange` takes.
 ///
-/// The split hands its words over front to back, so each conversion only has to
-/// encode the bytes since the last one: placing every word costs a single pass
-/// over the text instead of re-encoding the whole prefix for each word.
+/// Words arrive front to back, so each conversion only encodes the bytes since
+/// the last one: placing every word costs a single pass over the text.
 struct Utf16Cursor<'a> {
     text: &'a str,
     /// The byte and UTF-16 offsets of the last position reached.
@@ -352,8 +328,7 @@ impl<'a> Utf16Cursor<'a> {
     }
 
     /// The location and length of `range`, both in UTF-16 units. Ranges must
-    /// arrive in the order they appear in the text, without overlapping — which
-    /// is the order [`multilingual_split`] yields words in.
+    /// arrive front to back without overlapping, as [`multilingual_split`] yields.
     fn range(&mut self, range: &Range<usize>) -> (usize, usize) {
         self.utf16 += self.text[self.byte..range.start].encode_utf16().count();
         let location = self.utf16;
@@ -366,9 +341,8 @@ impl<'a> Utf16Cursor<'a> {
 
 /// Place every word on screen, or leave them all unplaced.
 ///
-/// In place only works when **all** words resolve to a real, distinct rectangle:
-/// a missing one would leave a word that cannot be picked, and two words sharing
-/// a rectangle would stack their hints on top of each other.
+/// In place needs **all** words to have a real, distinct rectangle: a missing one
+/// cannot be picked, and two sharing one would stack their hints.
 fn place_words(
     element: &ElementOfInterest,
     text: &str,
@@ -444,10 +418,6 @@ fn duplicate_frame(frames: &[Frame]) -> Option<(usize, usize, Frame)> {
 /// Three levels, fallen through only as far as needed: whitespace and script
 /// boundaries, then punctuation, then ASCII/non-ASCII — so a URL stays one token
 /// while `Hello世界` splits into `Hello`, `世`, `界`.
-///
-/// Ranges rather than the text they cover: the picker holds the whole text
-/// anyway, so a token costs an offset instead of an allocation, and no caller
-/// has to keep two vectors in step.
 fn multilingual_split(input: &str) -> Vec<Range<usize>> {
     let mut words = Vec::new();
     for token in token_ranges(input) {
@@ -458,8 +428,7 @@ fn multilingual_split(input: &str) -> Vec<Range<usize>> {
         }
     }
 
-    // Only a lone block still has punctuation and ASCII/non-ASCII boundaries to
-    // split on; anything else is already as fine-grained as it gets.
+    // Only a lone block has anything finer to split on.
     if words.len() != 1 {
         return words;
     }
@@ -513,8 +482,7 @@ fn punctuation_runs(input: &str, range: Range<usize>) -> Vec<Range<usize>> {
     runs
 }
 
-/// Split `range` into its ASCII runs, with every non-ASCII character a word of
-/// its own.
+/// Split `range` into ASCII runs, each non-ASCII character a word of its own.
 fn ascii_runs(input: &str, range: Range<usize>) -> Vec<Range<usize>> {
     let mut runs: Vec<Range<usize>> = Vec::new();
     let mut previous_ascii = false;
@@ -531,15 +499,13 @@ fn ascii_runs(input: &str, range: Range<usize>) -> Vec<Range<usize>> {
     runs
 }
 
-/// How wide the menu should be, in monospace cells, for `total_width` of them to
-/// look roughly square on screen.
+/// How wide the menu should be, in monospace cells, to look roughly square.
 fn ideal_width(total_width: usize, screen_ratio: f64) -> usize {
     (total_width as f64 * screen_ratio * 3.0).sqrt().round() as usize
 }
 
-/// The folded form of `word` for searches, or `None` when the word is already
-/// lowercase ASCII and folds to itself — then searching can use the raw slice,
-/// saving an allocation per word.
+/// The folded form of `word` for searches, or `None` when it is already lowercase
+/// ASCII — then callers search the raw slice and save an allocation.
 fn folded_form(word: &str) -> Option<String> {
     word.bytes()
         .any(|b| !b.is_ascii() || b.is_ascii_uppercase())
@@ -551,9 +517,7 @@ mod tests {
     use super::*;
     use rstest::rstest;
 
-    /// `multilingual_split` cuts a line into tokens at script boundaries and
-    /// reports each token as a *byte* range, so every case pins both ends of
-    /// every range.
+    /// Every case pins both ends of every byte range the split reports.
     #[rstest]
     #[case::basic_latin("Hello world rust", &["Hello", "world", "rust"], &[0, 6, 12])]
     // "こんにちは" is 15 bytes, the space sits at byte 15, "世界" starts at 16.
@@ -572,8 +536,7 @@ mod tests {
     #[case::whitespace_only("   ", &[], &[])]
     // Emoji are 4 bytes each, so the offsets are byte offsets, not char counts.
     #[case::emoji_are_four_bytes_each("English😁👻", &["English", "😁", "👻"], &[0, 7, 11])]
-    // A lone token falls through to the punctuation and ASCII/non-ASCII levels,
-    // which the mixed cases above never reach.
+    // A lone token reaches the deeper levels the mixed cases never do.
     #[case::single_word_stays_whole("Hello", &["Hello"], &[0])]
     #[case::trailing_punctuation_is_dropped("Wait!", &["Wait"], &[0])]
     #[case::internal_punctuation_splits("hello,world", &["hello", "world"], &[0, 6])]
@@ -581,8 +544,7 @@ mod tests {
     #[case::accents_split_off_the_ascii("café", &["caf", "é"], &[0, 3])]
     #[case::accents_survive_on_both_sides("naïve", &["na", "ï", "ve"], &[0, 2, 4])]
     #[case::ascii_between_emoji("a😁b", &["a", "😁", "b"], &[0, 1, 5])]
-    // A single CJK token reaches the last level too, which makes every character
-    // a word of its own.
+    // A lone CJK token makes every character a word of its own.
     #[case::lone_cjk_word(
         "こんにちは",
         &["こ", "ん", "に", "ち", "は"],
@@ -601,8 +563,7 @@ mod tests {
         assert_eq!(multilingual_split(input), expected);
     }
 
-    /// Skipping the fold must not change what a word matches: the raw slice is
-    /// only used when folding it would return it unchanged.
+    /// Skipping the fold must not change what a word matches.
     #[rstest]
     #[case::already_folded("alpha")]
     #[case::capitalised("Alpha")]
@@ -613,10 +574,8 @@ mod tests {
         assert_eq!(folded.as_deref().unwrap_or(word), lower_ascii(word));
     }
 
-    /// `AXBoundsForRange` addresses text in UTF-16 units, while the split works
-    /// in byte offsets, so the conversion is what keeps the frames on the right
-    /// words once anything outside ASCII is involved. Words arrive in order, so
-    /// each one is converted from where the previous one ended.
+    /// `AXBoundsForRange` counts UTF-16 units, so this conversion is what keeps
+    /// the frames on the right words once anything outside ASCII is involved.
     #[rstest]
     #[case::ascii("hello world", &[(0, 5)], &[(0, 5)])]
     #[case::multibyte_prefix("é alpha", &[(3, 8)], &[(2, 5)])]
@@ -640,9 +599,8 @@ mod tests {
         assert_eq!(converted, expected);
     }
 
-    /// Picking a range on a split that already owns a slice of the element must
-    /// carry that slice's start along, or the next split would place its hints
-    /// at the top of the element.
+    /// A range must carry its slice's start along, or the next split would place
+    /// its hints at the top of the element.
     #[test]
     fn picked_range_keeps_its_offset_in_the_element() {
         let mut picker = picker_with(&["alpha", "beta", "gamma"], &[]);
@@ -652,8 +610,7 @@ mod tests {
         assert_eq!(picker.select_range(2, 1), Some(("beta gamma", 46)));
     }
 
-    /// AX reporting one rectangle for several words is the signal that the split
-    /// cannot be drawn in place: the hints would stack on the same spot.
+    /// One rectangle for several words means the hints would stack on one spot.
     #[test]
     fn identical_word_frames_are_not_distinct() {
         let first = Frame::new(0.0, 0.0, 40.0, 20.0);
@@ -670,7 +627,6 @@ mod tests {
     }
 
     /// The smallest word decides the font, so that is the width varied here.
-    /// `None` means the configured font already fits.
     #[rstest]
     #[case::wide_words_keep_the_configured_font(60.0, None)]
     #[case::narrow_words_shrink_to_the_floor(10.0, Some(8.0))]
@@ -707,8 +663,7 @@ mod tests {
     }
 
     /// A picker over `words` whose `matched` list is set verbatim, so the match
-    /// queries can be exercised without a live `UIDrawer` (which is what
-    /// [`WordPicker::new`] needs and a headless test cannot build).
+    /// queries run without the `UIDrawer` [`WordPicker::new`] would need.
     fn picker_with(words: &[&str], matched: &[usize]) -> WordPicker {
         let raw = words.join(" ");
         let mut start = 0;
@@ -739,19 +694,16 @@ mod tests {
         }
     }
 
-    /// This is what decides whether a word-picking keypress picks a word or waits
-    /// for another key, so pin every case: no match, one, and several that are
-    /// the same word or not, with and without multi-selection.
+    /// This decides whether a keypress picks a word or waits for another key, so
+    /// pin every case: none, one, and several, with and without multi-selection.
     #[rstest]
-    // Nothing matched is not a pick, and must not claim to be one by vacuous
-    // truth.
+    // Nothing matched is not a pick, even by vacuous truth.
     #[case::nothing_matched(&["alpha"], &[], false, None)]
-    // A lone match is a pick even for a range: it is the only word either end
-    // could mean.
+    // A lone match is a pick even for a range.
     #[case::one_match(&["alpha"], &[0], false, Some((0, "alpha")))]
     #[case::one_match_of_a_range(&["alpha"], &[0], true, Some((0, "alpha")))]
-    // Two copies of one word cannot be told apart, so the pick stays unique —
-    // but not for a range, which needs two ends that differ.
+    // Two copies of one word cannot be told apart, but a range still needs two
+    // ends that differ.
     #[case::duplicates_of_one_word(&["alpha", "alpha"], &[0, 1], false, Some((0, "alpha")))]
     #[case::duplicates_of_one_word_of_a_range(&["alpha", "alpha"], &[0, 1], true, None)]
     #[case::two_different_words(&["alpha", "beta"], &[0, 1], false, None)]
