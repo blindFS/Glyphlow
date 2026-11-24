@@ -326,12 +326,39 @@ fn get_segment_re() -> &'static Regex {
     RE.get_or_init(|| Regex::new(SCRIPT_SEGMENT_PATTERN).unwrap())
 }
 
-/// The byte range of `text` as an AX text range (UTF-16 units from the start),
-/// which is what `AXBoundsForRange` takes.
-fn utf16_range(text: &str, range: &Range<usize>) -> (usize, usize) {
-    let location = text[..range.start].encode_utf16().count();
-    let length = text[range.clone()].encode_utf16().count();
-    (location, length)
+/// Converts byte ranges of one text to AX text ranges (UTF-16 units from the
+/// start), which is what `AXBoundsForRange` takes.
+///
+/// The split hands its words over front to back, so each conversion only has to
+/// encode the bytes since the last one: placing every word costs a single pass
+/// over the text instead of re-encoding the whole prefix for each word.
+struct Utf16Cursor<'a> {
+    text: &'a str,
+    /// The byte and UTF-16 offsets of the last position reached.
+    byte: usize,
+    utf16: usize,
+}
+
+impl<'a> Utf16Cursor<'a> {
+    fn new(text: &'a str) -> Self {
+        Self {
+            text,
+            byte: 0,
+            utf16: 0,
+        }
+    }
+
+    /// The location and length of `range`, both in UTF-16 units. Ranges must
+    /// arrive in the order they appear in the text, without overlapping — which
+    /// is the order [`multilingual_split`] yields words in.
+    fn range(&mut self, range: &Range<usize>) -> (usize, usize) {
+        self.utf16 += self.text[self.byte..range.start].encode_utf16().count();
+        let location = self.utf16;
+        let length = self.text[range.clone()].encode_utf16().count();
+        self.utf16 += length;
+        self.byte = range.end;
+        (location, length)
+    }
 }
 
 /// Place every word on screen, or leave them all unplaced.
@@ -351,9 +378,10 @@ fn place_words(
     }
 
     let mut frames = Vec::with_capacity(words.len());
+    let mut utf16 = Utf16Cursor::new(text);
     for (idx, word) in words.iter().enumerate() {
         let word_text = &text[word.text.clone()];
-        let (location, length) = utf16_range(text, &word.text);
+        let (location, length) = utf16.range(&word.text);
         let Some(frame) = element
             .element()
             .and_then(|ax| ax.bounds_for_range(element.context_offset + location, length))
@@ -528,17 +556,29 @@ mod tests {
 
     /// `AXBoundsForRange` addresses text in UTF-16 units, while the split works
     /// in byte offsets, so the conversion is what keeps the frames on the right
-    /// words once anything outside ASCII is involved.
+    /// words once anything outside ASCII is involved. Words arrive in order, so
+    /// each one is converted from where the previous one ended.
     #[rstest]
-    #[case::ascii("hello world", 0..5, (0, 5))]
-    #[case::multibyte_prefix("é alpha", 3..8, (2, 5))]
-    #[case::emoji_counts_as_two_units("😁 hi", 5..7, (3, 2))]
-    fn maps_byte_ranges_to_ax_utf16_ranges(
+    #[case::ascii("hello world", &[(0, 5)], &[(0, 5)])]
+    #[case::multibyte_prefix("é alpha", &[(3, 8)], &[(2, 5)])]
+    #[case::emoji_counts_as_two_units("😁 hi", &[(5, 7)], &[(3, 2)])]
+    // The skipped bytes between words still count, and count once.
+    #[case::gaps_count_toward_the_next_word(
+        "😁 hi 世",
+        &[(0, 4), (5, 7), (8, 11)],
+        &[(0, 2), (3, 2), (6, 1)]
+    )]
+    fn maps_byte_ranges_to_ax_utf16_ranges_in_order(
         #[case] input: &str,
-        #[case] range: Range<usize>,
-        #[case] expected: (usize, usize),
+        #[case] ranges: &[(usize, usize)],
+        #[case] expected: &[(usize, usize)],
     ) {
-        assert_eq!(utf16_range(input, &range), expected);
+        let mut utf16 = Utf16Cursor::new(input);
+        let converted: Vec<_> = ranges
+            .iter()
+            .map(|&(start, end)| utf16.range(&(start..end)))
+            .collect();
+        assert_eq!(converted, expected);
     }
 
     /// Picking a range on a split that already owns a slice of the element must
