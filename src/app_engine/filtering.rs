@@ -418,16 +418,17 @@ impl AppEngine {
             let Some(wp) = self.word_picker.as_ref() else {
                 return;
             };
-            if self.multi_selection.is_on {
+            let range = if self.multi_selection.is_on {
                 self.multi_selection
                     .set_one_side(idx)
                     .and_then(|(idx1, idx2)| wp.select_range(idx1, idx2))
             } else {
                 wp.word(idx)
-            }
+            };
+            range.map(|(text, offset)| (text, offset, wp.in_place))
         };
 
-        let Some((text, offset)) = picked else {
+        let Some((text, offset, in_place)) = picked else {
             if self.multi_selection.is_on {
                 self.hint_prefix.clear();
                 self.search_prefix.clear();
@@ -440,7 +441,7 @@ impl AppEngine {
         self.hint_boxes.clear();
         self.hint_prefix.clear();
         self.search_prefix.clear();
-        self.update_selected_text_at_and_show_menu(text.into(), offset);
+        self.update_selected_text_at_and_show_menu(text.into(), offset, in_place);
         self.word_picker = None;
     }
 

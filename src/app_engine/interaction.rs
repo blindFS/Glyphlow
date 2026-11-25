@@ -401,19 +401,16 @@ impl AppEngine {
 
     /// Replace the selection's text, keeping where that text starts in the
     /// element: a picked word or range is a slice of what the element holds.
+    /// `in_place` carries the picker's state into the new piece, so a later split
+    /// stays in the menu when this one was not drawn on screen.
     pub(super) fn update_selected_text_at_and_show_menu(
         &mut self,
         new_text: String,
         offset: usize,
+        in_place: bool,
     ) {
-        if let Some(ElementOfInterest {
-            context,
-            context_offset,
-            ..
-        }) = self.selected.as_mut()
-        {
-            *context = Some(new_text);
-            *context_offset = offset;
+        if let Some(selected) = self.selected.as_mut() {
+            selected.set_text_piece(new_text, offset, in_place);
         }
         self.show_element_menu(RoleOfInterest::PseudoText);
     }
@@ -421,7 +418,7 @@ impl AppEngine {
     /// Replace the selection's text with text that has no place in the element
     /// (clipboard contents, an external action's output).
     pub(super) fn update_selected_text_and_show_menu(&mut self, new_text: String) {
-        self.update_selected_text_at_and_show_menu(new_text, 0);
+        self.update_selected_text_at_and_show_menu(new_text, 0, false);
     }
 
     /// Put the clipboard's text up for action, or warn when it is empty.

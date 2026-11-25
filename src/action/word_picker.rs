@@ -50,7 +50,8 @@ pub(crate) struct WordPicker {
 
 impl WordPicker {
     /// `element` is the text's source, used only to place the words on screen;
-    /// `None`, or one that cannot answer `AXBoundsForRange`, keeps the menu.
+    /// `None`, or one that cannot answer `AXBoundsForRange`, keeps the menu. A
+    /// piece picked from the menu never tries to place its words again.
     pub(crate) fn new(
         text: String,
         screen_ratio: f64,
@@ -77,9 +78,10 @@ impl WordPicker {
             });
         }
 
-        let context_offset = element.map_or(0, |element| element.context_offset);
-        let in_place =
-            element.is_some_and(|element| place_words(element, &text, &mut words, screen_frame));
+        let context_offset = element.map_or(0, ElementOfInterest::context_offset);
+        let in_place = element.is_some_and(|element| {
+            element.splits_in_place() && place_words(element, &text, &mut words, screen_frame)
+        });
 
         let word_picker = Self {
             raw: text,
@@ -367,7 +369,7 @@ fn place_words(
     for (idx, word) in words.iter().enumerate() {
         let word_text = &text[word.text.clone()];
         let (location, length) = utf16.range(&word.text);
-        let Some(frame) = ax.bounds_for_range(element.context_offset + location, length) else {
+        let Some(frame) = ax.bounds_for_range(element.context_offset() + location, length) else {
             log::info!(
                 "Word picker: AX could not place word {idx} `{word_text}` (range {location}..+{length}); falling back to the menu."
             );
