@@ -159,9 +159,10 @@ impl AppEngine {
         match role {
             RoleOfInterest::Image => MenuScope::Image,
             RoleOfInterest::ScrollBar => MenuScope::Scroll,
-            RoleOfInterest::TextField | RoleOfInterest::StaticText | RoleOfInterest::PseudoText => {
-                MenuScope::Text
-            }
+            RoleOfInterest::TextField
+            | RoleOfInterest::StaticText
+            | RoleOfInterest::PseudoText
+            | RoleOfInterest::TextPiece => MenuScope::Text,
             _ if self.target == Target::Text => MenuScope::Text,
             _ if self.target == Target::Scrollable => MenuScope::Scroll,
             _ => MenuScope::Dashboard,

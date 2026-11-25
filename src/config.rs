@@ -15,7 +15,8 @@ use tabled::Tabled;
 ///
 /// [`Any`](Self::Any), [`Some`](Self::Some), [`Generic`](Self::Generic) and
 /// [`CustomTarget`](Self::CustomTarget) are sentinels a workflow may use as its
-/// `starting_role`; they get progressively stricter. The rest mirror
+/// `starting_role`; they get progressively stricter. [`TextPiece`](Self::TextPiece)
+/// is a sentinel too, matched on the selection's kind instead. The rest mirror
 /// accessibility roles.
 #[derive(Debug, Default, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub enum RoleOfInterest {
@@ -36,6 +37,10 @@ pub enum RoleOfInterest {
     TextField,
     /// Text with no accessibility element behind it (clipboard, OCR).
     PseudoText,
+    /// A piece of an element's text, split out by the word picker. It does have
+    /// an accessibility element, but reports the source element's role, so this
+    /// matches on the selection's kind rather than on `ElementOfInterest::role`.
+    TextPiece,
     Cell,
     /// The focused window. Satisfied by a window selection, or by no selection
     /// at all — the dashboard is already on a window before anything is picked.
@@ -62,6 +67,9 @@ pub enum WorkFlowAction {
     /// Print the element's attributes as a notification.
     Debug,
     SelectAll,
+    /// Select the current text piece in its accessibility element, by
+    /// `AXSelectedTextRange`. Only meaningful on a `TextPiece` selection.
+    SelectTextPiece,
     GoParent,
     Focus,
     Press,
