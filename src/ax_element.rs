@@ -296,6 +296,17 @@ pub enum ElementKind {
         element: ThreadSafeElement,
         role: RoleOfInterest,
     },
+    /// A slice of an element's text, picked from a split.
+    TextPiece {
+        element: Option<ThreadSafeElement>,
+        role: RoleOfInterest,
+        /// Where the piece starts in the element's text, in UTF-16 units — the
+        /// coordinates `AXBoundsForRange` uses.
+        context_offset: usize,
+        /// Whether this piece was picked in place, so a later split of it may be
+        /// placed on screen again.
+        in_place: bool,
+    },
     /// No accessibility element behind it — clipboard text or an OCR result. It
     /// can be drawn and picked, but never pressed.
     Pseudo,
@@ -305,11 +316,6 @@ pub enum ElementKind {
 pub struct ElementOfInterest {
     pub kind: ElementKind,
     pub context: Option<String>,
-    /// Where `context` starts in the element's text, in UTF-16 units — the
-    /// coordinates `AXBoundsForRange` uses. Narrowing the context (a word or a
-    /// range picked from a split) keeps the element, so this has to move with it
-    /// for a later split to land on the right words.
-    pub context_offset: usize,
     pub frame: Frame,
 }
 
@@ -326,7 +332,6 @@ impl ElementOfInterest {
                 role,
             },
             context,
-            context_offset: 0,
             frame,
         }
     }
@@ -344,14 +349,51 @@ impl ElementOfInterest {
         Self {
             kind: ElementKind::Pseudo,
             context,
-            context_offset: 0,
             frame,
+        }
+    }
+
+    /// Replace the selection with `text`, a slice that starts `offset` UTF-16
+    /// units into the source element's text. `in_place` records whether the pick
+    /// was drawn on screen, which decides whether a later split may be too.
+    pub fn set_text_piece(&mut self, text: String, offset: usize, in_place: bool) {
+        let (element, role) = match &self.kind {
+            ElementKind::Standard { element, role } => (Some(element.clone()), *role),
+            ElementKind::TextPiece { element, role, .. } => (element.clone(), *role),
+            ElementKind::Pseudo => (None, RoleOfInterest::PseudoText),
+        };
+        self.kind = ElementKind::TextPiece {
+            element,
+            role,
+            context_offset: offset,
+            in_place,
+        };
+        self.context = Some(text);
+    }
+
+    /// Where this selection's text starts in its source element's text, in
+    /// UTF-16 units. Zero unless the selection is a piece of that text.
+    pub fn context_offset(&self) -> usize {
+        match &self.kind {
+            ElementKind::TextPiece { context_offset, .. } => *context_offset,
+            _ => 0,
+        }
+    }
+
+    /// Whether a split of this selection may place its words on screen. Text
+    /// picked from the menu has no reliable place in its element, so it is split
+    /// in the menu again.
+    pub fn splits_in_place(&self) -> bool {
+        match &self.kind {
+            ElementKind::Standard { .. } => true,
+            ElementKind::TextPiece { in_place, .. } => *in_place,
+            ElementKind::Pseudo => false,
         }
     }
 
     pub fn role(&self) -> RoleOfInterest {
         match &self.kind {
-            ElementKind::Standard { role, .. } => *role,
+            ElementKind::Standard { role, .. } | ElementKind::TextPiece { role, .. } => *role,
             ElementKind::Pseudo => RoleOfInterest::PseudoText,
         }
     }
@@ -359,6 +401,7 @@ impl ElementOfInterest {
     pub fn element(&self) -> Option<&AXUIElement> {
         match &self.kind {
             ElementKind::Standard { element, .. } => Some(&element.0),
+            ElementKind::TextPiece { element, .. } => element.as_ref().map(|e| &e.0),
             ElementKind::Pseudo => None,
         }
     }
@@ -462,7 +505,6 @@ impl ElementCache {
         let ElementOfInterest {
             kind: ElementKind::Standard { element, role },
             context,
-            context_offset: _,
             frame,
         } = &eoi
         else {
@@ -1573,5 +1615,37 @@ mod tests {
             Frame::new(0.0, 0.0, 10.0, 10.0),
         );
         assert_eq!(element.ascii_search_target(), expected);
+    }
+
+    /// A word picked from the menu has no known position in its element, so
+    /// splitting it again must stay in the menu; a word picked in place may be
+    /// placed again. Either way the piece remembers where it starts.
+    #[rstest]
+    #[case::picked_from_the_menu(false, false)]
+    #[case::picked_in_place(true, true)]
+    fn a_text_piece_splits_only_as_it_was_picked(#[case] in_place: bool, #[case] expected: bool) {
+        let mut element =
+            ElementOfInterest::pseudo(Some("alpha beta".into()), Frame::new(0.0, 0.0, 100.0, 20.0));
+
+        element.set_text_piece("beta".into(), 6, in_place);
+
+        assert_eq!(element.context.as_deref(), Some("beta"));
+        assert_eq!(element.context_offset(), 6);
+        assert_eq!(element.splits_in_place(), expected);
+        assert_eq!(element.role(), RoleOfInterest::PseudoText);
+    }
+
+    /// Narrowing an in-place piece again from the menu drops the placement rather
+    /// than inheriting it: the menu pick is the newer, trustworthy answer.
+    #[test]
+    fn a_menu_pick_clears_an_earlier_in_place_pick() {
+        let mut element =
+            ElementOfInterest::pseudo(Some("alpha beta".into()), Frame::new(0.0, 0.0, 100.0, 20.0));
+        element.set_text_piece("beta".into(), 6, true);
+
+        element.set_text_piece("et".into(), 7, false);
+
+        assert_eq!(element.context_offset(), 7);
+        assert!(!element.splits_in_place());
     }
 }
