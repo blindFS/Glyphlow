@@ -13,7 +13,7 @@ use glyphlow::{
 };
 use monio::{EventType, grab};
 use notify::RecursiveMode;
-use notify_debouncer_mini::{DebounceEventResult, new_debouncer};
+use notify_debouncer_mini::{DebounceEventResult, DebouncedEventBatch, new_debouncer};
 use std::{
     collections::HashSet,
     path::PathBuf,
@@ -71,7 +71,7 @@ async fn main() {
     let Ok(mut debouncer) = new_debouncer(
         Duration::from_millis(200),
         move |res: DebounceEventResult| match res {
-            Ok(events) => {
+            Ok(DebouncedEventBatch::Events(events)) => {
                 let mut pbs: HashSet<PathBuf> = HashSet::new();
                 for e in events {
                     pbs.insert(e.path);
@@ -80,6 +80,7 @@ async fn main() {
                     let _ = ftx.blocking_send(pb);
                 }
             }
+            Ok(_) => {}
             Err(e) => log::error!("Watch error: {:?}", e),
         },
     ) else {

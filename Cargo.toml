@@ -4,7 +4,7 @@ version = "0.5.6"
 edition = "2024"
 
 [dependencies]
-monio = "0.2.0"
+monio = "0.3.0"
 toml = "1.2.1"
 serde = { version = "1.0.229", features = ["derive"] }
 accessibility = "0.2.0"
@@ -20,8 +20,8 @@ objc2-core-graphics = "0.3.2"
 objc2-core-foundation = "0.3.2"
 objc2-vision = "0.3.2"
 objc2-screen-capture-kit = "0.3.2"
-notify = "8.2.2"
-notify-debouncer-mini = "0.7.0"
+notify = "9.0.0"
+notify-debouncer-mini = "0.8.0"
 block2 = "0.6.2"
 regex = "1.13.1"
 tokio = { version = "1.54.1", features = ["net", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
@@ -41,7 +41,7 @@ tabled = { version = "0.22.0", default-features = false, features = ["ansi", "de
 
 [dev-dependencies]
 ansi-str = "0.9.0"
-rstest = "0.28"
+rstest = "0.29"
 
 [[test]]
 name = "lifecycle_tests"
