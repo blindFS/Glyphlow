@@ -1,6 +1,6 @@
 use super::{AppEngine, drawing::wrong_key_menu_string};
 use crate::{
-    ax_element::{CompiledTarget, GetAttribute, SetAttribute, Target},
+    ax_element::{CompiledTarget, ElementKind, GetAttribute, SetAttribute, Target},
     config::{CustomTarget, KeyBinding, RoleOfInterest, WorkFlow, WorkFlowAction},
 };
 use log::Level;
@@ -31,6 +31,11 @@ impl AppEngine {
         match wf.starting_role {
             RoleOfInterest::Any => true,
             RoleOfInterest::Some => self.selected.is_some(),
+            // A piece keeps its source element's role, so only the kind tells it
+            // from the whole element.
+            RoleOfInterest::TextPiece => self.selected.as_ref().is_some_and(|s| {
+                s.element().is_some() && matches!(s.kind, ElementKind::TextPiece { .. })
+            }),
             RoleOfInterest::Generic => self
                 .selected
                 .as_ref()
@@ -267,6 +272,20 @@ impl AppEngine {
                     .map(|txt| txt.encode_utf16().count())
                     .unwrap_or(0) as isize;
                 element.set_selected_range(0, len);
+            }
+            WorkFlowAction::SelectTextPiece => {
+                let ElementKind::TextPiece { context_offset, .. } = &selected.kind else {
+                    self.notify_then_deactivate(
+                        "`SelectTextPiece` needs a text piece selection.",
+                        Level::Error,
+                    );
+                    return true;
+                };
+                let len = context
+                    .as_ref()
+                    .map(|txt| txt.encode_utf16().count())
+                    .unwrap_or(0) as isize;
+                element.set_selected_range(*context_offset as isize, len);
             }
             _ => (),
         }
