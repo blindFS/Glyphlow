@@ -37,9 +37,6 @@ pub enum RoleOfInterest {
     TextField,
     /// Text with no accessibility element behind it (clipboard, OCR).
     PseudoText,
-    /// A piece of an element's text, split out by the word picker. It does have
-    /// an accessibility element, but reports the source element's role, so this
-    /// matches on the selection's kind rather than on `ElementOfInterest::role`.
     TextPiece,
     Cell,
     /// The focused window. Satisfied by a window selection, or by no selection
@@ -67,8 +64,6 @@ pub enum WorkFlowAction {
     /// Print the element's attributes as a notification.
     Debug,
     SelectAll,
-    /// Select the current text piece in its accessibility element, by
-    /// `AXSelectedTextRange`. Only meaningful on a `TextPiece` selection.
     SelectTextPiece,
     GoParent,
     Focus,
