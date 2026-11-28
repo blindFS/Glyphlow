@@ -23,6 +23,10 @@ const SCALE_FACTOR: f64 = 1.5;
 const DRAG_STEP_IN_PX: f64 = 20.0;
 /// How long to pause between those moves, in milliseconds.
 const DRAG_STEP_IN_MS: u64 = 8;
+/// NOTE: How long to let the cleared overlay reach the display before it is captured,
+/// in milliseconds. Hiding a layer only commits the change; ScreenCaptureKit
+/// captures the last presented frame, which is still the one with the menu drawn.
+const OVERLAY_CLEAR_SETTLE_IN_MS: u64 = 50;
 
 impl AppEngine {
     pub(super) const KEY_OP_INTERVAL_IN_MS: u64 = 20;
@@ -439,6 +443,7 @@ impl AppEngine {
     pub(super) fn take_screenshot(&mut self) {
         self.clear_cache();
         self.clear_drawing();
+        sleep(Duration::from_millis(OVERLAY_CLEAR_SETTLE_IN_MS));
         let frame = self
             .selected
             .as_ref()
